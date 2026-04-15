@@ -1,0 +1,590 @@
+"""Masters business logic — product and client data operations.
+
+This service knows nothing about HTTP. It raises custom exceptions
+from core.exceptions which controllers translate into HTTP responses.
+"""
+
+import uuid
+from datetime import date, datetime
+from typing import Any
+
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from core.config import get_settings
+from core.exceptions import ProductNotFoundError
+from masters.product_master import get_all_products, get_product_by_id
+from services.client_service import get_dummy_clients
+from db.models import ClientRecord
+from db.sheet_models import (
+    BallValveRow,
+    ButterflyValveRow,
+    DiaphragmValveRow,
+    HosesRow,
+    NvrRow,
+    SightGlassRow,
+    SpecialityValveRow,
+    StrainerRow,
+)
+
+
+SHEET_MODEL_BY_KEY: dict[str, type] = {
+    "butterfly_valve": ButterflyValveRow,
+    "ball_valve": BallValveRow,
+    "diaphragm_valve": DiaphragmValveRow,
+    "hoses": HosesRow,
+    "nvr": NvrRow,
+    "sight_glass": SightGlassRow,
+    "speciality_valve": SpecialityValveRow,
+    "strainer": StrainerRow,
+}
+
+# Human-readable names for manual entry / masters UI (keys stay stable for APIs).
+CATEGORY_LABEL_BY_KEY: dict[str, str] = {
+    "ball_valve": "Ball valve",
+    "butterfly_valve": "Butterfly valve",
+    "diaphragm_valve": "Diaphragm valve",
+    "hoses": "Hoses",
+    "nvr": "NVR (non-return)",
+    "sight_glass": "Sight glass",
+    "speciality_valve": "Speciality valve",
+    "strainer": "Strainer",
+}
+
+
+def _category_label(key: str) -> str:
+    return CATEGORY_LABEL_BY_KEY.get(key, key.replace("_", " ").title())
+
+
+# Ordered cascade fields per sheet (DB column names). Manual entry narrows row-by-row.
+CASCADE_STEPS: dict[str, list[str]] = {
+    "ball_valve": [
+        "sub_category",
+        "product",
+        "body_material",
+        "seat_material",
+        "stem_material",
+        "pressure_rating",
+        "end_connection",
+        "drilling_std",
+        "paint_finish",
+        "operator_config",
+        "moc_variant",
+        "size",
+    ],
+    "butterfly_valve": [
+        "sub_category",
+        "product",
+        "body_material",
+        "seat_material",
+        "stem_material",
+        "pressure_rating",
+        "end_connection",
+        "drilling_std",
+        "paint_finish",
+        "operator_config",
+        "disc_moc_variant",
+        "size",
+    ],
+    "nvr": [
+        "sub_category",
+        "product",
+        "design",
+        "body_material",
+        "seat_material",
+        "stem_material",
+        "pressure_rating",
+        "end_connection",
+        "drilling_std",
+        "paint_finish",
+        "operator_config",
+        "moc_variant",
+        "size",
+    ],
+    "speciality_valve": [
+        "sub_category",
+        "product",
+        "body_material",
+        "seat_material",
+        "stem_material",
+        "pressure_rating",
+        "end_connection",
+        "drilling_std",
+        "paint_finish",
+        "operator_config",
+        "moc_variant",
+        "size",
+    ],
+    "sight_glass": [
+        "sub_category",
+        "product",
+        "body_material",
+        "seat_material",
+        "stem_material",
+        "pressure_rating",
+        "end_connection",
+        "drilling_std",
+        "paint_finish",
+        "operator_config",
+        "moc_variant",
+        "size",
+    ],
+    "strainer": [
+        "sub_category",
+        "product",
+        "body_material",
+        "seat_material",
+        "stem_material",
+        "pressure_rating",
+        "end_connection",
+        "drilling_std",
+        "paint_finish",
+        "operator_config",
+        "moc_variant",
+        "size",
+    ],
+    "diaphragm_valve": [
+        "sub_category",
+        "product",
+        "valve_way",
+        "body_material",
+        "bonnet",
+        "diaphragm",
+        "seat",
+        "stem_spindle",
+        "stem_nut",
+        "compressor",
+        "handwheel",
+        "pin",
+        "stud_nut_washer",
+        "lever",
+        "pressure_rating",
+        "max_temp",
+        "end_connection",
+        "actuator",
+        "operator_operation",
+        "paint_finish",
+        "moc_price_column",
+        "size",
+    ],
+    "hoses": [
+        "sub_category",
+        "product_name",
+        "hose_family",
+        "moc_variant",
+        "size_as_printed",
+    ],
+}
+
+
+def _column_label(field: str) -> str:
+    return field.replace("_", " ").title()
+
+
+def get_cascade_schema(category: str) -> list[dict[str, str]]:
+    """Static ordered steps for a catalog sheet key (no DB)."""
+    steps = CASCADE_STEPS.get(category, [])
+    return [{"key": s, "label": _column_label(s)} for s in steps]
+
+
+def _cascade_prior_keys(category: str, field: str) -> list[str]:
+    steps = CASCADE_STEPS.get(category, [])
+    if field not in steps:
+        return []
+    idx = steps.index(field)
+    return steps[:idx]
+
+
+def _sanitize_cascade_filters(category: str, filters: dict[str, str], allowed_keys: set[str] | None = None) -> dict[str, str]:
+    steps = set(CASCADE_STEPS.get(category, []))
+    out: dict[str, str] = {}
+    for k, v in (filters or {}).items():
+        if k not in steps:
+            continue
+        if allowed_keys is not None and k not in allowed_keys:
+            continue
+        if v is None or not str(v).strip():
+            continue
+        out[k] = str(v).strip()
+    return out
+
+
+def _normalize_distinct_cell(v: Any) -> str | None:
+    if v is None:
+        return None
+    if isinstance(v, float):
+        s = str(int(v)) if v == int(v) else str(v).rstrip("0").rstrip(".") if "." in str(v) else str(v)
+    else:
+        s = str(v).strip()
+    if not s:
+        return None
+    low = s.lower()
+    if low in ("na", "n/a", "-", "—", "none", "null", "__none__"):
+        return None
+    return s
+
+
+async def get_clients_for_dropdown(search: str | None, db: AsyncSession) -> list[dict]:
+    """Client dropdown options (DB + dummy)."""
+    q = select(ClientRecord).order_by(ClientRecord.company_name).limit(50)
+    if search:
+        s = f"%{search.lower()}%"
+        q = q.where(func.lower(ClientRecord.company_name).like(s) | func.lower(func.coalesce(ClientRecord.contact_name, "")).like(s))
+    result = await db.execute(q)
+    db_clients = result.scalars().all()
+
+    all_clients: list[dict] = [
+        {
+            "id": str(c.id),
+            "company_name": c.company_name,
+            "contact_name": c.contact_name or "",
+            "email": c.email or "",
+            "phone": c.phone or "",
+            "city": c.city or "",
+            "erp_code": c.erp_code or "",
+            "source": "db",
+        }
+        for c in db_clients
+    ] + [{**d, "source": "dummy"} for d in get_dummy_clients()]
+
+    if search:
+        s2 = search.lower()
+        all_clients = [
+            c
+            for c in all_clients
+            if s2 in c["company_name"].lower()
+            or s2 in (c.get("contact_name") or "").lower()
+        ]
+
+    return all_clients
+
+
+async def get_product_categories(db: AsyncSession) -> list[dict[str, str | int]]:
+    """Categories backed by per-sheet product tables for the active client.
+
+    Returns sheets that have at least one row. If none have data yet, returns
+    the full catalog with zero counts so the UI can still offer choices.
+    """
+    settings = get_settings()
+    client_id = settings.ACTIVE_CLIENT
+
+    keyed: list[tuple[str, int]] = []
+    for key, model in SHEET_MODEL_BY_KEY.items():
+        total = (
+            await db.execute(
+                select(func.count()).select_from(model).where(model.client_id == client_id)
+            )
+        ).scalar_one()
+        n = int(total or 0)
+        keyed.append((key, n))
+
+    with_products = [(k, n) for k, n in keyed if n > 0]
+    use = with_products if with_products else keyed
+
+    out: list[dict[str, str | int]] = [
+        {"key": k, "label": _category_label(k), "count": n}
+        for k, n in sorted(use, key=lambda t: _category_label(t[0]).lower())
+    ]
+    return out
+
+
+async def get_product_subcategories(category: str, db: AsyncSession) -> list[str]:
+    model = SHEET_MODEL_BY_KEY.get(category)
+    if model is None:
+        return []
+    if not hasattr(model, "sub_category"):
+        return []
+    settings = get_settings()
+    client_id = settings.ACTIVE_CLIENT
+    result = await db.execute(
+        select(func.distinct(model.sub_category))
+        .where(model.client_id == client_id, model.sub_category.is_not(None))
+        .order_by(model.sub_category)
+    )
+    return [r[0] for r in result.all() if r[0]]
+
+
+def _format_size_label(name: str, size_inch: float | None, size_mm: float | None, material: str, price: float, unit: str) -> str:
+    parts: list[str] = []
+    if size_inch:
+        parts.append(f'{size_inch}"')
+    if size_mm:
+        parts.append(f"({size_mm:.0f}mm)")
+    if material:
+        parts.append(f"— {material}")
+    parts.append(f"— ₹{price:,.0f}/{unit}")
+    return " ".join(parts).strip()
+
+
+def catalog_row_to_size_option(category: str, row: object) -> dict:
+    """Build manual-entry / matcher line dict from a sheet ORM row."""
+    from masters.product_master import _parse_size_to_mm_inch
+
+    if hasattr(row, "product_name"):
+        name = (getattr(row, "product_name") or "").strip()
+        size_mm = getattr(row, "id_mm", None)
+        size_inch = getattr(row, "id_inch", None)
+        material = (getattr(row, "moc_variant", None) or "").strip()
+    else:
+        name = (getattr(row, "product", None) or "").strip()
+        size_mm, size_inch = _parse_size_to_mm_inch(getattr(row, "size", None))
+        material = " / ".join(
+            [
+                x
+                for x in [
+                    getattr(row, "body_material", None),
+                    getattr(row, "seat_material", None),
+                    getattr(row, "stem_material", None),
+                    getattr(row, "moc_variant", None),
+                    getattr(row, "disc_moc_variant", None),
+                ]
+                if x
+            ]
+        )
+
+    price = float(getattr(row, "price_inr", None) or 0.0)
+    unit_raw = getattr(row, "price_unit", None) or "piece"
+    unit = "meter" if "meter" in str(unit_raw).lower() else "piece"
+    nm = name or "Product"
+    return {
+        "id": f"{category}:{getattr(row, 'row_id')}",
+        "name": nm,
+        "size_inch": size_inch,
+        "size_mm": size_mm,
+        "material": material or "",
+        "base_price": price,
+        "unit": unit,
+        "display_label": _format_size_label(nm, size_inch, size_mm, material or "", price, unit),
+    }
+
+
+async def get_cascade_distinct_field_values(
+    category: str, field: str, filters: dict[str, str], db: AsyncSession
+) -> list[str]:
+    """Distinct non-empty values for one cascade column given prior selections."""
+    model = SHEET_MODEL_BY_KEY.get(category)
+    steps = CASCADE_STEPS.get(category, [])
+    if model is None or field not in steps or not hasattr(model, field):
+        return []
+    allowed = set(_cascade_prior_keys(category, field))
+    fdict = _sanitize_cascade_filters(category, filters, allowed_keys=allowed)
+    settings = get_settings()
+    client_id = settings.ACTIVE_CLIENT
+    col = getattr(model, field)
+    stmt = select(func.distinct(col)).where(model.client_id == client_id)
+    for k, v in fdict.items():
+        stmt = stmt.where(getattr(model, k) == v)
+    stmt = stmt.order_by(col)
+    result = await db.execute(stmt)
+    out: list[str] = []
+    seen: set[str] = set()
+    for (cell,) in result.all():
+        if _normalize_distinct_cell(cell) is None:
+            continue
+        if isinstance(cell, str):
+            s = cell.strip()
+        elif isinstance(cell, (int, float)):
+            s = str(int(cell)) if isinstance(cell, float) and float(cell) == int(float(cell)) else str(cell)
+        else:
+            s = str(cell).strip()
+        if s and s not in seen:
+            seen.add(s)
+            out.append(s)
+    out.sort(key=str.lower)
+    return out
+
+
+async def get_cascade_matching_products(category: str, filters: dict[str, str], db: AsyncSession) -> list[dict]:
+    """All catalog rows matching the current cascade filters (may be 0, 1, or many)."""
+    model = SHEET_MODEL_BY_KEY.get(category)
+    if model is None:
+        return []
+    fdict = _sanitize_cascade_filters(category, filters)
+    if not fdict:
+        return []
+    settings = get_settings()
+    client_id = settings.ACTIVE_CLIENT
+    q = select(model).where(model.client_id == client_id)
+    for k, v in fdict.items():
+        if not hasattr(model, k):
+            continue
+        col = getattr(model, k)
+        try:
+            num = float(v)
+            if hasattr(col, "type") and "Float" in type(col.type).__name__:
+                q = q.where(col == num)
+                continue
+        except ValueError:
+            pass
+        q = q.where(col == v)
+    if hasattr(model, "size"):
+        q = q.order_by(model.size)
+    elif hasattr(model, "product_name"):
+        q = q.order_by(model.product_name)
+    rows = (await db.execute(q)).scalars().all()
+    return [catalog_row_to_size_option(category, r) for r in rows]
+
+
+async def get_products_for_size_dropdown(category: str, subcategory: str | None, db: AsyncSession) -> list[dict]:
+    """Return products for size dropdown from sheet tables."""
+    model = SHEET_MODEL_BY_KEY.get(category)
+    if model is None:
+        return []
+    settings = get_settings()
+    client_id = settings.ACTIVE_CLIENT
+
+    q = select(model).where(model.client_id == client_id)
+    if subcategory and hasattr(model, "sub_category"):
+        q = q.where(model.sub_category == subcategory)
+    if hasattr(model, "size"):
+        q = q.order_by(model.size)
+    result = await db.execute(q)
+    rows = result.scalars().all()
+    return [catalog_row_to_size_option(category, r) for r in rows]
+
+
+async def get_product_materials(category: str, db: AsyncSession) -> list[str]:
+    """Distinct material-like values for the given sheet."""
+    model = SHEET_MODEL_BY_KEY.get(category)
+    if model is None:
+        return []
+    settings = get_settings()
+    client_id = settings.ACTIVE_CLIENT
+
+    # Best-effort: some sheets store moc_variant, others body_material etc.
+    cols = []
+    for c in ["moc_variant", "body_material", "seat_material", "stem_material", "disc_moc_variant"]:
+        if hasattr(model, c):
+            cols.append(getattr(model, c))
+    if not cols:
+        return []
+    # Distinct over a coalesce of the first available column (simple but useful for dropdown)
+    col = cols[0]
+    result = await db.execute(
+        select(func.distinct(col)).where(model.client_id == client_id, col.is_not(None)).order_by(col)
+    )
+    return [r[0] for r in result.all() if r[0]]
+
+
+def _jsonable(v: Any) -> Any:
+    if isinstance(v, (datetime, date)):
+        return v.isoformat()
+    return v
+
+
+async def list_products(
+    db: AsyncSession,
+    category: str | None = None,
+    skip: int = 0,
+    limit: int = 500,
+) -> list[dict]:
+    """List products for the active client with optional category filter."""
+    settings = get_settings()
+    client_id = settings.ACTIVE_CLIENT
+    # NOTE: db parameter is kept for interface consistency, but queries are performed
+    # via the product master helper which manages its own sessions by default.
+    limit = min(max(1, limit), 500)
+    skip = max(0, skip)
+
+    # If the UI requests a specific category, return that category only.
+    if category:
+        items = await get_all_products(client_id=client_id, category=category, active_only=False)
+        return items[skip : skip + limit]
+
+    # Otherwise, return a "balanced" first page across categories so the Masters UI
+    # immediately sees all categories (not only the biggest one).
+    categories = [
+        "butterfly_valve",
+        "ball_valve",
+        "diaphragm_valve",
+        "nvr",
+        "hoses",
+        "speciality_valve",
+        "sight_glass",
+        "strainer",
+    ]
+    per_cat = max(1, limit // max(1, len(categories)))
+    combined: list[dict] = []
+    for cat in categories:
+        rows = await get_all_products(client_id=client_id, category=cat, active_only=False)
+        combined.extend(rows[:per_cat])
+
+    # If we still have room (due to small categories), top up from the full catalog.
+    if len(combined) < limit:
+        all_rows = await get_all_products(client_id=client_id, category=None, active_only=False)
+        seen = {r.get("id") for r in combined}
+        for r in all_rows:
+            rid = r.get("id")
+            if rid in seen:
+                continue
+            combined.append(r)
+            if len(combined) >= limit:
+                break
+
+    return combined[:limit]
+
+
+async def get_product(product_id: str, db: AsyncSession) -> dict:
+    """Retrieve a single product by ID for the active client."""
+    # New id format: '<table>:<uuid>'
+    settings = get_settings()
+    item = await get_product_by_id(product_id)
+    if not item:
+        raise ProductNotFoundError(f"Product {product_id} not found")
+    if item.get("table") and settings.ACTIVE_CLIENT:
+        return item
+    return item
+
+
+async def get_client_config() -> dict:
+    """Load the active client configuration from JSON."""
+    return get_settings().get_client_json()
+
+
+async def list_sheet_rows(
+    db: AsyncSession,
+    sheet: str,
+    skip: int = 0,
+    limit: int = 50,
+) -> dict:
+    """Paginated listing of a single sheet table, returning raw columns."""
+    settings = get_settings()
+    client_id = settings.ACTIVE_CLIENT
+
+    model = SHEET_MODEL_BY_KEY.get(sheet)
+    if model is None:
+        raise ValueError(f"Unknown sheet: {sheet}")
+
+    skip = max(0, skip)
+    limit = min(max(1, limit), 200)
+
+    total = (
+        await db.execute(
+            select(func.count()).select_from(model).where(model.client_id == client_id)
+        )
+    ).scalar_one()
+
+    stmt = (
+        select(model)
+        .where(model.client_id == client_id)
+        .order_by(model.id.nulls_last(), model.created_at.nulls_last())
+        .offset(skip)
+        .limit(limit)
+    )
+    rows = (await db.execute(stmt)).scalars().all()
+
+    columns = list(model.__table__.columns.keys())
+
+    items: list[dict] = []
+    for r in rows:
+        d = {c: _jsonable(getattr(r, c)) for c in columns}
+        items.append(d)
+
+    return {
+        "sheet": sheet,
+        "columns": columns,
+        "total": int(total or 0),
+        "skip": skip,
+        "limit": limit,
+        "items": items,
+    }

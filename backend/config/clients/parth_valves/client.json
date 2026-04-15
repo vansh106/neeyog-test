@@ -1,0 +1,15 @@
+{
+  "client_id": "parth_valves",
+  "company_name": "Parth Valves and Hoses LLP",
+  "address": "Plot No. D-1/21/3/1/3 Road, Near Nagmani Hotel, Thermax Chowk, MIDC Chinchwad, Akurdi, Pune - 411019",
+  "gst_number": "27AASFP6216F2ZY",
+  "phone": "+91 7722076899",
+  "email": "marketing@parthvalve.com",
+  "website": "www.parthvalve.com",
+  "currency": "INR",
+  "default_gst_rate": 18.0,
+  "default_pf_rate": 3.0,
+  "quote_validity_days": 15,
+  "product_categories": ["butterfly_valve", "hose", "fitting"],
+  "active_category_for_demo": "butterfly_valve"
+}
