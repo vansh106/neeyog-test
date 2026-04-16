@@ -13,6 +13,7 @@ from controllers.enquiry_controller import (
     EnquiryResponse,
     HITLDecisionRequest,
     HITLStateResponse,
+    ManualDropdownProcessRequest,
     UploadEmailRequest,
 )
 from core.database import get_db
@@ -44,6 +45,14 @@ async def upload_email_stream_route(
             "Access-Control-Allow-Origin": "*",
         },
     )
+
+
+@router.post("/manual/process", response_model=EnquiryResponse)
+async def manual_dropdown_process_route(
+    body: ManualDropdownProcessRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    return await enquiry_controller.handle_process_manual_dropdown(body, db)
 
 
 @router.get("/", response_model=list[EnquiryListItem])

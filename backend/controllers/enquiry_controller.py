@@ -35,6 +35,10 @@ class EnquiryResponse(BaseModel):
     pdf_available: bool = False
     pdf_path: str | None = None
     clarification_questions: str | None = None
+    quote_number: str | None = None
+    subtotal: float | None = None
+    total_amount: float | None = None
+    line_items: list[dict] = []
     ai_reasoning: list[str] = []
     requires_human_review: bool = False
 
@@ -47,6 +51,54 @@ class EnquiryListItem(BaseModel):
     input_type: str
     created_at: str
     erp_export_available: bool = False
+
+
+class ManualSelectedProduct(BaseModel):
+    id: str
+    name: str
+    size_inch: float | None = None
+    size_mm: float | None = None
+    material: str | None = None
+    base_price: float
+    unit: str
+    display_label: str | None = None
+
+
+class ManualLineItemRequest(BaseModel):
+    category: str
+    cascadeSelections: dict[str, str] = {}
+    selectedProduct: ManualSelectedProduct
+    quantity: int = 1
+
+
+class ManualNewClientRequest(BaseModel):
+    company_name: str
+    contact_name: str = ""
+    phone: str = ""
+    email: str = ""
+    address: str = ""
+
+
+class ManualDropdownProcessRequest(BaseModel):
+    clientMode: str
+    selectedClientId: str | None = None
+    newClient: ManualNewClientRequest | None = None
+    lineItems: list[ManualLineItemRequest]
+    priority: str = "Normal"
+    notes: str = ""
+
+    @model_validator(mode="after")
+    def validate_fields(self):
+        mode = (self.clientMode or "").strip().lower()
+        if mode not in ("existing", "new"):
+            raise ValueError("clientMode must be 'existing' or 'new'")
+        if mode == "existing" and not self.selectedClientId:
+            raise ValueError("selectedClientId required for existing clientMode")
+        if mode == "new" and not self.newClient:
+            raise ValueError("newClient required for new clientMode")
+        if not self.lineItems:
+            raise ValueError("At least one line item is required")
+        return self
 
 
 class EmailInboxItem(BaseModel):
@@ -214,6 +266,19 @@ async def handle_list_enquiries(
             for e in enquiries
         ]
     except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+async def handle_process_manual_dropdown(
+    body: ManualDropdownProcessRequest,
+    db: AsyncSession,
+) -> EnquiryResponse:
+    """Manual dropdown processing: skip AI pipeline and generate quote directly."""
+    try:
+        result = await enquiry_service.process_manual_dropdown(body.model_dump(), db)
+        return EnquiryResponse(**result)
+    except Exception as e:
+        logger.exception("Manual dropdown processing failed")
         raise HTTPException(status_code=500, detail=str(e))
 
 

@@ -161,6 +161,19 @@ export async function uploadEmailStream(
   }
 }
 
+export async function processManualDropdown(body: import('@/types').ManualEnquiryForm): Promise<import('@/types').EnquiryResponse> {
+  const base = (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/$/, '')
+  const url = base ? `${base}/api/enquiries/manual/process` : '/api/enquiries/manual/process'
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    cache: 'no-store',
+  })
+  if (!res.ok) throw new Error(`API error: ${res.status}`)
+  return (await res.json()) as import('@/types').EnquiryResponse
+}
+
 function sseStreamBaseUrl(): string {
   return (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/$/, '')
 }

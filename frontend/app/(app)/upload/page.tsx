@@ -23,10 +23,10 @@ import ManualEntryForm from '@/components/upload/ManualEntryForm'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
-import { quotationsApi, uploadEmailStream } from '@/lib/api'
+import { processManualDropdown, quotationsApi, uploadEmailStream } from '@/lib/api'
 import { useEmailSyncStatus, useTriggerEmailSync } from '@/lib/queries'
 import { cn, formatCurrency } from '@/lib/utils'
-import type { EnquiryResponse, AgentEvent, HITLContext, HITLHistoryEntry, ClientVerificationContext, ClientVerificationResponse } from '@/types'
+import type { EnquiryResponse, AgentEvent, HITLContext, HITLHistoryEntry, ClientVerificationContext, ClientVerificationResponse, ManualEnquiryForm } from '@/types'
 
 type InputType = 'email' | 'indiamart' | 'manual'
 
@@ -185,6 +185,21 @@ export default function UploadPage() {
   const handleSubmit = useCallback(async () => {
     await startStreaming(text, inputType)
   }, [text, inputType, startStreaming])
+
+  const handleManualSubmit = useCallback(async (form: ManualEnquiryForm) => {
+    if (isStreaming) return
+    clearRightPanel()
+    setIsStreaming(true)
+    try {
+      const res = await processManualDropdown(form)
+      setFinalResult(res)
+      setEnquiryId(res.enquiry_id ?? null)
+    } catch (e) {
+      setStreamError(e instanceof Error ? e.message : 'Manual process failed')
+    } finally {
+      setIsStreaming(false)
+    }
+  }, [clearRightPanel, isStreaming])
 
   const handleClear = () => {
     setText('')
@@ -566,10 +581,7 @@ export default function UploadPage() {
             <TabsContent value="manual">
               <ManualEntryForm
                 isProcessing={isStreaming}
-                onSubmit={(emailText, itype) => {
-                  // force the manual tag path
-                  startStreaming(emailText, itype as InputType)
-                }}
+                onSubmitManual={handleManualSubmit}
               />
             </TabsContent>
           </Tabs>

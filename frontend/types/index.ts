@@ -19,6 +19,16 @@ export interface EnquiryResponse {
   clarification_questions: string | null
   ai_reasoning: string[]
   requires_human_review: boolean
+  quote_number?: string | null
+  subtotal?: number | null
+  total_amount?: number | null
+  line_items?: Array<{
+    description?: string
+    quantity?: number
+    unit_price?: number
+    unit?: string
+    line_total?: number
+  }>
 }
 
 export interface EnquiryDetail {

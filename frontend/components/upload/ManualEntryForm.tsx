@@ -23,7 +23,7 @@ import type {
 } from '@/types'
 
 type Props = {
-  onSubmit: (emailText: string, inputType: string) => void
+  onSubmitManual: (form: ManualEnquiryForm) => void
   isProcessing: boolean
 }
 
@@ -438,7 +438,7 @@ function ManualLineCascadeFields({
   )
 }
 
-export default function ManualEntryForm({ onSubmit, isProcessing }: Props) {
+export default function ManualEntryForm({ onSubmitManual, isProcessing }: Props) {
   const [form, setForm] = useState<ManualEnquiryForm>({
     clientMode: 'existing',
     selectedClientId: null,
@@ -781,13 +781,12 @@ export default function ManualEntryForm({ onSubmit, isProcessing }: Props) {
           type="button"
           onClick={() => {
             if (!validate()) return
-            const emailText = buildEmailText(form, clients)
-            onSubmit(emailText, 'email') // backend will detect tag and convert to manual
+            onSubmitManual(form)
           }}
           disabled={isProcessing}
           className="h-12 bg-brand-green-500 text-white hover:bg-brand-green-600"
         >
-          {isProcessing ? 'AI is thinking…' : 'Process with AI →'}
+          {isProcessing ? 'Processing…' : 'Process →'}
         </Button>
       </div>
     </div>

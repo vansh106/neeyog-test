@@ -7,6 +7,8 @@ Raises only from core.exceptions.
 import asyncio
 import logging
 import uuid
+import json
+from datetime import date
 
 from sqlalchemy import desc, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,7 +17,7 @@ from sqlalchemy.orm import selectinload
 from core.config import get_settings
 from core.database import async_session_factory
 from core.exceptions import EnquiryParseError, ProductNotFoundError
-from db.models import AuditLog, Enquiry
+from db.models import AuditLog, Enquiry, Quotation
 from orchestrator.graph import enquiry_graph, resume_enquiry_flow, run_enquiry_flow
 from orchestrator.graph import resume_client_verification_flow
 
@@ -32,6 +34,50 @@ STATUS_MAP = {
     "matcher_failed": "Failed to match products",
     "quote_failed": "Failed to build quotation",
 }
+
+
+def _allocate_quote_number() -> str:
+    return f"QT-{date.today().strftime('%Y%m%d')}-{uuid.uuid4().hex[:8].upper()}"
+
+
+def _clean_float(x: object, default: float = 0.0) -> float:
+    try:
+        if x is None:
+            return default
+        return float(x)
+    except (TypeError, ValueError):
+        return default
+
+
+def _normalize_int(x: object, default: int = 1) -> int:
+    try:
+        n = int(x)  # type: ignore[arg-type]
+        return n if n > 0 else default
+    except Exception:
+        return default
+
+
+def _calc_totals(
+    line_items: list[dict],
+    gst_rate: float,
+    pf_rate: float,
+) -> tuple[list[dict], float, float, float, float]:
+    normalized: list[dict] = []
+    subtotal = 0.0
+    for raw in line_items:
+        if not isinstance(raw, dict):
+            continue
+        qty = _normalize_int(raw.get("quantity"), 1)
+        unit_price = round(_clean_float(raw.get("unit_price"), 0.0), 2)
+        line_total = round(qty * unit_price, 2)
+        row = {**raw, "quantity": qty, "unit_price": unit_price, "line_total": line_total}
+        normalized.append(row)
+        subtotal += line_total
+    subtotal = round(subtotal, 2)
+    gst_amount = round(subtotal * (gst_rate / 100.0), 2)
+    pf_amount = round(subtotal * (pf_rate / 100.0), 2)
+    total_amount = round(subtotal + gst_amount + pf_amount, 2)
+    return normalized, subtotal, gst_amount, pf_amount, total_amount
 
 
 async def create_enquiry(
@@ -132,6 +178,262 @@ async def process_enquiry(
         "clarification_questions": final_state.get("clarification_questions"),
         "ai_reasoning": final_state.get("ai_reasoning", []),
         "requires_human_review": final_state.get("requires_human_review", False),
+    }
+
+
+async def process_manual_dropdown(body: dict, db: AsyncSession) -> dict:
+    """Manual dropdown flow: no parser/matcher/HITL; create enquiry + quote directly."""
+    from services.client_service import create_client_record, get_client_by_id
+    from services.erp_export_service import generate_enquiry_list_excel
+    from services.pdf_service import generate_quotation_pdf
+
+    settings = get_settings()
+    client_json = settings.get_client_json()
+    gst_rate = float(client_json.get("default_gst_rate", 18.0))
+    pf_rate = float(client_json.get("default_pf_rate", 3.0))
+
+    mode = str(body.get("clientMode") or "").strip().lower()
+    selected_client_id = body.get("selectedClientId")
+    new_client = body.get("newClient") or {}
+    line_items_in = body.get("lineItems") or []
+    notes = str(body.get("notes") or "").strip()
+    priority = str(body.get("priority") or "Normal").strip()
+
+    # Resolve client identity
+    client_name = "Customer"
+    client_company = ""
+    client_email = ""
+    client_phone = ""
+    client_id_uuid: uuid.UUID | None = None
+    client_obj = None
+
+    if mode == "existing" and isinstance(selected_client_id, str):
+        client_obj = await get_client_by_id(selected_client_id, db)
+        if client_obj is not None:
+            client_company = str(getattr(client_obj, "company_name", "") or "")
+            client_name = str(getattr(client_obj, "contact_name", "") or "") or client_name
+            client_email = str(getattr(client_obj, "email", "") or "")
+            client_phone = str(getattr(client_obj, "phone", "") or "")
+            # Only persist FK when it's our real UUID client record
+            if not selected_client_id.startswith("dummy-"):
+                client_id_uuid = uuid.UUID(selected_client_id)
+    elif mode == "new":
+        extracted = {
+            "company_name": new_client.get("company_name"),
+            "contact_name": new_client.get("contact_name"),
+            "email": new_client.get("email"),
+            "phone": new_client.get("phone"),
+            "city": None,
+            "country": "India",
+        }
+        created = await create_client_record(extracted, source="manual_dropdown", db=db)
+        client_id_uuid = created.id
+        client_obj = created
+        client_company = created.company_name
+        client_name = created.contact_name or client_name
+        client_email = created.email or ""
+        client_phone = created.phone or ""
+
+    enquiry_id = uuid.uuid4()
+
+    parsed_products: list[dict] = []
+    matched_products: list[dict] = []
+    quote_line_items: list[dict] = []
+
+    for li in line_items_in:
+        if not isinstance(li, dict):
+            continue
+        qty = _normalize_int(li.get("quantity"), 1)
+        sp = li.get("selectedProduct") or {}
+        if not isinstance(sp, dict):
+            continue
+        name = str(sp.get("name") or "Product").strip()
+        unit = str(sp.get("unit") or "Nos").strip() or "Nos"
+        unit_price = _clean_float(sp.get("base_price"), 0.0)
+        size_inch = sp.get("size_inch")
+        size_mm = sp.get("size_mm")
+        material = sp.get("material")
+
+        desc_parts = [name]
+        if size_inch is not None or size_mm is not None:
+            inch_part = f'{size_inch}"' if size_inch is not None else ""
+            mm_part = f"({size_mm}mm)" if size_mm is not None else ""
+            sz = " ".join([p for p in [inch_part, mm_part] if p]).strip()
+            if sz:
+                desc_parts.append(sz)
+        if material:
+            desc_parts.append(str(material))
+        description = " — ".join([p for p in desc_parts if p])
+
+        parsed_products.append(
+            {
+                "product_description": description,
+                "quantity": qty,
+                "unit": unit,
+            }
+        )
+        matched_products.append(
+            {
+                "matched": True,
+                "product_id": sp.get("id"),
+                "product_name": name,
+                "material": material,
+                "size_inch": size_inch,
+                "size_mm": size_mm,
+                "base_price": unit_price,
+                "unit": unit,
+            }
+        )
+        quote_line_items.append(
+            {
+                "description": description,
+                "quantity": qty,
+                "unit_price": unit_price,
+                "unit": unit,
+            }
+        )
+
+    quote_line_items, subtotal, gst_amount, pf_amount, total_amount = _calc_totals(
+        quote_line_items, gst_rate=gst_rate, pf_rate=pf_rate
+    )
+
+    raw_input = json.dumps(
+        {
+            "source": "manual_dropdown",
+            "priority": priority,
+            "notes": notes,
+            "client": {
+                "name": client_name,
+                "company": client_company,
+                "email": client_email,
+                "phone": client_phone,
+            },
+            "line_items": quote_line_items,
+        },
+        ensure_ascii=False,
+    )
+
+    enquiry = Enquiry(
+        id=enquiry_id,
+        client_config="parth_valves",
+        raw_input=raw_input,
+        input_type="manual_dropdown",
+        status="approved",
+        flow_type="complete",
+        parsed_data={
+            "client_name": client_name,
+            "client_company": client_company,
+            "client_email": client_email,
+            "client_phone": client_phone,
+            "priority": priority,
+            "notes": notes,
+            "products_requested": parsed_products,
+        },
+        matched_products=matched_products,
+    )
+    if client_id_uuid is not None:
+        enquiry.client_id = client_id_uuid
+
+    db.add(enquiry)
+    await db.commit()
+
+    quote_number = _allocate_quote_number()
+    quotation_id = uuid.uuid4()
+    quotation_data = {
+        "quote_number": quote_number,
+        "client_name": client_name,
+        "client_company": client_company,
+        "client_email": client_email,
+        "client_phone": client_phone,
+        "line_items": quote_line_items,
+        "subtotal": subtotal,
+        "gst_rate": gst_rate,
+        "gst_amount": gst_amount,
+        "pf_rate": pf_rate,
+        "pf_amount": pf_amount,
+        "freight_note": "Extra at actual",
+        "total_amount": total_amount,
+        "professional_notes": notes or "",
+    }
+
+    quotation = Quotation(
+        id=quotation_id,
+        enquiry_id=enquiry_id,
+        quote_number=quote_number,
+        client_name=client_name,
+        client_company=client_company,
+        client_email=client_email,
+        client_phone=client_phone,
+        line_items=quote_line_items,
+        subtotal=subtotal,
+        gst_rate=gst_rate,
+        gst_amount=gst_amount,
+        pf_rate=pf_rate,
+        pf_amount=pf_amount,
+        total_amount=total_amount,
+        validity_days=int(client_json.get("quote_validity_days", 15)),
+        status="approved",
+        notes=notes or None,
+    )
+    db.add(quotation)
+    await db.commit()
+
+    pdf_path = await generate_quotation_pdf(quotation_data, client_json)
+    if pdf_path:
+        quotation.pdf_path = pdf_path
+        await db.commit()
+
+    # Generate ERP Enquiry List (non-negotiable requirement)
+    try:
+        if client_obj is None and isinstance(selected_client_id, str):
+            client_obj = await get_client_by_id(selected_client_id, db)
+        if client_obj is not None:
+            erp_path = await generate_enquiry_list_excel(
+                enquiry_id=str(enquiry_id),
+                client=client_obj,
+                parsed_data=enquiry.parsed_data or {},
+                matched_products=matched_products,
+                quotation_data=quotation_data,
+                input_type=enquiry.input_type,
+                subject="Manual dropdown enquiry",
+            )
+            enquiry.erp_export_path = erp_path
+            await db.commit()
+    except Exception:
+        # Don't fail the whole request if export generation fails,
+        # but log the issue for follow-up.
+        logger.exception("Failed to generate ERP enquiry list for manual dropdown")
+
+    audit = AuditLog(
+        id=uuid.uuid4(),
+        entity_type="enquiry",
+        entity_id=enquiry_id,
+        action="manual_dropdown_processed",
+        performed_by="user",
+        details={
+            "quotation_id": str(quotation_id),
+            "quote_number": quote_number,
+            "subtotal": subtotal,
+            "total_amount": total_amount,
+        },
+    )
+    db.add(audit)
+    await db.commit()
+
+    return {
+        "enquiry_id": str(enquiry_id),
+        "status": "quoted",
+        "flow_type": "complete",
+        "message": "Manual dropdown processed — quotation generated",
+        "quotation_id": str(quotation_id),
+        "pdf_available": bool(pdf_path),
+        "pdf_path": pdf_path,
+        "quote_number": quote_number,
+        "subtotal": subtotal,
+        "total_amount": total_amount,
+        "line_items": quote_line_items,
+        "ai_reasoning": [],
+        "requires_human_review": False,
     }
 
 
