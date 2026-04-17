@@ -8,6 +8,7 @@ import email.header
 import email.utils
 import imaplib
 import logging
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -112,8 +113,15 @@ class EmailSyncService:
             return False, "auto_sender"
 
         own_domain = self.email.split("@")[-1]
-        if sender_email.endswith(f"@{own_domain}"):
-            return False, "internal_sender"
+        sender_lower = (sender_email or "").lower()
+
+        # Allow forwarded RFQs sent from our own mailbox/domain by extracting the original external sender.
+        if sender_lower.endswith(f"@{own_domain}"):
+            fwd_sender = self._extract_forwarded_sender_email(subject, body)
+            if fwd_sender and not fwd_sender.lower().endswith(f"@{own_domain}"):
+                sender_lower = fwd_sender.lower()
+            else:
+                return False, "internal_sender"
 
         skip_senders = [
             "noreply",
@@ -125,7 +133,6 @@ class EmailSyncService:
             "support@",
             "buyershelpdesk@indiamart.com",
         ]
-        sender_lower = sender_email.lower()
         if any(s in sender_lower for s in skip_senders):
             if "indiamart" not in sender_lower:
                 return False, "auto_sender"
@@ -137,6 +144,34 @@ class EmailSyncService:
             return False, "no_keywords"
 
         return True, ""
+
+    def _extract_forwarded_sender_email(self, subject: str, body: str) -> str | None:
+        """Best-effort extraction of original sender email from forwarded threads."""
+        txt = f"{subject}\n{body}"
+        # Gmail thread quote format: "On ... Name <email@domain> wrote:"
+        m = re.search(
+            r"\bOn\s.+?<([A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,})>\s+wrote:",
+            txt,
+            re.IGNORECASE | re.DOTALL,
+        )
+        if m:
+            return m.group(1).strip()
+        # Forwarded header blocks: "From: Name <email@domain>"
+        m = re.search(
+            r"^\s*From:\s.*?<([A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,})>\s*$",
+            txt,
+            re.IGNORECASE | re.MULTILINE,
+        )
+        if m:
+            return m.group(1).strip()
+        m = re.search(
+            r"^\s*From:.*?([A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}).*$",
+            txt,
+            re.IGNORECASE | re.MULTILINE,
+        )
+        if m:
+            return m.group(1).strip()
+        return None
 
     async def _get_or_create_sync_state(self, db: AsyncSession) -> EmailSyncState:
         result = await db.execute(select(EmailSyncState).where(EmailSyncState.id == 1))
@@ -303,6 +338,13 @@ class EmailSyncService:
                         pass
                     return
 
+                # If this is a forwarded thread from our own mailbox, use the original external sender in the saved raw email.
+                effective_sender_email = sender_email_addr
+                if sender_email_addr and sender_email_addr.lower().endswith(f"@{self.email.split('@')[-1]}"):
+                    fwd_sender = self._extract_forwarded_sender_email(subject, body)
+                    if fwd_sender:
+                        effective_sender_email = fwd_sender
+
                 if received_at < baseline_at:
                     logger.info("Skipping message before baseline: %s", subject)
                     await self._record_processed(
@@ -339,7 +381,7 @@ class EmailSyncService:
 
                 email_text = self._build_email_text(
                     sender_name,
-                    sender_email_addr,
+                    effective_sender_email or (sender_email_addr or ""),
                     subject,
                     body,
                     date_str,
