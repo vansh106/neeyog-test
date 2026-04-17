@@ -241,8 +241,8 @@ function TeamMembers() {
       </div>
 
       <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
-        <SheetContent side="right" className="w-[600px] sm:max-w-[600px]">
-          <SheetHeader>
+        <SheetContent side="right" className="w-[600px] sm:max-w-[600px] px-6 py-6">
+          <SheetHeader className="mb-4">
             <SheetTitle>{mode === 'create' ? 'Add Team Member' : `Edit Permissions — ${activeUser?.full_name ?? ''}`}</SheetTitle>
           </SheetHeader>
 

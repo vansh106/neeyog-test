@@ -192,6 +192,39 @@ async def search_products_by_size(
     if target_mm is None:
         return []
 
+    # Try to derive a common inch representation too (many sheets store `size` as `1/2"` etc.)
+    # Reverse lookup on the predefined map first, otherwise approximate.
+    target_inch: float | None = None
+    if size_inch is not None:
+        target_inch = float(size_inch)
+    else:
+        for inch, mm in INCH_TO_MM.items():
+            if abs(mm - float(target_mm)) < 0.51:
+                target_inch = float(inch)
+                break
+        if target_inch is None:
+            try:
+                target_inch = float(target_mm) / 25.4
+            except Exception:
+                target_inch = None
+
+    inch_patterns: list[str] = []
+    if target_inch is not None:
+        # Common textual encodings in XLSX: 0.5", 1/2", 3/4", 0.75"
+        inch_patterns.extend([f'{target_inch:g}"'])
+        if abs(target_inch - 0.5) < 0.01:
+            inch_patterns.extend(['1/2"', '1/2 "'])
+        elif abs(target_inch - 0.75) < 0.01:
+            inch_patterns.extend(['3/4"', '3/4 "'])
+        elif abs(target_inch - 0.25) < 0.01:
+            inch_patterns.extend(['1/4"', '1/4 "'])
+        elif abs(target_inch - 1.25) < 0.01:
+            inch_patterns.extend(['1 1/4"', '1 1/4 "'])
+        elif abs(target_inch - 1.5) < 0.01:
+            inch_patterns.extend(['1 1/2"', '1 1/2 "'])
+        elif abs(target_inch - 2.5) < 0.01:
+            inch_patterns.extend(['2 1/2"', '2 1/2 "'])
+
     async def _query(s: AsyncSession) -> list[dict]:
         out: list[dict] = []
         for table_key, model in SHEET_TABLES:
@@ -205,7 +238,7 @@ async def search_products_by_size(
             else:
                 # Most sheets store size as text; we approximate by matching common encodings.
                 # e.g. DN100, 100 MM
-                patterns = [f"DN{int(target_mm)}", f"{int(target_mm)} MM", f"{int(target_mm)}MM"]
+                patterns = [f"DN{int(target_mm)}", f"{int(target_mm)} MM", f"{int(target_mm)}MM", *inch_patterns]
                 stmt = select(model).where(model.client_id == client_id)
                 stmt = stmt.where(or_(*[model.size.ilike(f"%{p}%") for p in patterns if hasattr(model, "size")]))
 

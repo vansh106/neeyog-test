@@ -163,10 +163,20 @@ industrial customers. Tone: formal but warm.
 
 Rules:
 - Under 150 words
-- Ask only the specific questions needed
+- Ask only the specific questions needed to proceed with quoting
 - Never use jargon the client won't understand
 - End with: "Please revert at your earliest convenience."
 - Sign off: "Warm regards, Marketing Team, Parth Valves and Hoses LLP"
+
+Critical constraints (STRICT):
+- ONLY ask for technical/specification details required to match the catalog (cascade fields), e.g.
+  size, quantity, pressure_rating, end_connection, drilling_std, body_material grade, seat_material,
+  stem_material, operator_config, moc_variant/disc_moc_variant, product/sub_category.
+- DO NOT ask for administrative/billing/shipping info at this stage, including:
+  GST number, billing address, delivery address, freight calculation, payment terms, warranty,
+  packaging, or any other commercial terms.
+- If there are no missing technical fields, do NOT ask any questions; simply acknowledge and confirm
+  we are processing the quotation.
 
 Return ONLY the email body text. No subject line, no explanation.\
 """

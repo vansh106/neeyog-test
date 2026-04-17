@@ -177,9 +177,7 @@ function CompletionRow({
           return (
             <div key={step.key} className="space-y-1.5">
               <div className="text-[10px] font-medium uppercase tracking-wide text-[#8A9488]">{step.label}</div>
-              {inferredNotInCatalog && (
-                <p className="text-[10px] text-amber-800">AI value not in catalog — pick closest or fix catalog import.</p>
-              )}
+              {inferredNotInCatalog && null}
               <Select
                 value={value}
                 onValueChange={(v) => {
