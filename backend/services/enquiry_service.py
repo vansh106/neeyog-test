@@ -20,6 +20,7 @@ from core.exceptions import EnquiryParseError, ProductNotFoundError
 from db.models import AuditLog, Enquiry, Quotation
 from orchestrator.graph import enquiry_graph, resume_enquiry_flow, run_enquiry_flow
 from orchestrator.graph import resume_client_verification_flow
+from orchestrator.graph import resume_product_completion_flow
 
 logger = logging.getLogger(__name__)
 
@@ -538,6 +539,7 @@ async def get_enquiry_hitl_state(enquiry_id: str) -> dict:
                 "awaiting_human": v.get("awaiting_human", False),
                 "hitl_cycle": v.get("hitl_cycle", 0),
                 "hitl_context": v.get("hitl_context"),
+                "product_hitl_context": v.get("product_hitl_context"),
                 "hitl_history": v.get("hitl_history", []),
                 "flow_type": v.get("flow_type"),
                 "current_step": v.get("current_step"),
@@ -545,8 +547,35 @@ async def get_enquiry_hitl_state(enquiry_id: str) -> dict:
             }
     except Exception:
         logger.exception("Failed to get HITL state for %s", enquiry_id)
-    return {"awaiting_human": False, "hitl_cycle": 0, "hitl_context": None,
-            "hitl_history": [], "flow_type": None, "current_step": None, "next_nodes": []}
+    # Fallback: after process restart, in-memory checkpointer can be empty.
+    try:
+        async with async_session_factory() as session:
+            r = await session.execute(select(Enquiry).where(Enquiry.id == uuid.UUID(enquiry_id)))
+            row = r.scalar_one_or_none()
+            if row and isinstance(row.agent_state, dict) and row.agent_state.get("awaiting_human"):
+                v = row.agent_state
+                return {
+                    "awaiting_human": bool(v.get("awaiting_human", False)),
+                    "hitl_cycle": int(v.get("hitl_cycle", 0) or 0),
+                    "hitl_context": v.get("hitl_context"),
+                    "product_hitl_context": v.get("product_hitl_context"),
+                    "hitl_history": v.get("hitl_history", []),
+                    "flow_type": v.get("flow_type"),
+                    "current_step": v.get("current_step"),
+                    "next_nodes": list(v.get("next_nodes") or []),
+                }
+    except Exception:
+        logger.exception("Failed HITL DB fallback for %s", enquiry_id)
+    return {
+        "awaiting_human": False,
+        "hitl_cycle": 0,
+        "hitl_context": None,
+        "product_hitl_context": None,
+        "hitl_history": [],
+        "flow_type": None,
+        "current_step": None,
+        "next_nodes": [],
+    }
 
 
 async def submit_human_review(
@@ -815,6 +844,173 @@ async def get_erp_export_path(enquiry_id: str, db: AsyncSession) -> str:
     if not enquiry.erp_export_path:
         raise ProductNotFoundError("ERP export not found for this enquiry")
     return enquiry.erp_export_path
+
+
+async def submit_product_completion(
+    enquiry_id: str,
+    decision: str,
+    payload: dict,
+    db: AsyncSession,
+    emitter=None,
+) -> dict:
+    """Resume graph at product completion router with human decision.
+
+    - fill_self: apply cascade selections, resolve to single product(s), continue to quote.
+    - ask_client: compose clarification email with selected DB-column questions, continue to human review.
+    """
+    from services.client_service import get_client_by_id
+    from services.erp_export_service import generate_enquiry_list_excel
+    from services.masters_service import get_cascade_matching_products
+
+    result = await db.execute(select(Enquiry).where(Enquiry.id == uuid.UUID(enquiry_id)))
+    row = result.scalar_one_or_none()
+    if not row:
+        raise ProductNotFoundError(f"Enquiry {enquiry_id} not found")
+
+    parsed = row.parsed_data or {}
+    products = parsed.get("products_requested") or []
+    if not isinstance(products, list):
+        products = []
+
+    state_patch: dict = {}
+
+    if decision == "fill_self":
+        items = payload.get("items") or []
+        matches: list[dict] = []
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            idx = int(it.get("index") or 0)
+            category = str(it.get("category") or "").strip()
+            selections = it.get("selections") if isinstance(it.get("selections"), dict) else {}
+            if not category or not selections:
+                continue
+            prods = await get_cascade_matching_products(category, selections, db)
+            if len(prods) == 1 and prods[0]:
+                p = prods[0]
+                matches.append(
+                    {
+                        "matched": True,
+                        "product_id": p.get("id"),
+                        "product_name": p.get("name"),
+                        "material": p.get("material"),
+                        "size_inch": p.get("size_inch"),
+                        "size_mm": p.get("size_mm"),
+                        "base_price": p.get("base_price"),
+                        "unit": p.get("unit"),
+                        "match_confidence": 1.0,
+                        "match_source": "cascade",
+                        "category": category,
+                        "cascade_filters": selections,
+                    }
+                )
+                if 0 <= idx < len(products) and isinstance(products[idx], dict):
+                    products[idx]["category"] = category
+                    products[idx]["cascade_filters"] = selections
+                    products[idx]["matched_product_id"] = p.get("id")
+
+        parsed["products_requested"] = products
+        row.parsed_data = parsed
+        row.matched_products = matches
+        row.missing_fields = []
+        row.flow_type = "complete" if matches else "incomplete"
+        row.status = "matching"
+        await db.commit()
+        state_patch = {
+            "parsed_data": parsed,
+            "matched_products": matches,
+            "missing_fields": [],
+            "flow_type": row.flow_type,
+        }
+
+        # Optional: generate ERP export early if client is resolved.
+        try:
+            client = await get_client_by_id(str(row.client_id), db) if row.client_id else None
+            if client:
+                row.erp_export_path = await generate_enquiry_list_excel(
+                    enquiry_id=str(row.id),
+                    client=client,
+                    parsed_data=parsed,
+                    matched_products=matches,
+                    quotation_data=None,
+                    input_type=row.input_type,
+                    subject=None,
+                )
+                await db.commit()
+        except Exception:
+            logger.exception("ERP export generation failed during product completion")
+
+    elif decision == "ask_client":
+        ask = payload.get("ask") or {}
+        subject = "Clarification needed for your enquiry"
+        lines: list[str] = []
+        lines.append(f"Subject: {subject}")
+        lines.append("")
+        lines.append("Dear Sir/Madam,")
+        lines.append("")
+        lines.append("Thanks for your enquiry. To confirm the exact item, please share the following:")
+        lines.append("")
+        if isinstance(ask, dict):
+            for k, v in ask.items():
+                try:
+                    idx = int(k)
+                except Exception:
+                    continue
+                if idx < 0 or idx >= len(products) or not isinstance(products[idx], dict):
+                    continue
+                desc = products[idx].get("product_description") or f"Item {idx + 1}"
+                lines.append(f"- For {desc}:")
+                if isinstance(v, dict):
+                    for field, options in v.items():
+                        opt_list = options if isinstance(options, list) else []
+                        opt_txt = ", ".join([str(x) for x in opt_list if x is not None and str(x).strip()])
+                        lines.append(f"  - {field}: {opt_txt or 'Please specify'}")
+                lines.append("")
+        lines.append("Regards,")
+        lines.append("Parth Valves")
+
+        row.clarification_questions = "\n".join(lines)
+        row.flow_type = "incomplete"
+        await db.commit()
+        state_patch = {
+            "clarification_questions": row.clarification_questions,
+            "flow_type": "incomplete",
+        }
+
+    final_state = await resume_product_completion_flow(
+        enquiry_id=enquiry_id,
+        decision=decision,
+        payload=payload,
+        state_patch=state_patch,
+        emitter=emitter,
+    )
+    return _build_result_dict(final_state)
+
+
+async def submit_product_completion_streaming(
+    enquiry_id: str,
+    decision: str,
+    payload: dict,
+    emitter,
+) -> None:
+    """Streaming wrapper that uses its own DB session (safe for background tasks)."""
+    from services.sse_service import evt_agent_error, evt_result
+
+    try:
+        async with async_session_factory() as session:
+            result = await submit_product_completion(
+                enquiry_id=enquiry_id,
+                decision=decision,
+                payload=payload,
+                db=session,
+                emitter=emitter,
+            )
+        await emitter.emit(evt_result(result))
+    except Exception as e:
+        logger.exception("Product completion streaming failed for %s", enquiry_id)
+        await emitter.emit(evt_agent_error(agent="system", message=f"Processing failed: {e}"))
+    finally:
+        await emitter.done()
 
 
 async def list_clients(search: str | None = None) -> list[dict]:

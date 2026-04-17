@@ -3,10 +3,12 @@
 import { useEffect, useMemo, useState } from 'react'
 import { CheckCircle2, Download, UserCheck, UserPlus, Users } from 'lucide-react'
 
+import { PermissionGate } from '@/components/auth/PermissionGate'
+import { Permissions } from '@/lib/permissions'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
-import { clientVerifyStream, enquiriesApi, erpExportUrl } from '@/lib/api'
+import { clientVerifyStream, downloadErpExport, enquiriesApi } from '@/lib/api'
 import type { AgentEvent, ClientSummary, ClientVerificationContext, ClientVerificationResponse } from '@/types'
 
 type Props = {
@@ -85,23 +87,17 @@ export default function ClientVerificationPanel({ enquiryId, clientContext, onVe
     if (!result?.erp_export_available || downloadBusy) return
     setDownloadBusy(true)
     try {
-      const url = erpExportUrl(enquiryId)
-      const resp = await fetch(url, { cache: 'no-store' })
-      if (!resp.ok) throw new Error(`Download failed (${resp.status})`)
-      const blob = await resp.blob()
-      const a = document.createElement('a')
-      a.href = URL.createObjectURL(blob)
-      a.download = `EnquiryList_${enquiryId.slice(0, 8).toUpperCase()}.xlsx`
-      document.body.appendChild(a)
-      a.click()
-      a.remove()
-      URL.revokeObjectURL(a.href)
+      await downloadErpExport(enquiryId)
     } finally {
       setDownloadBusy(false)
     }
   }
 
   return (
+    <PermissionGate
+      permission={Permissions.CLIENT_VERIFY}
+      fallback={<p className="text-[13px] text-surface-muted">You don&apos;t have permission to verify clients.</p>}
+    >
     <div className="rounded-xl border-t-[3px] border-t-brand-navy-500 border border-surface-border bg-white shadow-sm overflow-hidden">
       <div className="flex flex-wrap items-center justify-between gap-3 px-5 pt-4 pb-3 border-b border-surface-border bg-brand-navy-50/40">
         <div className="flex items-center gap-2">
@@ -307,6 +303,7 @@ export default function ClientVerificationPanel({ enquiryId, clientContext, onVe
         </button>
       </div>
     </div>
+    </PermissionGate>
   )
 }
 

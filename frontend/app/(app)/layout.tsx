@@ -6,6 +6,7 @@ import Sidebar from '@/components/layout/Sidebar'
 import Topbar from '@/components/layout/Topbar'
 import { useGlobalEvents } from '@/hooks/useGlobalEvents'
 import { useEmailStore } from '@/stores/emailStore'
+import { useAuthStore } from '@/stores/authStore'
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter()
@@ -14,15 +15,20 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const updateStatus = useEmailStore((s) => s.updateStatus)
   const addLiveEvent = useEmailStore((s) => s.addLiveEvent)
   const setConnection = useEmailStore((s) => s.setConnection)
+  const user = useAuthStore((s) => s.user)
+  const accessToken = useAuthStore((s) => s.access_token)
 
   useEffect(() => {
-    const role = localStorage.getItem('cpq_role')
-    if (!role) {
+    if (!user || !accessToken) {
       router.replace('/login')
     } else {
+      if (user.is_first_login) {
+        router.replace('/change-password')
+        return
+      }
       setReady(true)
     }
-  }, [router])
+  }, [router, user, accessToken])
 
   useGlobalEvents({
     onNewEmail: (evt) => addNewEmail(evt),

@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import func, select
 
-from api.routes import enquiries, masters, quotations, stream, sync
+from api.routes import auth, enquiries, masters, quotations, stream, sync, users
 from core.config import get_settings
 from core.database import async_session_factory, init_db
 from db.sheet_models import (
@@ -33,6 +33,17 @@ async def lifespan(app: FastAPI):
     await init_db()
     logger.info("Database initialised, pgvector enabled.")
 
+    # Seed superadmin (idempotent)
+    try:
+        from services.auth_service import ensure_superadmin_seeded
+
+        async with async_session_factory() as session:
+            created = await ensure_superadmin_seeded(session)
+            if created:
+                logger.info("SuperAdmin created: %s", settings.SUPERADMIN_EMAIL)
+    except Exception:
+        logger.exception("SuperAdmin seed failed")
+
     async with async_session_factory() as session:
         models = [
             ("butterfly_valve", ButterflyValveRow),
@@ -52,12 +63,22 @@ async def lifespan(app: FastAPI):
             c = int(result.scalar() or 0)
             total += c
             logger.info("Catalog rows (%s): %d", key, c)
+        # Read-only session: commit so SQLAlchemy does not emit a noisy ROLLBACK on close.
+        await session.commit()
 
     if total == 0:
-        logger.warning(
-            "Catalog is empty for client_id=%s. Import your XLSX into sheet tables.",
-            settings.ACTIVE_CLIENT,
+        hint = (
+            "Import the master XLSX into sheet tables, e.g. from the backend root: "
+            "`python db/import_sheet_tables.py --file /path/to/Parth_valves_product_list.xlsx`."
         )
+        if settings.APP_ENV == "development":
+            logger.info(
+                "Catalog is empty for client_id=%s — %s",
+                settings.ACTIVE_CLIENT,
+                hint,
+            )
+        else:
+            logger.warning("Catalog is empty for client_id=%s. %s", settings.ACTIVE_CLIENT, hint)
     else:
         logger.info("Found %d catalog rows for client_id=%s.", total, settings.ACTIVE_CLIENT)
 
@@ -99,6 +120,8 @@ app.include_router(quotations.router)
 app.include_router(masters.router, prefix="/api")
 app.include_router(sync.router)
 app.include_router(stream.router)
+app.include_router(auth.router)
+app.include_router(users.router)
 
 
 @app.get("/health")

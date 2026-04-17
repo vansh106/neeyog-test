@@ -22,6 +22,8 @@ from agents.client_identification_agent import client_identification_agent
 from agents.hitl_router_agent import hitl_router_agent
 from agents.human_review_node import human_review_node
 from agents.matcher_agent import matcher_agent
+from agents.product_hitl_node import product_hitl_node
+from agents.product_hitl_router import product_hitl_router
 from agents.parser_agent import parser_agent
 from agents.quote_agent import quote_agent
 from agents.send_node import send_node
@@ -36,6 +38,7 @@ from orchestrator.router import (
     route_after_email_composer,
     route_after_hitl_router,
     route_after_matcher,
+    route_after_product_hitl_router,
     route_after_parser,
     route_after_quote,
     route_after_send_node,
@@ -110,6 +113,8 @@ def build_graph():
     graph.add_node("client_identification_agent", client_identification_agent)
     graph.add_node("client_hitl_node", client_hitl_node)
     graph.add_node("client_hitl_router", client_hitl_router)
+    graph.add_node("product_hitl_node", product_hitl_node)
+    graph.add_node("product_hitl_router", product_hitl_router)
     graph.add_node("matcher_agent", matcher_agent)
     graph.add_node("quote_agent", quote_agent)
     graph.add_node("missing_fields_handler", missing_fields_handler)
@@ -146,6 +151,7 @@ def build_graph():
         route_after_client_hitl_router,
         {
             "matcher_agent": "matcher_agent",
+            "product_hitl_node": "product_hitl_node",
             "missing_fields_handler": "missing_fields_handler",
             "error_handler": "error_handler",
         },
@@ -164,7 +170,26 @@ def build_graph():
         route_after_matcher,
         {
             "quote_agent": "quote_agent",
+            "product_hitl_node": "product_hitl_node",
             "missing_fields_handler": "missing_fields_handler",
+            "error_handler": "error_handler",
+        },
+    )
+
+    # Product completion HITL: node emits event, then graph pauses before router
+    graph.add_conditional_edges(
+        "product_hitl_node",
+        lambda state: "product_hitl_router",
+        {"product_hitl_router": "product_hitl_router"},
+    )
+
+    graph.add_conditional_edges(
+        "product_hitl_router",
+        route_after_product_hitl_router,
+        {
+            "quote_agent": "quote_agent",
+            "human_review": "human_review",
+            "product_hitl_node": "product_hitl_node",
             "error_handler": "error_handler",
         },
     )
@@ -214,6 +239,7 @@ def build_graph():
         interrupt_before=[
             "hitl_router_agent",   # main HITL router
             "client_hitl_router",  # client verification router
+            "product_hitl_router",  # product completion router
         ],
     )
 
@@ -385,6 +411,48 @@ async def resume_client_verification_flow(
             "awaiting_human": False,
         },
     )
+
+    try:
+        final_state = await enquiry_graph.ainvoke(None, config)
+    finally:
+        if emitter is not None:
+            remove_emitter(str(enquiry_id))
+
+    eid = UUID(enquiry_id) if isinstance(enquiry_id, str) else enquiry_id
+    await _save_state_to_db(eid, final_state)
+    return final_state
+
+
+async def resume_product_completion_flow(
+    enquiry_id: str,
+    decision: str,
+    payload: dict,
+    state_patch: dict | None = None,
+    emitter=None,
+) -> EnquiryState:
+    """Resume a graph paused at product completion (before product_hitl_router)."""
+    config = {"configurable": {"thread_id": enquiry_id}}
+
+    if emitter is not None:
+        register_emitter(str(enquiry_id), emitter)
+
+    current = await enquiry_graph.aget_state(config)
+    if current is None or not current.next:
+        if emitter is not None:
+            remove_emitter(str(enquiry_id))
+        raise ValueError(
+            f"No paused graph found for enquiry {enquiry_id}. Was the enquiry processed?"
+        )
+
+    patch = {
+        "product_hitl_decision": decision,
+        "product_hitl_payload": payload,
+        "awaiting_human": False,
+    }
+    if state_patch and isinstance(state_patch, dict):
+        patch.update(state_patch)
+
+    await enquiry_graph.aupdate_state(config, patch)
 
     try:
         final_state = await enquiry_graph.ainvoke(None, config)

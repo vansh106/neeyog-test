@@ -139,6 +139,7 @@ class HITLStateResponse(BaseModel):
     flow_type: str | None = None
     current_step: str | None = None
     hitl_context: dict | None = None
+    product_hitl_context: dict | None = None
     hitl_history: list[dict] = []
     next_nodes: list[str] = []
 
@@ -164,6 +165,19 @@ class ClientVerificationResponse(BaseModel):
     erp_export_available: bool = False
     erp_export_path: str | None = None
     message: str
+
+
+class ProductHITLDecisionRequest(BaseModel):
+    decision: str  # "fill_self" | "ask_client"
+    payload: dict = {}
+
+    @model_validator(mode="after")
+    def validate_fields(self):
+        if self.decision not in ("fill_self", "ask_client"):
+            raise ValueError("decision must be 'fill_self' or 'ask_client'")
+        if not isinstance(self.payload, dict):
+            raise ValueError("payload must be an object")
+        return self
 
 
 # ── Controller functions ────────────────────────────────────
@@ -447,3 +461,41 @@ async def handle_get_clients(search: str | None = None) -> list[dict]:
         return await enquiry_service.list_clients(search)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+async def handle_product_completion(
+    enquiry_id: str,
+    body: ProductHITLDecisionRequest,
+    db: AsyncSession,
+) -> dict:
+    try:
+        return await enquiry_service.submit_product_completion(
+            enquiry_id=enquiry_id,
+            decision=body.decision,
+            payload=body.payload,
+            db=db,
+        )
+    except ProductNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+async def handle_product_completion_stream(
+    enquiry_id: str,
+    body: ProductHITLDecisionRequest,
+    db: AsyncSession,
+) -> AsyncGenerator[str, None]:
+    """Resume product completion and stream remaining pipeline events."""
+    from services.sse_service import SSEEventEmitter
+
+    emitter = SSEEventEmitter()
+    asyncio.create_task(
+        enquiry_service.submit_product_completion_streaming(
+            enquiry_id=enquiry_id,
+            decision=body.decision,
+            payload=body.payload,
+            emitter=emitter,
+        )
+    )
+    return emitter.stream()

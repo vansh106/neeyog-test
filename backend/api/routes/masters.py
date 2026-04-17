@@ -4,7 +4,9 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from config.permissions import Permission
 from controllers import masters_controller
+from core.auth_middleware import require_permission
 from core.database import get_db
 
 router = APIRouter(prefix="/masters", tags=["masters"])
@@ -26,6 +28,7 @@ class CascadeMatchBody(BaseModel):
 @router.get("/categories")
 async def list_catalog_categories_route(
     db: AsyncSession = Depends(get_db),
+    _user=Depends(require_permission(Permission.MASTERS_VIEW)),
 ):
     return await masters_controller.handle_product_categories(db)
 
@@ -36,6 +39,7 @@ async def list_products_route(
     skip: int = 0,
     limit: int = 500,
     db: AsyncSession = Depends(get_db),
+    _user=Depends(require_permission(Permission.MASTERS_VIEW)),
 ):
     return await masters_controller.handle_list_products(db, category=category, skip=skip, limit=limit)
 
@@ -45,6 +49,7 @@ async def list_products_route(
 @router.get("/products/categories")
 async def list_product_categories_route(
     db: AsyncSession = Depends(get_db),
+    _user=Depends(require_permission(Permission.MASTERS_VIEW)),
 ):
     return await masters_controller.handle_product_categories(db)
 
@@ -53,6 +58,7 @@ async def list_product_categories_route(
 async def list_product_subcategories_route(
     category: str = Query(...),
     db: AsyncSession = Depends(get_db),
+    _user=Depends(require_permission(Permission.MASTERS_VIEW)),
 ):
     return await masters_controller.handle_product_subcategories(db, category)
 
@@ -62,6 +68,7 @@ async def list_product_sizes_route(
     category: str = Query(...),
     subcategory: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
+    _user=Depends(require_permission(Permission.MASTERS_VIEW)),
 ):
     return await masters_controller.handle_product_sizes(db, category, subcategory)
 
@@ -70,22 +77,31 @@ async def list_product_sizes_route(
 async def list_product_materials_route(
     category: str = Query(...),
     db: AsyncSession = Depends(get_db),
+    _user=Depends(require_permission(Permission.MASTERS_VIEW)),
 ):
     return await masters_controller.handle_product_materials(db, category)
 
 
 @router.get("/products/cascade-schema")
-async def cascade_schema_route(category: str = Query(...)):
+async def cascade_schema_route(category: str = Query(...), _user=Depends(require_permission(Permission.MASTERS_VIEW))):
     return masters_controller.handle_cascade_schema(category)
 
 
 @router.post("/products/cascade-values")
-async def cascade_values_route(body: CascadeValuesBody, db: AsyncSession = Depends(get_db)):
+async def cascade_values_route(
+    body: CascadeValuesBody,
+    db: AsyncSession = Depends(get_db),
+    _user=Depends(require_permission(Permission.MASTERS_VIEW)),
+):
     return await masters_controller.handle_cascade_values(db, body.category, body.field, body.filters)
 
 
 @router.post("/products/cascade-match")
-async def cascade_match_route(body: CascadeMatchBody, db: AsyncSession = Depends(get_db)):
+async def cascade_match_route(
+    body: CascadeMatchBody,
+    db: AsyncSession = Depends(get_db),
+    _user=Depends(require_permission(Permission.MASTERS_VIEW)),
+):
     return await masters_controller.handle_cascade_match(db, body.category, body.filters)
 
 
@@ -93,12 +109,13 @@ async def cascade_match_route(body: CascadeMatchBody, db: AsyncSession = Depends
 async def get_product_route(
     product_id: str,
     db: AsyncSession = Depends(get_db),
+    _user=Depends(require_permission(Permission.MASTERS_VIEW)),
 ):
     return await masters_controller.handle_get_product(product_id, db)
 
 
 @router.get("/client-config")
-async def get_client_config_route():
+async def get_client_config_route(_user=Depends(require_permission(Permission.MASTERS_VIEW))):
     return await masters_controller.handle_get_client_config()
 
 
@@ -108,6 +125,7 @@ async def list_sheet_rows_route(
     skip: int = 0,
     limit: int = 50,
     db: AsyncSession = Depends(get_db),
+    _user=Depends(require_permission(Permission.MASTERS_VIEW)),
 ):
     return await masters_controller.handle_list_sheet_rows(db, sheet=sheet, skip=skip, limit=limit)
 
@@ -116,5 +134,6 @@ async def list_sheet_rows_route(
 async def list_clients_dropdown_route(
     search: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
+    _user=Depends(require_permission(Permission.CLIENT_VIEW)),
 ):
     return await masters_controller.handle_clients_dropdown(db, search)

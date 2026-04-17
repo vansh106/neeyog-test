@@ -28,7 +28,9 @@ def route_after_client_hitl_router(state: EnquiryState) -> str:
     flow_type = state.get("flow_type")
     if flow_type in ("complete", "ambiguous"):
         return "matcher_agent"
-    if flow_type in ("incomplete", "not_found"):
+    if flow_type in ("incomplete",):
+        return "product_hitl_node"
+    if flow_type in ("not_found",):
         return "missing_fields_handler"
     return "missing_fields_handler"
 
@@ -37,10 +39,25 @@ def route_after_matcher(state: EnquiryState) -> str:
     if state.get("error"):
         return "error_handler"
     if not state.get("matched_products"):
-        return "missing_fields_handler"
+        return "product_hitl_node" if state.get("flow_type") == "incomplete" else "missing_fields_handler"
     if state.get("flow_type") == "not_found":
         return "missing_fields_handler"
+    if state.get("flow_type") == "incomplete":
+        return "product_hitl_node"
     return "quote_agent"
+
+
+def route_after_product_hitl_router(state: EnquiryState) -> str:
+    """After product completion HITL, route based on decision."""
+    if state.get("error"):
+        return "error_handler"
+    decision = state.get("product_hitl_decision")
+    if decision == "fill_self":
+        return "quote_agent"
+    if decision == "ask_client":
+        return "human_review"
+    # If unknown/no decision, pause again.
+    return "product_hitl_node"
 
 
 def route_after_quote(state: EnquiryState) -> str:

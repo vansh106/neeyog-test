@@ -20,13 +20,16 @@ import LiveAgentTimeline from '@/components/upload/LiveAgentTimeline'
 import HITLPanel from '@/components/upload/HITLPanel'
 import ClientVerificationPanel from '@/components/upload/ClientVerificationPanel'
 import ManualEntryForm from '@/components/upload/ManualEntryForm'
+import ProductCompletionPanel from '@/components/upload/ProductCompletionPanel'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
-import { processManualDropdown, quotationsApi, uploadEmailStream } from '@/lib/api'
+import { PermissionGate } from '@/components/auth/PermissionGate'
+import { Permissions } from '@/lib/permissions'
+import { processManualDropdown, quotationsApi, submitProductCompleteStream, uploadEmailStream } from '@/lib/api'
 import { useEmailSyncStatus, useTriggerEmailSync } from '@/lib/queries'
 import { cn, formatCurrency } from '@/lib/utils'
-import type { EnquiryResponse, AgentEvent, HITLContext, HITLHistoryEntry, ClientVerificationContext, ClientVerificationResponse, ManualEnquiryForm } from '@/types'
+import type { EnquiryResponse, AgentEvent, HITLContext, HITLHistoryEntry, ClientVerificationContext, ClientVerificationResponse, ManualEnquiryForm, ProductCompletionContext } from '@/types'
 
 type InputType = 'email' | 'indiamart' | 'manual'
 
@@ -121,6 +124,7 @@ export default function UploadPage() {
   // Client verification HITL
   const [clientContext, setClientContext] = useState<ClientVerificationContext | null>(null)
   const [clientVerified, setClientVerified] = useState<ClientVerificationResponse | null>(null)
+  const [productContext, setProductContext] = useState<ProductCompletionContext | null>(null)
 
   const clearRightPanel = useCallback(() => {
     setAgentEvents([])
@@ -133,6 +137,7 @@ export default function UploadPage() {
     setEnquiryId(null)
     setClientContext(null)
     setClientVerified(null)
+    setProductContext(null)
   }, [])
 
   const handleEvent = useCallback((event: AgentEvent) => {
@@ -149,7 +154,13 @@ export default function UploadPage() {
       setIsStreaming(false)
       return
     }
+    if (event.type === 'product_hitl_required') {
+      setProductContext(event.product_context ?? null)
+      setIsStreaming(false)
+      return
+    }
     if (event.type === 'hitl_required') {
+      setProductContext(null)
       setHitlContext(event.hitl_context ?? null)
       setHitlCycle(event.cycle ?? 1)
       setIsStreaming(false)
@@ -162,6 +173,7 @@ export default function UploadPage() {
       return
     }
     if (event.type === 'result') {
+      setProductContext(null)
       setFinalResult(event.data as unknown as EnquiryResponse)
       setIsStreaming(false)
       return
@@ -257,6 +269,33 @@ export default function UploadPage() {
         {/* Live agent timeline */}
         {hasActivity && (
           <LiveAgentTimeline events={agentEvents} isStreaming={isStreaming} />
+        )}
+
+        {/* Product completion (new) */}
+        {productContext && enquiryId && !clientContext && (
+          <ProductCompletionPanel
+            enquiryId={enquiryId}
+            context={productContext}
+            isProcessing={isStreaming}
+            onFillSelf={async (items) => {
+              setIsStreaming(true)
+              try {
+                await submitProductCompleteStream(enquiryId, { decision: 'fill_self', payload: { items } }, handleEvent)
+              } catch (e) {
+                setStreamError(e instanceof Error ? e.message : 'Product completion failed')
+                setIsStreaming(false)
+              }
+            }}
+            onAskClient={async (ask) => {
+              setIsStreaming(true)
+              try {
+                await submitProductCompleteStream(enquiryId, { decision: 'ask_client', payload: { ask } }, handleEvent)
+              } catch (e) {
+                setStreamError(e instanceof Error ? e.message : 'Product completion failed')
+                setIsStreaming(false)
+              }
+            }}
+          />
         )}
 
         {/* Client verification (Step 1) */}
@@ -561,28 +600,39 @@ export default function UploadPage() {
                 ))}
               </div>
 
-              <Button
-                type="button"
-                onClick={handleSubmit}
-                disabled={!text.trim() || isStreaming}
-                className="mt-6 h-12 w-full bg-brand-green-500 text-white hover:bg-brand-green-600"
+              <PermissionGate
+                permission={Permissions.UPLOAD_EMAIL}
+                fallback={
+                  <p className="mt-6 text-[13px] text-surface-muted">You don&apos;t have permission to run AI processing.</p>
+                }
               >
-                {isStreaming ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    AI is thinking...
-                  </>
-                ) : (
-                  <>Process with AI →</>
-                )}
-              </Button>
+                <Button
+                  type="button"
+                  onClick={handleSubmit}
+                  disabled={!text.trim() || isStreaming}
+                  className="mt-6 h-12 w-full bg-brand-green-500 text-white hover:bg-brand-green-600"
+                >
+                  {isStreaming ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      AI is thinking...
+                    </>
+                  ) : (
+                    <>Process with AI →</>
+                  )}
+                </Button>
+              </PermissionGate>
             </TabsContent>
 
             <TabsContent value="manual">
-              <ManualEntryForm
-                isProcessing={isStreaming}
-                onSubmitManual={handleManualSubmit}
-              />
+              <PermissionGate
+                permission={Permissions.UPLOAD_EMAIL}
+                fallback={
+                  <p className="text-[13px] text-surface-muted">You don&apos;t have permission to create enquiries from manual entry.</p>
+                }
+              >
+                <ManualEntryForm isProcessing={isStreaming} onSubmitManual={handleManualSubmit} />
+              </PermissionGate>
             </TabsContent>
           </Tabs>
         </div>

@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useQueries } from '@tanstack/react-query'
 import { Download, Eye, FileText, Inbox } from 'lucide-react'
+import { PermissionGate } from '@/components/auth/PermissionGate'
 import PageShell from '@/components/layout/PageShell'
 import StatusBadge from '@/components/ui/StatusBadge'
 import EmptyState from '@/components/ui/EmptyState'
@@ -17,7 +18,8 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { useEnquiries, useQuotations } from '@/lib/queries'
-import { erpExportUrl, quotationsApi } from '@/lib/api'
+import { downloadErpExport, quotationsApi } from '@/lib/api'
+import { Permissions } from '@/lib/permissions'
 import { formatRelativeTime, cn } from '@/lib/utils'
 import type { EnquiryListItem, Quotation } from '@/types'
 
@@ -298,16 +300,19 @@ export default function EnquiriesPage() {
                               <Eye className="size-4" />
                             </Link>
                             {e.erp_export_available ? (
-                              <a
-                                href={erpExportUrl(e.enquiry_id)}
-                                aria-label="Download ERP Enquiry List"
-                                className={cn(
-                                  buttonVariants({ variant: 'ghost', size: 'icon' }),
-                                  'text-surface-muted',
-                                )}
-                              >
-                                <Download className="size-4" />
-                              </a>
+                              <PermissionGate permission={Permissions.ERP_DOWNLOAD}>
+                                <button
+                                  type="button"
+                                  aria-label="Download ERP Enquiry List"
+                                  className={cn(
+                                    buttonVariants({ variant: 'ghost', size: 'icon' }),
+                                    'text-surface-muted',
+                                  )}
+                                  onClick={() => void downloadErpExport(e.enquiry_id)}
+                                >
+                                  <Download className="size-4" />
+                                </button>
+                              </PermissionGate>
                             ) : (
                               <span
                                 className={cn(

@@ -205,6 +205,7 @@ export interface AgentEvent {
     | 'hitl_resumed'
     | 'client_hitl_required'
     | 'client_hitl_resumed'
+    | 'product_hitl_required'
     | 'client_verification_result'
     | 'approved_and_sent'
   agent?: string
@@ -217,6 +218,24 @@ export interface AgentEvent {
   hitl_context?: HITLContext
   cycle?: number
   client_context?: ClientVerificationContext
+  product_context?: ProductCompletionContext
+}
+
+export interface ProductCompletionItem {
+  index: number
+  category: string
+  schema: CascadeStepMeta[]
+  selections: Record<string, string>
+  missing_keys: string[]
+  product_description: string
+  quantity: number
+}
+
+export interface ProductCompletionContext {
+  type: 'product_completion'
+  summary: string
+  items: ProductCompletionItem[]
+  options_available: Array<'fill_self' | 'ask_client'>
 }
 
 export interface HITLContext {
@@ -271,6 +290,7 @@ export interface HITLStateResponse {
   flow_type: string | null
   current_step: string | null
   hitl_context: HITLContext | null
+  product_hitl_context?: ProductCompletionContext | null
   hitl_history: HITLHistoryEntry[]
   next_nodes: string[]
 }

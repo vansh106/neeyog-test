@@ -10,6 +10,8 @@ import {
   Loader2,
   Wand2,
 } from 'lucide-react'
+import { PermissionGate } from '@/components/auth/PermissionGate'
+import { Permissions } from '@/lib/permissions'
 import { submitReviewStream } from '@/lib/api'
 import { cn, formatCurrency } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -142,6 +144,10 @@ export default function HITLPanel({
         <div className="px-5 pb-5 space-y-3">
           {/* Approve */}
           {showApprove && (
+            <PermissionGate
+              permission={Permissions.HITL_APPROVE}
+              fallback={<p className="text-[13px] text-surface-muted">You don&apos;t have permission to approve.</p>}
+            >
             <div className="rounded-xl border border-brand-green-200 bg-brand-green-50/30 p-4">
               <div className="flex items-start gap-3">
                 <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand-green-100">
@@ -172,10 +178,15 @@ export default function HITLPanel({
                 </div>
               </div>
             </div>
+            </PermissionGate>
           )}
 
           {/* Edit Email */}
           {showEdit && (
+            <PermissionGate
+              permission={Permissions.HITL_EDIT_EMAIL}
+              fallback={<p className="text-[13px] text-surface-muted">You don&apos;t have permission to edit the draft email.</p>}
+            >
             <div className="rounded-xl border border-surface-border bg-white">
               <button
                 type="button"
@@ -212,10 +223,15 @@ export default function HITLPanel({
                 </div>
               )}
             </div>
+            </PermissionGate>
           )}
 
           {/* Custom Prompt */}
           {showPrompt && (
+            <PermissionGate
+              permission={Permissions.HITL_CUSTOM_PROMPT}
+              fallback={<p className="text-[13px] text-surface-muted">You don&apos;t have permission to use custom AI instructions.</p>}
+            >
             <div className="rounded-xl border border-surface-border bg-white">
               <button
                 type="button"
@@ -264,6 +280,7 @@ export default function HITLPanel({
                 </div>
               )}
             </div>
+            </PermissionGate>
           )}
         </div>
       </div>

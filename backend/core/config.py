@@ -4,6 +4,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings
 
 
@@ -22,6 +23,27 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
 
     PDF_OUTPUT_DIR: str = "./output/pdfs"
+
+    # ── Auth / JWT ─────────────────────────
+    JWT_SECRET_KEY: str = "CHANGE_ME"
+    JWT_ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 30
+    SUPERADMIN_EMAIL: str = "admin@parthvalve.com"
+    SUPERADMIN_PASSWORD: str = "ChangeMe@123"
+    SUPERADMIN_NAME: str = "Super Admin"
+    #: If true, on every API startup the superadmin row's password is re-hashed from SUPERADMIN_PASSWORD
+    #: (fixes bad hashes after migrations). Set false in production once accounts are managed only via UI.
+    SUPERADMIN_SYNC_PASSWORD_ON_STARTUP: bool = True
+
+    @model_validator(mode="after")
+    def strip_auth_secrets(self):
+        """Env files often pick up trailing newlines — strip critical auth strings."""
+        self.SUPERADMIN_EMAIL = self.SUPERADMIN_EMAIL.strip()
+        self.SUPERADMIN_PASSWORD = self.SUPERADMIN_PASSWORD.strip()
+        self.SUPERADMIN_NAME = self.SUPERADMIN_NAME.strip()
+        self.JWT_SECRET_KEY = self.JWT_SECRET_KEY.strip()
+        return self
 
     #: Per LLM HTTP call (parser / matcher / quote / missing-fields)
     LLM_REQUEST_TIMEOUT_SECONDS: float = 180.0

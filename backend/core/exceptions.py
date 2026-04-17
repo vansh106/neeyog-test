@@ -24,3 +24,15 @@ class EnquiryParseError(Exception):
 
 class LLMCallError(Exception):
     pass
+
+
+class AuthenticationError(Exception):
+    pass
+
+
+class AuthorizationError(Exception):
+    pass
+
+
+class UserNotFoundError(Exception):
+    pass

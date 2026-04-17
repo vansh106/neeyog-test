@@ -7,6 +7,9 @@ import { cn } from '@/lib/utils'
 import { useUIStore } from '@/lib/store'
 import { useHealth } from '@/lib/queries'
 import { useEmailStore } from '@/stores/emailStore'
+import { PermissionGate } from '@/components/auth/PermissionGate'
+import { Permissions } from '@/lib/permissions'
+import { useAuthStore } from '@/stores/authStore'
 import {
   LayoutDashboard, Upload, Inbox, FileText,
   BarChart2, Database, Shield, PanelLeftClose, PanelLeft, ChevronDown, ChevronRight,
@@ -26,7 +29,7 @@ const MASTER_CATEGORIES = [
 
 const NAV_ITEMS = [
   { href: '/dashboard', label: 'Home', icon: LayoutDashboard },
-  { href: '/upload', label: 'AI Upload', icon: Upload },
+  { href: '/upload', label: 'Upload', icon: Upload },
   { href: '/emails', label: 'Emails', icon: Mail },
   { href: '/enquiries', label: 'Enquiries', icon: Inbox },
   { href: '/quotations', label: 'Quotations', icon: FileText },
@@ -43,6 +46,7 @@ export default function Sidebar() {
   const isConnected = useEmailStore((s) => s.isConnected)
   const mastersActive = pathname === '/masters' || pathname.startsWith('/masters/')
   const [mastersOpen, setMastersOpen] = React.useState<boolean>(mastersActive)
+  const isAdminOrAbove = useAuthStore((s) => s.isAdminOrAbove)
 
   return (
     <aside className={cn(
@@ -63,9 +67,26 @@ export default function Sidebar() {
 
       <nav className="flex-1 px-2 space-y-0.5">
         {NAV_ITEMS.map((item) => {
+          // Permission-based nav visibility
+          const gate =
+            item.href === '/upload'
+              ? Permissions.UPLOAD_EMAIL
+              : item.href === '/emails' || item.href === '/enquiries'
+                ? Permissions.VIEW_ENQUIRIES
+                : item.href === '/quotations'
+                  ? Permissions.VIEW_QUOTATIONS
+                  : item.href === '/reports'
+                    ? Permissions.REPORTS_VIEW
+                    : item.href === '/masters'
+                      ? Permissions.MASTERS_VIEW
+                      : null
+
+          if (item.href === '/admin' && !isAdminOrAbove()) return null
+
           if (item.href === '/masters') {
             return (
-              <div key={item.href}>
+              <PermissionGate key={item.href} permission={Permissions.MASTERS_VIEW}>
+              <div>
                 <button
                   type="button"
                   onClick={() => setMastersOpen((v) => !v)}
@@ -109,11 +130,12 @@ export default function Sidebar() {
                   </div>
                 )}
               </div>
+              </PermissionGate>
             )
           }
 
           const active = pathname === item.href || pathname.startsWith(item.href + '/')
-          return (
+          const link = (
             <Link
               key={item.href}
               href={item.href}
@@ -137,6 +159,13 @@ export default function Sidebar() {
                 </span>
               )}
             </Link>
+          )
+          return gate ? (
+            <PermissionGate key={item.href} permission={gate}>
+              {link}
+            </PermissionGate>
+          ) : (
+            link
           )
         })}
       </nav>

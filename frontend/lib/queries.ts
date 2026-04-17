@@ -3,7 +3,7 @@ import { enquiriesApi, quotationsApi, mastersApi, systemApi, syncApi } from './a
 import type {
   EnquiryListItem, EnquiryDetail, EnquiryResponse,
   QuotationListItem, Quotation, Product,
-  HealthResponse, ClientConfig, EmailSyncStatus,
+  HealthResponse, ClientConfig, EmailSyncStatus, HITLStateResponse,
 } from '@/types'
 
 export function useHealth() {
@@ -50,6 +50,16 @@ export function useEnquiry(id: string) {
     queryKey: ['enquiry', id],
     queryFn: () => enquiriesApi.getEnquiry<EnquiryDetail>(id),
     enabled: !!id,
+  })
+}
+
+export function useEnquiryHITLState(id: string) {
+  return useQuery<HITLStateResponse>({
+    queryKey: ['enquiry_hitl_state', id],
+    queryFn: () => enquiriesApi.getHITLState<HITLStateResponse>(id),
+    enabled: !!id,
+    refetchInterval: 5000,
+    staleTime: 2000,
   })
 }
 

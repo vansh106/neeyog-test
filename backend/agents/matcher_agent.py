@@ -11,6 +11,7 @@ from core.config import get_settings
 from core.database import async_session_factory
 from core.litellm_client import llm_client, strip_llm_json_payload
 from db.models import Enquiry
+from services import masters_service
 from masters.product_master import (
     format_products_for_agent,
     get_all_products,
@@ -26,7 +27,7 @@ async def matcher_agent(state: EnquiryState) -> EnquiryState:
     logger.info("Matcher agent starting for enquiry %s", enquiry_id)
 
     flow_type = state.get("flow_type")
-    if flow_type not in ("complete", "ambiguous"):
+    if flow_type not in ("complete", "ambiguous", "incomplete"):
         logger.info("Matcher skipped — flow_type=%s", flow_type)
         return state
 
@@ -44,6 +45,108 @@ async def matcher_agent(state: EnquiryState) -> EnquiryState:
             message="Searching product catalog",
             detail=f"Looking up {len(products_requested)} requested item(s)",
         ))
+
+        # ── Prefer DB cascade matching when parser provides category/filters ──
+        has_cascade_hints = any(
+            isinstance(req, dict) and ((req.get("category") or req.get("category_key")) is not None)
+            for req in (products_requested if isinstance(products_requested, list) else [])
+        )
+
+        if has_cascade_hints:
+            cascade_matches: list[dict] = []
+            missing_fields: list[str] = []
+            not_found_names: list[str] = []
+
+            async with async_session_factory() as session:
+                for req in (products_requested if isinstance(products_requested, list) else []):
+                    if not isinstance(req, dict):
+                        continue
+                    category = (req.get("category") or req.get("category_key") or "").strip()
+                    if not category:
+                        continue
+                    schema = masters_service.get_cascade_schema(category)
+                    schema_keys = [s["key"] for s in schema]
+                    selections = (
+                        req.get("cascade_filters") if isinstance(req.get("cascade_filters"), dict) else {}
+                    )
+                    if not selections:
+                        selections = {
+                            k: str(req.get(k)).strip()
+                            for k in schema_keys
+                            if req.get(k) is not None and str(req.get(k)).strip()
+                        }
+
+                    if not selections:
+                        missing_fields.extend(schema_keys[:2] if schema_keys else [])
+                        continue
+
+                    prods = await masters_service.get_cascade_matching_products(category, selections, session)
+                    if len(prods) == 1 and prods[0]:
+                        p = prods[0]
+                        cascade_matches.append(
+                            {
+                                "matched": True,
+                                "product_id": p.get("id"),
+                                "product_name": p.get("name"),
+                                "material": p.get("material"),
+                                "size_inch": p.get("size_inch"),
+                                "size_mm": p.get("size_mm"),
+                                "base_price": p.get("base_price"),
+                                "unit": p.get("unit"),
+                                "match_confidence": 1.0,
+                                "match_source": "cascade",
+                                "category": category,
+                                "cascade_filters": selections,
+                            }
+                        )
+                    elif len(prods) == 0:
+                        not_found_names.append(req.get("product_description") or "unknown")
+                    else:
+                        # ambiguous: ask for remaining cascade fields
+                        for k in schema_keys:
+                            if not selections.get(k):
+                                missing_fields.append(k)
+                                break
+
+            updated_flow_type = "complete" if cascade_matches and not missing_fields and not not_found_names else "incomplete"
+            if not_found_names and not cascade_matches:
+                updated_flow_type = "not_found"
+
+            await emit(
+                state,
+                evt_agent_complete(
+                    agent="matcher",
+                    message="Catalog match via DB cascade complete",
+                    data={
+                        "matched": len(cascade_matches),
+                        "missing_fields": list(dict.fromkeys(missing_fields)),
+                        "not_found": len(not_found_names),
+                    },
+                ),
+            )
+
+            async with async_session_factory() as session:
+                result = await session.execute(select(Enquiry).where(Enquiry.id == enquiry_id))
+                enquiry = result.scalar_one_or_none()
+                if enquiry:
+                    enquiry.matched_products = cascade_matches
+                    enquiry.status = "matching" if updated_flow_type == "incomplete" else "quoting"
+                    enquiry.flow_type = updated_flow_type
+                    enquiry.missing_fields = list(dict.fromkeys(missing_fields))
+                    await session.commit()
+
+            return {
+                **state,
+                "matched_products": cascade_matches,
+                "products_not_found": not_found_names,
+                "flow_type": updated_flow_type,
+                "missing_fields": list(dict.fromkeys(missing_fields)),
+                "requires_human_review": state.get("requires_human_review", False),
+                "current_step": "matched",
+                "ai_reasoning": list(state.get("ai_reasoning", [])) + ["Matcher: used DB cascade"],
+            }
+
+        # NOTE: fallback to existing LLM matcher when cascade data isn't available.
 
         all_candidate_products = []
         for req in products_requested:

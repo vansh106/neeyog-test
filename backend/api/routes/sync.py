@@ -4,6 +4,8 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from config.permissions import Permission
+from core.auth_middleware import require_permission
 from core.database import async_session_factory, get_db
 from db.models import EmailSyncState, ProcessedEmail
 
@@ -11,7 +13,7 @@ router = APIRouter(prefix="/api/sync", tags=["email-sync"])
 
 
 @router.get("/status")
-async def get_sync_status() -> dict:
+async def get_sync_status(_user=Depends(require_permission(Permission.EMAIL_SYNC_VIEW))) -> dict:
     from core.config import get_settings
     from services.scheduler_service import scheduler
 
@@ -37,7 +39,7 @@ async def get_sync_status() -> dict:
 
 
 @router.post("/trigger")
-async def trigger_sync_now() -> dict:
+async def trigger_sync_now(_user=Depends(require_permission(Permission.EMAIL_SYNC_TRIGGER))) -> dict:
     from services.email_sync_service import email_sync_service
 
     summary = await email_sync_service.sync_once()
@@ -45,7 +47,11 @@ async def trigger_sync_now() -> dict:
 
 
 @router.get("/history")
-async def get_sync_history(limit: int = 50, db: AsyncSession = Depends(get_db)) -> list[dict]:
+async def get_sync_history(
+    limit: int = 50,
+    db: AsyncSession = Depends(get_db),
+    _user=Depends(require_permission(Permission.EMAIL_SYNC_VIEW)),
+) -> list[dict]:
     result = await db.execute(
         select(ProcessedEmail).order_by(desc(ProcessedEmail.created_at)).limit(limit)
     )

@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, Query
 from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from config.permissions import Permission
 from controllers import enquiry_controller
 from controllers.enquiry_controller import (
     ClientHITLDecisionRequest,
@@ -13,9 +14,11 @@ from controllers.enquiry_controller import (
     EnquiryResponse,
     HITLDecisionRequest,
     HITLStateResponse,
+    ProductHITLDecisionRequest,
     ManualDropdownProcessRequest,
     UploadEmailRequest,
 )
+from core.auth_middleware import require_permission
 from core.database import get_db
 from pathlib import Path
 
@@ -26,6 +29,7 @@ router = APIRouter(prefix="/api/enquiries", tags=["enquiries"])
 async def upload_email_route(
     body: UploadEmailRequest,
     db: AsyncSession = Depends(get_db),
+    _user=Depends(require_permission(Permission.UPLOAD_EMAIL)),
 ):
     return await enquiry_controller.handle_upload_email(body, db)
 
@@ -34,6 +38,7 @@ async def upload_email_route(
 async def upload_email_stream_route(
     body: UploadEmailRequest,
     db: AsyncSession = Depends(get_db),
+    _user=Depends(require_permission(Permission.UPLOAD_EMAIL)),
 ):
     stream = await enquiry_controller.handle_upload_email_stream(body, db)
     return StreamingResponse(
@@ -51,6 +56,7 @@ async def upload_email_stream_route(
 async def manual_dropdown_process_route(
     body: ManualDropdownProcessRequest,
     db: AsyncSession = Depends(get_db),
+    _user=Depends(require_permission(Permission.UPLOAD_EMAIL)),
 ):
     return await enquiry_controller.handle_process_manual_dropdown(body, db)
 
@@ -62,6 +68,7 @@ async def list_enquiries_route(
     limit: int = Query(50, le=500),
     offset: int = Query(0),
     db: AsyncSession = Depends(get_db),
+    _user=Depends(require_permission(Permission.VIEW_ENQUIRIES)),
 ):
     return await enquiry_controller.handle_list_enquiries(db, status, flow_type, limit, offset)
 
@@ -72,12 +79,13 @@ async def list_email_inbox_route(
     limit: int = Query(50, le=100),
     offset: int = Query(0),
     db: AsyncSession = Depends(get_db),
+    _user=Depends(require_permission(Permission.VIEW_ENQUIRIES)),
 ):
     return await enquiry_controller.handle_list_email_enquiries(db, status, limit, offset)
 
 
 @router.get("/{enquiry_id}/hitl-state", response_model=HITLStateResponse)
-async def get_hitl_state_route(enquiry_id: str):
+async def get_hitl_state_route(enquiry_id: str, _user=Depends(require_permission(Permission.VIEW_ENQUIRIES))):
     return await enquiry_controller.handle_get_hitl_state(enquiry_id)
 
 
@@ -86,6 +94,7 @@ async def submit_review_route(
     enquiry_id: str,
     body: HITLDecisionRequest,
     db: AsyncSession = Depends(get_db),
+    _user=Depends(require_permission(Permission.HITL_APPROVE)),
 ):
     return await enquiry_controller.handle_submit_review(enquiry_id, body, db)
 
@@ -95,6 +104,7 @@ async def submit_review_stream_route(
     enquiry_id: str,
     body: HITLDecisionRequest,
     db: AsyncSession = Depends(get_db),
+    _user=Depends(require_permission(Permission.HITL_APPROVE)),
 ):
     stream = await enquiry_controller.handle_submit_review_stream(enquiry_id, body, db)
     return StreamingResponse(
@@ -111,6 +121,7 @@ async def submit_review_stream_route(
 @router.get("/clients/search")
 async def search_clients_route(
     q: str | None = Query(None),
+    _user=Depends(require_permission(Permission.CLIENT_VIEW)),
 ):
     return await enquiry_controller.handle_get_clients(q)
 
@@ -120,6 +131,7 @@ async def client_verify_route(
     enquiry_id: str,
     body: ClientHITLDecisionRequest,
     db: AsyncSession = Depends(get_db),
+    _user=Depends(require_permission(Permission.CLIENT_VERIFY)),
 ):
     return await enquiry_controller.handle_client_verification(enquiry_id, body, db)
 
@@ -129,8 +141,38 @@ async def client_verify_stream_route(
     enquiry_id: str,
     body: ClientHITLDecisionRequest,
     db: AsyncSession = Depends(get_db),
+    _user=Depends(require_permission(Permission.CLIENT_VERIFY)),
 ):
     stream = await enquiry_controller.handle_client_verification_stream(enquiry_id, body, db)
+    return StreamingResponse(
+        stream,
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Access-Control-Allow-Origin": "*",
+        },
+    )
+
+
+@router.post("/{enquiry_id}/product-complete")
+async def product_complete_route(
+    enquiry_id: str,
+    body: ProductHITLDecisionRequest,
+    db: AsyncSession = Depends(get_db),
+    _user=Depends(require_permission(Permission.HITL_APPROVE)),
+):
+    return await enquiry_controller.handle_product_completion(enquiry_id, body, db)
+
+
+@router.post("/{enquiry_id}/product-complete-stream")
+async def product_complete_stream_route(
+    enquiry_id: str,
+    body: ProductHITLDecisionRequest,
+    db: AsyncSession = Depends(get_db),
+    _user=Depends(require_permission(Permission.HITL_APPROVE)),
+):
+    stream = await enquiry_controller.handle_product_completion_stream(enquiry_id, body, db)
     return StreamingResponse(
         stream,
         media_type="text/event-stream",
@@ -146,6 +188,7 @@ async def client_verify_stream_route(
 async def get_erp_export_route(
     enquiry_id: str,
     db: AsyncSession = Depends(get_db),
+    _user=Depends(require_permission(Permission.ERP_DOWNLOAD)),
 ):
     path = await enquiry_controller.handle_get_erp_export_path(enquiry_id, db)
     return FileResponse(
@@ -159,5 +202,6 @@ async def get_erp_export_route(
 async def get_enquiry_route(
     enquiry_id: str,
     db: AsyncSession = Depends(get_db),
+    _user=Depends(require_permission(Permission.VIEW_ENQUIRIES)),
 ):
     return await enquiry_controller.handle_get_enquiry(enquiry_id, db)

@@ -12,11 +12,14 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Progress } from '@/components/ui/progress'
 import { buttonVariants } from '@/components/ui/button'
 import ClientVerificationPanel from '@/components/upload/ClientVerificationPanel'
-import { useEnquiry } from '@/lib/queries'
+import HITLPanel from '@/components/upload/HITLPanel'
+import ProductCompletionPanel from '@/components/upload/ProductCompletionPanel'
+import { submitProductCompleteStream } from '@/lib/api'
+import { useEnquiry, useEnquiryHITLState } from '@/lib/queries'
 import { enquiriesApi, quotationsApi } from '@/lib/api'
 import { useQueryClient } from '@tanstack/react-query'
 import { formatRelativeTime } from '@/lib/utils'
-import type { AgentEvent, ClientSummary, ClientVerificationContext, ClientVerificationResponse, EnquiryDetail } from '@/types'
+import type { AgentEvent, ClientVerificationContext, ClientVerificationResponse, EnquiryDetail, HITLContext, HITLHistoryEntry, EnquiryResponse, ProductCompletionContext } from '@/types'
 
 type EnquiryDetailExt = EnquiryDetail & {
   raw_input?: string | null
@@ -86,6 +89,7 @@ export default function EnquiryDetailPage() {
         : ''
 
   const { data: enquiry, isPending, isError } = useEnquiry(id)
+  const { data: hitlState } = useEnquiryHITLState(id)
   const qc = useQueryClient()
 
   const ext = enquiry as EnquiryDetailExt | undefined
@@ -108,43 +112,43 @@ export default function EnquiryDetailPage() {
 
   const [clientContext, setClientContext] = useState<ClientVerificationContext | null>(null)
   const [clientEvents, setClientEvents] = useState<AgentEvent[]>([])
+  const [productContext, setProductContext] = useState<ProductCompletionContext | null>(null)
+  const [hitlContext, setHitlContext] = useState<HITLContext | null>(null)
+  const [hitlCycle, setHitlCycle] = useState(0)
+  const [hitlHistory, setHitlHistory] = useState<HITLHistoryEntry[]>([])
+  const [approved, setApproved] = useState(false)
+  const [hitlEvents, setHitlEvents] = useState<AgentEvent[]>([])
 
   useEffect(() => {
-    async function loadClientContext() {
-      if (!ext) return
-      if (ext.status !== 'pending_client_verification') {
-        setClientContext(null)
-        return
-      }
-
-      const p = (ext.parsed_data && typeof ext.parsed_data === 'object')
-        ? (ext.parsed_data as Record<string, unknown>)
-        : null
-
-      const extracted = {
-        company_name: typeof p?.client_company === 'string' ? p.client_company : null,
-        contact_name: typeof p?.client_name === 'string' ? p.client_name : null,
-        email: typeof p?.client_email === 'string' ? p.client_email : null,
-        phone: typeof p?.client_phone === 'string' ? p.client_phone : null,
-        city: typeof p?.city === 'string' ? p.city : (typeof p?.location === 'string' ? p.location : null),
-        country: null,
-      }
-
-      const clients = await enquiriesApi.searchClients<ClientSummary[]>()
-      const ctx: ClientVerificationContext = {
-        type: 'client_verification',
-        summary: 'Client verification needed before quoting.',
-        recommended_action: 'confirm_new',
-        extracted_client: extracted,
-        matched_client: null,
-        client_is_new: true,
-        available_clients: clients ?? [],
-      }
-      setClientContext(ctx)
+    // Decide which HITL to show, based on hitl-state next_nodes.
+    if (!hitlState?.awaiting_human) {
+      setClientContext(null)
+      setProductContext(null)
+      setHitlContext(null)
+      return
     }
-
-    loadClientContext().catch(() => setClientContext(null))
-  }, [ext])
+    const next = hitlState.next_nodes ?? []
+    if (next.includes('client_hitl_router') && hitlState.hitl_context) {
+      setClientContext(hitlState.hitl_context as unknown as ClientVerificationContext)
+      setProductContext(null)
+      setHitlContext(null)
+      return
+    }
+    if (next.includes('product_hitl_router') && hitlState.product_hitl_context) {
+      setProductContext(hitlState.product_hitl_context as ProductCompletionContext)
+      setClientContext(null)
+      setHitlContext(null)
+      return
+    }
+    if (next.includes('hitl_router_agent') && hitlState.hitl_context) {
+      setHitlContext(hitlState.hitl_context as HITLContext)
+      setHitlCycle(hitlState.hitl_cycle ?? 0)
+      setHitlHistory(hitlState.hitl_history ?? [])
+      setClientContext(null)
+      setProductContext(null)
+      return
+    }
+  }, [hitlState])
 
   const gridEntries = useMemo(() => {
     if (!parsed) return []
@@ -157,23 +161,7 @@ export default function EnquiryDetailPage() {
     return pr.filter(isProductRow)
   }, [parsed])
 
-  const missingList = useMemo(() => {
-    const fromParsed = parsed?.missing_fields
-    if (Array.isArray(fromParsed)) {
-      return fromParsed.map((x) => (typeof x === 'string' ? x : stringifyValue(x)))
-    }
-    const fromRow = ext?.missing_fields
-    if (Array.isArray(fromRow)) {
-      return fromRow.map((x) => (typeof x === 'string' ? x : stringifyValue(x)))
-    }
-    if (fromParsed && typeof fromParsed === 'string') return [fromParsed]
-    return []
-  }, [parsed, ext?.missing_fields])
-
-  const showMissingCard =
-    ext?.flow_type === 'incomplete' ||
-    clarificationHint(ext?.error_message ?? null) ||
-    missingList.length > 0
+  // Missing fields UI removed — product completion HITL replaces it.
 
   const rawBlock = useMemo(() => {
     const raw = ext?.raw_input
@@ -248,6 +236,28 @@ export default function EnquiryDetailPage() {
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
         <div className="space-y-6 lg:col-span-3">
+          {productContext && hitlState?.awaiting_human && (
+            <ProductCompletionPanel
+              enquiryId={id}
+              context={productContext}
+              isProcessing={false}
+              onFillSelf={async (items) => {
+                setHitlEvents([])
+                await submitProductCompleteStream(id, { decision: 'fill_self', payload: { items } }, (evt) => setHitlEvents((p) => [...p, evt]))
+                await qc.invalidateQueries({ queryKey: ['enquiry', id] })
+                await qc.invalidateQueries({ queryKey: ['enquiry_hitl_state', id] })
+                await qc.invalidateQueries({ queryKey: ['enquiries'] })
+              }}
+              onAskClient={async (ask) => {
+                setHitlEvents([])
+                await submitProductCompleteStream(id, { decision: 'ask_client', payload: { ask } }, (evt) => setHitlEvents((p) => [...p, evt]))
+                await qc.invalidateQueries({ queryKey: ['enquiry', id] })
+                await qc.invalidateQueries({ queryKey: ['enquiry_hitl_state', id] })
+                await qc.invalidateQueries({ queryKey: ['enquiries'] })
+              }}
+            />
+          )}
+
           {clientContext && (
             <ClientVerificationPanel
               enquiryId={id}
@@ -256,8 +266,31 @@ export default function EnquiryDetailPage() {
               onVerified={async (_res: ClientVerificationResponse) => {
                 setClientContext(null)
                 await qc.invalidateQueries({ queryKey: ['enquiry', id] })
+                await qc.invalidateQueries({ queryKey: ['enquiry_hitl_state', id] })
                 await qc.invalidateQueries({ queryKey: ['enquiries'] })
               }}
+            />
+          )}
+
+          {hitlContext && hitlState?.awaiting_human && (
+            <HITLPanel
+              enquiryId={id}
+              hitlContext={hitlContext}
+              flowType={String(hitlState.flow_type ?? '')}
+              cycle={hitlCycle}
+              hitlHistory={hitlHistory}
+              onDecisionSubmitted={(res: EnquiryResponse | null) => {
+                void res
+              }}
+              onHITLRequired={(ctx, cyc) => {
+                setHitlContext(ctx)
+                setHitlCycle(cyc)
+              }}
+              onApproved={() => {
+                setApproved(true)
+                setHitlContext(null)
+              }}
+              onNewEvents={(newEvents) => setHitlEvents((prev) => [...prev, ...newEvents])}
             />
           )}
 
@@ -398,23 +431,7 @@ export default function EnquiryDetailPage() {
             </section>
           )}
 
-          {showMissingCard && (
-            <section className="rounded-xl border border-amber-200 bg-amber-50/80 p-5 shadow-sm">
-              <h2 className="text-[14px] font-semibold text-amber-950">Missing Information</h2>
-              {missingList.length > 0 ? (
-                <ul className="mt-3 list-disc space-y-1 pl-5 text-[13px] text-amber-950/90">
-                  {missingList.map((item, i) => (
-                    <li key={i}>{item}</li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="mt-3 text-[13px] text-amber-950/90">
-                  Additional details may be required before this enquiry can be quoted. Check the
-                  original input and error message above.
-                </p>
-              )}
-            </section>
-          )}
+          {/* Missing Information card removed */}
         </div>
       </div>
     </PageShell>

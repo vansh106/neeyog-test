@@ -2,27 +2,38 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { Input } from '@/components/ui/input'
+import { authApi } from '@/lib/api'
+import { useAuthStore } from '@/stores/authStore'
 
 export default function LoginPage() {
   const router = useRouter()
-  const [department, setDepartment] = useState<string | null>(null)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
+  const setAuth = useAuthStore((s) => s.setAuth)
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    // TODO: Replace with JWT auth when backend auth endpoints are built
-    if (!department) return
-    localStorage.setItem('cpq_role', department)
-    router.push('/dashboard')
+    setError('')
+    if (!email.trim() || !password) return
+    setLoading(true)
+    try {
+      const res = await authApi.login<{
+        access_token: string
+        refresh_token: string
+        is_first_login: boolean
+        user: any
+      }>(email, password)
+      authApi.setRefreshToken(res.refresh_token)
+      setAuth({ ...res.user, is_first_login: res.is_first_login }, res.access_token)
+      router.push(res.is_first_login ? '/change-password' : '/dashboard')
+    } catch (e2) {
+      setError(e2 instanceof Error ? e2.message : 'Login failed')
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
@@ -53,22 +64,15 @@ export default function LoginPage() {
         <div className="w-full max-w-sm mx-auto">
           <h2 className="text-[24px] font-semibold text-gray-900 tracking-[-0.3px]">Sign in</h2>
           <p className="text-[14px] text-surface-muted mt-1 mb-8">
-            Select your department to continue
+            Use your admin-provided account
           </p>
 
           <form onSubmit={handleSubmit} className="space-y-5">
-            <div className="space-y-2">
-              <label className="text-[12px] font-medium text-gray-700">Department</label>
-              <Select value={department} onValueChange={setDepartment}>
-                <SelectTrigger className="w-full h-10 rounded-lg border border-[#E2E6DC] bg-white">
-                  <SelectValue placeholder="Choose department" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="marketing">Marketing</SelectItem>
-                  <SelectItem value="admin">Admin</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+            {error && (
+              <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-[13px] text-red-700">
+                {error}
+              </div>
+            )}
 
             <div className="space-y-2">
               <label className="text-[12px] font-medium text-gray-700">Email</label>
@@ -96,9 +100,10 @@ export default function LoginPage() {
 
             <button
               type="submit"
-              className="w-full h-10 rounded-lg bg-brand-green-500 hover:bg-brand-green-600 text-white text-sm font-medium transition-colors"
+              disabled={loading}
+              className="w-full h-10 rounded-lg bg-brand-green-500 hover:bg-brand-green-600 disabled:opacity-60 text-white text-sm font-medium transition-colors"
             >
-              Continue →
+              {loading ? 'Signing in…' : 'Continue →'}
             </button>
           </form>
         </div>

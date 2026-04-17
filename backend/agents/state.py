@@ -56,6 +56,11 @@ class EnquiryState(TypedDict, total=False):
     resolved_client_id: str | None
     erp_export_path: str | None
 
+    # ── Product completion HITL (DB cascade) ───────
+    product_hitl_context: dict | None
+    product_hitl_decision: str | None  # "fill_self" | "ask_client"
+    product_hitl_payload: dict | None  # selections/questions chosen by human
+
 
 async def emit(state: EnquiryState, event: dict) -> None:
     """
