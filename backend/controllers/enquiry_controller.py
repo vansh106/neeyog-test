@@ -118,54 +118,6 @@ class EmailInboxItem(BaseModel):
     awaiting_human: bool = False
     hitl_cycle: int = 0
 
-
-class HITLDecisionRequest(BaseModel):
-    decision: str
-    edited_email: str | None = None
-    human_prompt: str | None = None
-
-    @model_validator(mode="after")
-    def validate_fields(self):
-        if self.decision == "edit_email" and not self.edited_email:
-            raise ValueError("edited_email required for edit_email decision")
-        if self.decision == "custom_prompt" and not self.human_prompt:
-            raise ValueError("human_prompt required for custom_prompt decision")
-        return self
-
-
-class HITLStateResponse(BaseModel):
-    awaiting_human: bool = False
-    hitl_cycle: int = 0
-    flow_type: str | None = None
-    current_step: str | None = None
-    hitl_context: dict | None = None
-    hitl_history: list[dict] = []
-    next_nodes: list[str] = []
-
-
-class ClientHITLDecisionRequest(BaseModel):
-    decision: str
-    # "confirmed_new" | "matched_existing" | "skip"
-
-    selected_client_id: str | None = None
-
-    @model_validator(mode="after")
-    def validate_fields(self):
-        if self.decision == "matched_existing" and not self.selected_client_id:
-            raise ValueError("selected_client_id required for matched_existing decision")
-        return self
-
-
-class ClientVerificationResponse(BaseModel):
-    enquiry_id: str
-    decision: str
-    client_id: str | None = None
-    company_name: str | None = None
-    erp_export_available: bool = False
-    erp_export_path: str | None = None
-    message: str
-
-
 # ── Controller functions ────────────────────────────────────
 
 
@@ -204,6 +156,7 @@ async def handle_upload_email(
             raw_input=body.email_text,
             input_type=body.input_type,
             db=db,
+            emitter=None,
         )
         return EnquiryResponse(**result)
     except EnquiryParseError as e:
@@ -319,127 +272,16 @@ async def handle_upload_email_stream(
     })
 
     asyncio.create_task(
-        enquiry_service.process_enquiry_streaming(
+        enquiry_service.process_enquiry(
             enquiry_id=str(enquiry.id),
             raw_input=body.email_text,
             input_type=body.input_type,
+            db=db,
             emitter=emitter,
         )
     )
 
     return emitter.stream()
-
-
-async def handle_get_hitl_state(enquiry_id: str) -> HITLStateResponse:
-    state = await enquiry_service.get_enquiry_hitl_state(enquiry_id)
-    return HITLStateResponse(**state)
-
-
-async def handle_submit_review(
-    enquiry_id: str,
-    body: HITLDecisionRequest,
-    db: AsyncSession,
-) -> EnquiryResponse:
-    try:
-        result = await enquiry_service.submit_human_review(
-            enquiry_id=enquiry_id,
-            decision=body.decision,
-            edited_email=body.edited_email,
-            human_prompt=body.human_prompt,
-        )
-        return EnquiryResponse(**result)
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        logger.exception("HITL review failed for %s", enquiry_id)
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-async def handle_submit_review_stream(
-    enquiry_id: str,
-    body: HITLDecisionRequest,
-    db: AsyncSession,
-) -> AsyncGenerator[str, None]:
-    """Streaming version — returns SSE generator."""
-    from services.sse_service import SSEEventEmitter
-
-    emitter = SSEEventEmitter()
-
-    await emitter.emit({
-        "type": "hitl_resumed",
-        "agent": "system",
-        "message": f"Resuming with decision: {body.decision}",
-        "status": "running",
-    })
-
-    asyncio.create_task(
-        enquiry_service.submit_human_review_streaming(
-            enquiry_id=enquiry_id,
-            decision=body.decision,
-            edited_email=body.edited_email,
-            human_prompt=body.human_prompt,
-            emitter=emitter,
-        )
-    )
-
-    return emitter.stream()
-
-
-async def handle_client_verification(
-    enquiry_id: str,
-    body: ClientHITLDecisionRequest,
-    db: AsyncSession,
-) -> ClientVerificationResponse:
-    try:
-        result = await enquiry_service.submit_client_verification(
-            enquiry_id=enquiry_id,
-            decision=body.decision,
-            selected_client_id=body.selected_client_id,
-        )
-        return ClientVerificationResponse(**result)
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        logger.exception("Client verification failed for %s", enquiry_id)
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-async def handle_client_verification_stream(
-    enquiry_id: str,
-    body: ClientHITLDecisionRequest,
-    db: AsyncSession,
-) -> AsyncGenerator[str, None]:
-    """Streaming version — resumes graph and returns SSE generator."""
-    from services.sse_service import SSEEventEmitter
-
-    emitter = SSEEventEmitter()
-
-    await emitter.emit({
-        "type": "client_hitl_resumed",
-        "agent": "system",
-        "message": f"Resuming client verification: {body.decision}",
-        "status": "running",
-    })
-
-    asyncio.create_task(
-        enquiry_service.submit_client_verification_streaming(
-            enquiry_id=enquiry_id,
-            decision=body.decision,
-            selected_client_id=body.selected_client_id,
-            emitter=emitter,
-        )
-    )
-
-    return emitter.stream()
-
-
-async def handle_get_erp_export_path(enquiry_id: str, db: AsyncSession) -> str:
-    try:
-        return await enquiry_service.get_erp_export_path(enquiry_id, db)
-    except ProductNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 async def handle_get_clients(search: str | None = None) -> list[dict]:

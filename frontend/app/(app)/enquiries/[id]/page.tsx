@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { ChevronRight, Download, FileText } from 'lucide-react'
@@ -11,9 +11,9 @@ import AIReasoningPanel from '@/components/ui/AIReasoningPanel'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Progress } from '@/components/ui/progress'
 import { buttonVariants } from '@/components/ui/button'
-import ClientVerificationPanel from '@/components/upload/ClientVerificationPanel'
+import { ClientVerificationPanel } from '@/components/upload/ClientVerificationPanel'
 import { useEnquiry } from '@/lib/queries'
-import { enquiriesApi, quotationsApi } from '@/lib/api'
+import { enquiriesApi, erpExportUrl, quotationsApi } from '@/lib/api'
 import { useQueryClient } from '@tanstack/react-query'
 import { formatRelativeTime } from '@/lib/utils'
 import type { AgentEvent, ClientSummary, ClientVerificationContext, ClientVerificationResponse, EnquiryDetail } from '@/types'
@@ -108,6 +108,34 @@ export default function EnquiryDetailPage() {
 
   const [clientContext, setClientContext] = useState<ClientVerificationContext | null>(null)
   const [clientEvents, setClientEvents] = useState<AgentEvent[]>([])
+  const [exportBusy, setExportBusy] = useState(false)
+  const [exportError, setExportError] = useState<string | null>(null)
+
+  const downloadErpExport = useCallback(async () => {
+    if (!id || exportBusy) return
+    setExportBusy(true)
+    setExportError(null)
+    try {
+      const url = erpExportUrl(id)
+      const resp = await fetch(url, { cache: 'no-store' })
+      if (!resp.ok) {
+        if (resp.status === 404) throw new Error('ERP export not available for this enquiry yet.')
+        throw new Error(`Download failed (${resp.status})`)
+      }
+      const blob = await resp.blob()
+      const a = document.createElement('a')
+      a.href = URL.createObjectURL(blob)
+      a.download = `EnquiryList_${id.slice(0, 8).toUpperCase()}.xlsx`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(a.href)
+    } catch (e) {
+      setExportError(e instanceof Error ? e.message : 'Download failed')
+    } finally {
+      setExportBusy(false)
+    }
+  }, [exportBusy, id])
 
   useEffect(() => {
     async function loadClientContext() {
@@ -170,10 +198,19 @@ export default function EnquiryDetailPage() {
     return []
   }, [parsed, ext?.missing_fields])
 
+  const isResolved = useMemo(() => {
+    // After HITL completion a linked quotation (or a "final" status) means we should
+    // not continue surfacing stale parser missing_fields on the detail page.
+    if (quoteId) return true
+    const st = (ext?.status ?? '').toLowerCase()
+    return ['complete', 'approved', 'approved_sent', 'quoted'].includes(st)
+  }, [ext?.status, quoteId])
+
   const showMissingCard =
-    ext?.flow_type === 'incomplete' ||
-    clarificationHint(ext?.error_message ?? null) ||
-    missingList.length > 0
+    !isResolved &&
+    (ext?.flow_type === 'incomplete' ||
+      clarificationHint(ext?.error_message ?? null) ||
+      missingList.length > 0)
 
   const rawBlock = useMemo(() => {
     const raw = ext?.raw_input
@@ -249,16 +286,7 @@ export default function EnquiryDetailPage() {
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
         <div className="space-y-6 lg:col-span-3">
           {clientContext && (
-            <ClientVerificationPanel
-              enquiryId={id}
-              clientContext={clientContext}
-              onEvent={(evt) => setClientEvents((prev) => [...prev, evt])}
-              onVerified={async (_res: ClientVerificationResponse) => {
-                setClientContext(null)
-                await qc.invalidateQueries({ queryKey: ['enquiry', id] })
-                await qc.invalidateQueries({ queryKey: ['enquiries'] })
-              }}
-            />
+            <ClientVerificationPanel />
           )}
 
           <section className="rounded-xl border border-surface-border bg-white p-5 shadow-sm">
@@ -272,7 +300,7 @@ export default function EnquiryDetailPage() {
           </section>
 
           <section className="rounded-xl border border-surface-border bg-white p-5 shadow-sm">
-            <h2 className="text-[15px] font-semibold text-gray-900">What AI Extracted</h2>
+            <h2 className="text-[15px] font-semibold text-gray-900">What is Extracted</h2>
             {!parsed ? (
               <p className="mt-3 text-[14px] text-surface-muted">No structured data was extracted.</p>
             ) : (
@@ -362,6 +390,26 @@ export default function EnquiryDetailPage() {
                   Created {formatRelativeTime(ext.created_at)}
                 </p>
               )}
+            </div>
+          </section>
+
+          <section className="rounded-xl border border-surface-border bg-white p-5 shadow-sm">
+            <h2 className="text-[14px] font-semibold text-gray-900">Exports</h2>
+            <div className="mt-4 flex flex-col gap-2">
+              <button
+                type="button"
+                onClick={downloadErpExport}
+                disabled={exportBusy}
+                className={buttonVariants({
+                  variant: 'secondary',
+                  size: 'sm',
+                  className: 'gap-1.5 justify-center',
+                })}
+              >
+                <Download className="size-3.5" />
+                {exportBusy ? 'Preparing…' : 'Download ERP Enquiry List'}
+              </button>
+              {exportError && <p className="text-[12px] text-red-700">{exportError}</p>}
             </div>
           </section>
 

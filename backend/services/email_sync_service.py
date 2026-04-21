@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.config import get_settings
 from core.database import async_session_factory
 from db.models import EmailSyncState, ProcessedEmail
-from services.enquiry_service import create_enquiry
+from services.enquiry_service import create_enquiry, process_enquiry
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -423,10 +423,14 @@ class EmailSyncService:
                 except Exception:
                     logger.warning("Could not mark seen for enquiry email %s", msg_id_bytes)
 
+                # Trigger processing (stub for now)
                 asyncio.create_task(
-                    _run_pipeline_background(
+                    process_enquiry(
                         enquiry_id=str(enquiry.id),
-                        email_text=email_text,
+                        raw_input=email_text,
+                        input_type="email_sync",
+                        db=db,
+                        emitter=None
                     )
                 )
 
@@ -507,72 +511,6 @@ class EmailSyncService:
             summary["errors"],
         )
         return summary
-
-
-async def _run_pipeline_background(enquiry_id: str, email_text: str) -> None:
-    """Run agent pipeline for a synced email; no SSE. Uses a fresh DB session for audit."""
-    from db.models import AuditLog
-    from orchestrator.graph import run_enquiry_flow
-
-    settings = get_settings()
-    try:
-        final_state = await asyncio.wait_for(
-            run_enquiry_flow(
-                enquiry_id=enquiry_id,
-                raw_input=email_text,
-                input_type="email_sync",
-                client_config="parth_valves",
-                emitter=None,
-            ),
-            timeout=settings.ENQUIRY_FLOW_TIMEOUT_SECONDS,
-        )
-
-        current_step = final_state.get("current_step", "unknown")
-
-        async with async_session_factory() as session:
-            audit = AuditLog(
-                id=uuid.uuid4(),
-                entity_type="enquiry",
-                entity_id=uuid.UUID(enquiry_id),
-                action="ai_processed",
-                performed_by="system",
-                details={
-                    "flow_type": final_state.get("flow_type"),
-                    "current_step": current_step,
-                    "has_quotation": final_state.get("quotation_data") is not None,
-                    "source": "email_sync",
-                },
-            )
-            session.add(audit)
-            await session.commit()
-
-        logger.info(
-            "Pipeline complete for %s: flow=%s step=%s",
-            enquiry_id,
-            final_state.get("flow_type"),
-            current_step,
-        )
-
-        try:
-            from services.global_event_bus import broadcast_enquiry_status_change
-
-            await broadcast_enquiry_status_change(
-                enquiry_id=enquiry_id,
-                new_status=current_step,
-                flow_type=final_state.get("flow_type"),
-                client_name=(final_state.get("parsed_data") or {}).get("client_name"),
-                message="Background processing complete",
-            )
-        except Exception:
-            pass
-    except TimeoutError:
-        logger.error(
-            "Pipeline timed out for %s after %ss",
-            enquiry_id,
-            settings.ENQUIRY_FLOW_TIMEOUT_SECONDS,
-        )
-    except Exception as e:
-        logger.error("Pipeline failed for %s: %s", enquiry_id, e, exc_info=True)
 
 
 email_sync_service = EmailSyncService()

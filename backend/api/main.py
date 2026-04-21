@@ -8,18 +8,17 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import func, select
 
-from api.routes import enquiries, masters, quotations, stream, sync
+from api.routes import configurator, enquiries, masters, quotations, stream, sync
 from core.config import get_settings
 from core.database import async_session_factory, init_db
 from db.sheet_models import (
-    BallValveRow,
-    ButterflyValveRow,
-    DiaphragmValveRow,
-    HosesRow,
-    NvrRow,
-    SightGlassRow,
-    SpecialityValveRow,
-    StrainerRow,
+    CatalogBallValveRow,
+    CatalogBracketsCouplerRow,
+    CatalogButterflyValveRow,
+    CatalogLimitSwitchRow,
+    CatalogOperatorRow,
+    CatalogPositionerRow,
+    CatalogSovRow,
 )
 
 logger = logging.getLogger(__name__)
@@ -35,14 +34,13 @@ async def lifespan(app: FastAPI):
 
     async with async_session_factory() as session:
         models = [
-            ("butterfly_valve", ButterflyValveRow),
-            ("ball_valve", BallValveRow),
-            ("diaphragm_valve", DiaphragmValveRow),
-            ("nvr", NvrRow),
-            ("hoses", HosesRow),
-            ("speciality_valve", SpecialityValveRow),
-            ("sight_glass", SightGlassRow),
-            ("strainer", StrainerRow),
+            ("butterfly_valve", CatalogButterflyValveRow),
+            ("ball_valve", CatalogBallValveRow),
+            ("operator", CatalogOperatorRow),
+            ("brackets_coupler", CatalogBracketsCouplerRow),
+            ("sov", CatalogSovRow),
+            ("limit_switch_box", CatalogLimitSwitchRow),
+            ("positioner", CatalogPositionerRow),
         ]
         total = 0
         for key, model in models:
@@ -55,7 +53,7 @@ async def lifespan(app: FastAPI):
 
     if total == 0:
         logger.warning(
-            "Catalog is empty for client_id=%s. Import your XLSX into sheet tables.",
+            "Catalog is empty for client_id=%s. Run: python -m db.import_revamp_catalog --clear-existing",
             settings.ACTIVE_CLIENT,
         )
     else:
@@ -99,6 +97,7 @@ app.include_router(quotations.router)
 app.include_router(masters.router, prefix="/api")
 app.include_router(sync.router)
 app.include_router(stream.router)
+app.include_router(configurator.router)
 
 
 @app.get("/health")

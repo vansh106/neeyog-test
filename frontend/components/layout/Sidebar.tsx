@@ -14,14 +14,13 @@ import {
 } from 'lucide-react'
 
 const MASTER_CATEGORIES = [
-  'ball_valve',
-  'butterfly_valve',
-  'diaphragm_valve',
-  'hoses',
-  'nvr',
-  'sight_glass',
-  'speciality_valve',
-  'strainer',
+  { key: 'butterfly_valve', label: 'Butterfly valve' },
+  { key: 'ball_valve', label: 'Ball valve' },
+  { key: 'operator', label: 'Operator' },
+  { key: 'brackets_coupler', label: 'Brackets & couplers' },
+  { key: 'sov', label: 'SOV' },
+  { key: 'limit_switch_box', label: 'Limit switch box' },
+  { key: 'positioner', label: 'Positioner' },
 ] as const
 
 const NAV_ITEMS = [
@@ -88,12 +87,12 @@ export default function Sidebar() {
 
                 {!sidebarCollapsed && mastersOpen && (
                   <div className="mt-1 ml-2 space-y-0.5">
-                    {MASTER_CATEGORIES.map((cat) => {
-                      const href = `/masters/${cat}`
+                    {MASTER_CATEGORIES.map(({ key, label }) => {
+                      const href = `/masters/${key}`
                       const active = pathname === href
                       return (
                         <Link
-                          key={cat}
+                          key={key}
                           href={href}
                           className={cn(
                             'flex items-center gap-3 px-3 py-2 rounded-md text-[12px] transition-colors',
@@ -102,7 +101,7 @@ export default function Sidebar() {
                               : 'text-[#8AAF8E] hover:bg-surface-sidebar2 hover:text-white',
                           )}
                         >
-                          <span className="truncate">{cat}</span>
+                          <span className="truncate">{label}</span>
                         </Link>
                       )
                     })}

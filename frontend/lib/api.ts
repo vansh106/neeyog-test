@@ -101,6 +101,49 @@ export const systemApi = {
   health: <T = unknown>() => get<T>('/health'),
 }
 
+export const configuratorApi = {
+  getValveTypes: <T = unknown>() => get<T>('/api/configurator/valve-types'),
+
+  getValveOptions: <T = unknown>(
+    valve_type: string,
+    field: string,
+    filters: Record<string, string>,
+  ) =>
+    get<T>('/api/configurator/valve-options', {
+      valve_type,
+      field,
+      filters: JSON.stringify(filters || {}),
+    }),
+
+  resolveValve: <T = unknown>(
+    valve_type: string,
+    specs: Record<string, string>,
+  ) => get<T>('/api/configurator/resolve-valve', { valve_type, ...specs }),
+
+  getOperators: <T = unknown>(
+    valve_type: string,
+    construction: string,
+    valve_size: string,
+  ) =>
+    get<T>('/api/configurator/operators', {
+      valve_type,
+      construction,
+      valve_size,
+    }),
+
+  getAccessories: <T = unknown>() => get<T>('/api/configurator/accessories'),
+
+  calculatePrice: <T = unknown>(body: {
+    valve_price: number | null
+    operator_type: string
+    operator_price: number | null
+    sov_price: number | null
+    lsb_price: number | null
+    positioner_price: number | null
+    bracket_price: number | null
+  }) => post<T>('/api/configurator/calculate-price', body),
+}
+
 export const syncApi = {
   getStatus: <T = unknown>() => get<T>('/api/sync/status'),
   triggerNow: <T = unknown>() => post<T>('/api/sync/trigger'),

@@ -286,3 +286,116 @@ export interface HITLHistoryEntry {
     reasoning: string
   }
 }
+
+// ── Valve configurator ────────────────────────────────────────────────────
+export type OperatorKey =
+  | 'bare_shaft'
+  | 'manual'
+  | 'gear_box'
+  | 'da'
+  | 'sa'
+  | 'electric_actuator'
+
+export interface ValveProduct {
+  id: string
+  type: string
+  construction: string | null
+  valve_size: string | null
+  bore_type: string | null
+  end_connection: string | null
+  pressure: string | null
+  body: string | null
+  ball_disc?: string | null
+  ball?: string | null
+  stem: string | null
+  seat: string | null
+  fasteners: string | null
+  base_price: number | null
+  has_price: boolean
+}
+
+export interface OperatorModel {
+  id: string
+  model_name: string
+  operator_type: 'da' | 'sa'
+  /** Nominal port size from the operator sheet (e.g. `1 1/2"`). */
+  size: string | null
+  base_price: number | null
+}
+
+export interface OperatorOption {
+  key: OperatorKey
+  label: string
+  description: string
+  has_price: boolean
+  price: number | null
+  models?: OperatorModel[]
+  unlocks_accessories: boolean
+}
+
+export interface AccessoryItem {
+  id: string
+  sr_no: number
+  type: string
+  price: number | null
+}
+
+export interface Accessories {
+  sov: AccessoryItem[]
+  limit_switch_boxes: AccessoryItem[]
+  positioners: AccessoryItem[]
+}
+
+export interface BracketCoupler {
+  id: string
+  size: string
+  price: number | null
+}
+
+export interface OperatorsResponsePayload {
+  operator_options: OperatorOption[]
+  da_operators: OperatorModel[]
+  sa_operators: OperatorModel[]
+  bracket: BracketCoupler | null
+  /** `2 Way` or `3 Way`, extracted from the valve's construction. */
+  construct_way: string | null
+}
+
+export interface AssemblyPriceBreakdown {
+  subtotal: number
+  has_unknown_prices: boolean
+  unknown_components: string[]
+  breakdown: Array<{ component: string; price: number | null }>
+}
+
+export interface ValveSpecSelections {
+  valve_type: string | null
+  construction: string | null
+  valve_size: string | null
+  bore_type: string | null
+  end_connection: string | null
+  pressure: string | null
+  body: string | null
+  ball_disc: string | null
+  ball: string | null
+  stem: string | null
+  seat: string | null
+  fasteners: string | null
+}
+
+export interface AssembledProduct {
+  id: string
+  valve: ValveProduct | null
+  operator_key: OperatorKey | null
+  operator_model: OperatorModel | null
+  sov: AccessoryItem | null
+  limit_switch_box: AccessoryItem | null
+  positioner: AccessoryItem | null
+  bracket: BracketCoupler | null
+  include_bracket: boolean
+  quantity: number
+  unit_price: number | null
+  has_unknown_prices: boolean
+  unknown_components: string[]
+  price_breakdown: Array<{ component: string; price: number | null }>
+}

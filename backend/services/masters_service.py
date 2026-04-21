@@ -13,42 +13,50 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import get_settings
 from core.exceptions import ProductNotFoundError
-from masters.product_master import get_all_products, get_product_by_id
+from masters.product_master import _parse_size_to_mm_inch, get_all_products, get_product_by_id
 from services.client_service import get_dummy_clients
 from db.models import ClientRecord
 from db.sheet_models import (
-    BallValveRow,
-    ButterflyValveRow,
-    DiaphragmValveRow,
-    HosesRow,
-    NvrRow,
-    SightGlassRow,
-    SpecialityValveRow,
-    StrainerRow,
+    CatalogBallValveRow,
+    CatalogBracketsCouplerRow,
+    CatalogButterflyValveRow,
+    CatalogLimitSwitchRow,
+    CatalogOperatorRow,
+    CatalogPositionerRow,
+    CatalogSovRow,
 )
 
 
 SHEET_MODEL_BY_KEY: dict[str, type] = {
-    "butterfly_valve": ButterflyValveRow,
-    "ball_valve": BallValveRow,
-    "diaphragm_valve": DiaphragmValveRow,
-    "hoses": HosesRow,
-    "nvr": NvrRow,
-    "sight_glass": SightGlassRow,
-    "speciality_valve": SpecialityValveRow,
-    "strainer": StrainerRow,
+    "butterfly_valve": CatalogButterflyValveRow,
+    "ball_valve": CatalogBallValveRow,
+    "operator": CatalogOperatorRow,
+    "brackets_coupler": CatalogBracketsCouplerRow,
+    "sov": CatalogSovRow,
+    "limit_switch_box": CatalogLimitSwitchRow,
+    "positioner": CatalogPositionerRow,
 }
 
 # Human-readable names for manual entry / masters UI (keys stay stable for APIs).
 CATEGORY_LABEL_BY_KEY: dict[str, str] = {
     "ball_valve": "Ball valve",
     "butterfly_valve": "Butterfly valve",
-    "diaphragm_valve": "Diaphragm valve",
-    "hoses": "Hoses",
-    "nvr": "NVR (non-return)",
-    "sight_glass": "Sight glass",
-    "speciality_valve": "Speciality valve",
-    "strainer": "Strainer",
+    "operator": "Operator",
+    "brackets_coupler": "Brackets and couplers",
+    "sov": "SOV",
+    "limit_switch_box": "Limit switch box",
+    "positioner": "Positioner",
+}
+
+# Distinct-value column used like a sub-category in the Masters UI.
+_SUBCATEGORY_FIELD: dict[str, str] = {
+    "butterfly_valve": "variant_type",
+    "ball_valve": "variant_type",
+    "operator": "operator_for",
+    "brackets_coupler": "bracket_operator",
+    "sov": "variant_type",
+    "limit_switch_box": "variant_type",
+    "positioner": "variant_type",
 }
 
 
@@ -58,122 +66,37 @@ def _category_label(key: str) -> str:
 
 # Ordered cascade fields per sheet (DB column names). Manual entry narrows row-by-row.
 CASCADE_STEPS: dict[str, list[str]] = {
-    "ball_valve": [
-        "sub_category",
-        "product",
-        "body_material",
-        "seat_material",
-        "stem_material",
-        "pressure_rating",
-        "end_connection",
-        "drilling_std",
-        "paint_finish",
-        "operator_config",
-        "moc_variant",
-        "size",
-    ],
     "butterfly_valve": [
-        "sub_category",
-        "product",
-        "body_material",
-        "seat_material",
-        "stem_material",
-        "pressure_rating",
+        "variant_type",
+        "construction",
+        "valve_size",
+        "bore_type",
         "end_connection",
-        "drilling_std",
-        "paint_finish",
-        "operator_config",
-        "disc_moc_variant",
-        "size",
-    ],
-    "nvr": [
-        "sub_category",
-        "product",
-        "design",
-        "body_material",
-        "seat_material",
-        "stem_material",
-        "pressure_rating",
-        "end_connection",
-        "drilling_std",
-        "paint_finish",
-        "operator_config",
-        "moc_variant",
-        "size",
-    ],
-    "speciality_valve": [
-        "sub_category",
-        "product",
-        "body_material",
-        "seat_material",
-        "stem_material",
-        "pressure_rating",
-        "end_connection",
-        "drilling_std",
-        "paint_finish",
-        "operator_config",
-        "moc_variant",
-        "size",
-    ],
-    "sight_glass": [
-        "sub_category",
-        "product",
-        "body_material",
-        "seat_material",
-        "stem_material",
-        "pressure_rating",
-        "end_connection",
-        "drilling_std",
-        "paint_finish",
-        "operator_config",
-        "moc_variant",
-        "size",
-    ],
-    "strainer": [
-        "sub_category",
-        "product",
-        "body_material",
-        "seat_material",
-        "stem_material",
-        "pressure_rating",
-        "end_connection",
-        "drilling_std",
-        "paint_finish",
-        "operator_config",
-        "moc_variant",
-        "size",
-    ],
-    "diaphragm_valve": [
-        "sub_category",
-        "product",
-        "valve_way",
-        "body_material",
-        "bonnet",
-        "diaphragm",
+        "pressure",
+        "body",
+        "ball_disc",
+        "stem",
         "seat",
-        "stem_spindle",
-        "stem_nut",
-        "compressor",
-        "handwheel",
-        "pin",
-        "stud_nut_washer",
-        "lever",
-        "pressure_rating",
-        "max_temp",
+        "fasteners",
+    ],
+    "ball_valve": [
+        "variant_type",
+        "construction",
+        "valve_size",
+        "bore_type",
         "end_connection",
-        "actuator",
-        "operator_operation",
-        "paint_finish",
-        "moc_price_column",
-        "size",
+        "pressure",
+        "body",
+        "ball",
+        "stem",
+        "seat",
+        "fasteners",
     ],
-    "hoses": [
-        "sub_category",
-        "product_name",
-        "hose_family",
-        "moc_variant",
-        "size_as_printed",
-    ],
+    "operator": ["operator_for", "construct", "size_text", "model_name"],
+    "brackets_coupler": ["bracket_operator", "construct", "size_text"],
+    "sov": ["variant_type"],
+    "limit_switch_box": ["variant_type"],
+    "positioner": ["variant_type"],
 }
 
 
@@ -292,14 +215,14 @@ async def get_product_subcategories(category: str, db: AsyncSession) -> list[str
     model = SHEET_MODEL_BY_KEY.get(category)
     if model is None:
         return []
-    if not hasattr(model, "sub_category"):
+    field = _SUBCATEGORY_FIELD.get(category)
+    if not field or not hasattr(model, field):
         return []
     settings = get_settings()
     client_id = settings.ACTIVE_CLIENT
+    col = getattr(model, field)
     result = await db.execute(
-        select(func.distinct(model.sub_category))
-        .where(model.client_id == client_id, model.sub_category.is_not(None))
-        .order_by(model.sub_category)
+        select(func.distinct(col)).where(model.client_id == client_id, col.is_not(None)).order_by(col)
     )
     return [r[0] for r in result.all() if r[0]]
 
@@ -318,33 +241,60 @@ def _format_size_label(name: str, size_inch: float | None, size_mm: float | None
 
 def catalog_row_to_size_option(category: str, row: object) -> dict:
     """Build manual-entry / matcher line dict from a sheet ORM row."""
-    from masters.product_master import _parse_size_to_mm_inch
+    name = ""
+    size_mm: float | None = None
+    size_inch: float | None = None
+    material = ""
 
-    if hasattr(row, "product_name"):
-        name = (getattr(row, "product_name") or "").strip()
-        size_mm = getattr(row, "id_mm", None)
-        size_inch = getattr(row, "id_inch", None)
-        material = (getattr(row, "moc_variant", None) or "").strip()
-    else:
-        name = (getattr(row, "product", None) or "").strip()
-        size_mm, size_inch = _parse_size_to_mm_inch(getattr(row, "size", None))
-        material = " / ".join(
-            [
-                x
-                for x in [
-                    getattr(row, "body_material", None),
-                    getattr(row, "seat_material", None),
-                    getattr(row, "stem_material", None),
-                    getattr(row, "moc_variant", None),
-                    getattr(row, "disc_moc_variant", None),
-                ]
-                if x
+    if isinstance(row, CatalogButterflyValveRow):
+        name = " ".join(
+            x
+            for x in [
+                (row.variant_type or "").strip(),
+                (row.construction or "").strip(),
+                (row.valve_size or "").strip(),
             ]
+            if x
         )
+        size_mm, size_inch = _parse_size_to_mm_inch(row.valve_size)
+        material = " / ".join(
+            x
+            for x in [row.body, row.ball_disc, row.stem, row.seat, row.fasteners]
+            if x
+        )
+    elif isinstance(row, CatalogBallValveRow):
+        name = " ".join(
+            x
+            for x in [
+                (row.variant_type or "").strip(),
+                (row.construction or "").strip(),
+                (row.valve_size or "").strip(),
+            ]
+            if x
+        )
+        size_mm, size_inch = _parse_size_to_mm_inch(row.valve_size)
+        material = " / ".join(x for x in [row.body, row.ball, row.stem, row.seat, row.fasteners] if x)
+    elif isinstance(row, CatalogOperatorRow):
+        name = ((row.model_name or "").strip() or (row.operator_for or "").strip() or "Operator")
+        size_mm, size_inch = _parse_size_to_mm_inch(row.size_text)
+        material = " / ".join(x for x in [row.construct, row.operator_for] if x)
+    elif isinstance(row, CatalogBracketsCouplerRow):
+        name = " ".join(
+            x
+            for x in [
+                (row.bracket_operator or "").strip(),
+                (row.construct or "").strip(),
+                (row.size_text or "").strip(),
+            ]
+            if x
+        )
+        size_mm, size_inch = _parse_size_to_mm_inch(row.size_text)
+        material = (row.construct or "").strip()
+    elif isinstance(row, (CatalogSovRow, CatalogLimitSwitchRow, CatalogPositionerRow)):
+        name = (row.variant_type or "").strip() or category.replace("_", " ").title()
 
     price = float(getattr(row, "price_inr", None) or 0.0)
-    unit_raw = getattr(row, "price_unit", None) or "piece"
-    unit = "meter" if "meter" in str(unit_raw).lower() else "piece"
+    unit = "piece"
     nm = name or "Product"
     return {
         "id": f"{category}:{getattr(row, 'row_id')}",
@@ -417,10 +367,14 @@ async def get_cascade_matching_products(category: str, filters: dict[str, str], 
         except ValueError:
             pass
         q = q.where(col == v)
-    if hasattr(model, "size"):
-        q = q.order_by(model.size)
-    elif hasattr(model, "product_name"):
-        q = q.order_by(model.product_name)
+    if hasattr(model, "valve_size"):
+        q = q.order_by(model.valve_size)
+    elif hasattr(model, "size_text"):
+        q = q.order_by(model.size_text)
+    elif hasattr(model, "variant_type"):
+        q = q.order_by(model.variant_type)
+    elif hasattr(model, "model_name"):
+        q = q.order_by(model.model_name)
     rows = (await db.execute(q)).scalars().all()
     return [catalog_row_to_size_option(category, r) for r in rows]
 
@@ -434,10 +388,15 @@ async def get_products_for_size_dropdown(category: str, subcategory: str | None,
     client_id = settings.ACTIVE_CLIENT
 
     q = select(model).where(model.client_id == client_id)
-    if subcategory and hasattr(model, "sub_category"):
-        q = q.where(model.sub_category == subcategory)
-    if hasattr(model, "size"):
-        q = q.order_by(model.size)
+    sub_field = _SUBCATEGORY_FIELD.get(category)
+    if subcategory and sub_field and hasattr(model, sub_field):
+        q = q.where(getattr(model, sub_field) == subcategory)
+    if hasattr(model, "valve_size"):
+        q = q.order_by(model.valve_size)
+    elif hasattr(model, "size_text"):
+        q = q.order_by(model.size_text)
+    elif hasattr(model, "variant_type"):
+        q = q.order_by(model.variant_type)
     result = await db.execute(q)
     rows = result.scalars().all()
     return [catalog_row_to_size_option(category, r) for r in rows]
@@ -451,9 +410,19 @@ async def get_product_materials(category: str, db: AsyncSession) -> list[str]:
     settings = get_settings()
     client_id = settings.ACTIVE_CLIENT
 
-    # Best-effort: some sheets store moc_variant, others body_material etc.
     cols = []
-    for c in ["moc_variant", "body_material", "seat_material", "stem_material", "disc_moc_variant"]:
+    for c in [
+        "body",
+        "ball_disc",
+        "ball",
+        "stem",
+        "seat",
+        "fasteners",
+        "construct",
+        "operator_for",
+        "bracket_operator",
+        "variant_type",
+    ]:
         if hasattr(model, c):
             cols.append(getattr(model, c))
     if not cols:
@@ -496,12 +465,11 @@ async def list_products(
     categories = [
         "butterfly_valve",
         "ball_valve",
-        "diaphragm_valve",
-        "nvr",
-        "hoses",
-        "speciality_valve",
-        "sight_glass",
-        "strainer",
+        "operator",
+        "brackets_coupler",
+        "sov",
+        "limit_switch_box",
+        "positioner",
     ]
     per_cat = max(1, limit // max(1, len(categories)))
     combined: list[dict] = []
@@ -564,13 +532,18 @@ async def list_sheet_rows(
         )
     ).scalar_one()
 
-    stmt = (
-        select(model)
-        .where(model.client_id == client_id)
-        .order_by(model.id.nulls_last(), model.created_at.nulls_last())
-        .offset(skip)
-        .limit(limit)
-    )
+    order_parts = []
+    if hasattr(model, "sr_no"):
+        order_parts.append(model.sr_no.asc().nulls_last())
+    if hasattr(model, "variant_type"):
+        order_parts.append(model.variant_type.asc().nulls_last())
+    if hasattr(model, "valve_size"):
+        order_parts.append(model.valve_size.asc().nulls_last())
+    if hasattr(model, "model_name"):
+        order_parts.append(model.model_name.asc().nulls_last())
+    order_parts.append(model.created_at.desc())
+
+    stmt = select(model).where(model.client_id == client_id).order_by(*order_parts).offset(skip).limit(limit)
     rows = (await db.execute(stmt)).scalars().all()
 
     columns = list(model.__table__.columns.keys())

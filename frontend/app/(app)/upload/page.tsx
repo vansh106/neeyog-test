@@ -6,7 +6,7 @@ import { motion } from 'framer-motion'
 import {
   AlertCircle,
   CheckCircle,
-  Inbox,
+  Inbox as InboxIcon,
   Loader2,
   Mail,
   PackageX,
@@ -17,8 +17,8 @@ import AIReasoningPanel from '@/components/ui/AIReasoningPanel'
 import EmptyState from '@/components/ui/EmptyState'
 import StatusBadge from '@/components/ui/StatusBadge'
 import LiveAgentTimeline from '@/components/upload/LiveAgentTimeline'
-import HITLPanel from '@/components/upload/HITLPanel'
-import ClientVerificationPanel from '@/components/upload/ClientVerificationPanel'
+import { HITLPanel } from '@/components/upload/HITLPanel'
+import { ClientVerificationPanel } from '@/components/upload/ClientVerificationPanel'
 import ManualEntryForm from '@/components/upload/ManualEntryForm'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -244,7 +244,7 @@ export default function UploadPage() {
         <div className={cn(CARD_CLASS, 'min-h-[320px]')}>
           <h2 className="text-[18px] font-semibold text-gray-900 px-6 pt-6 pb-0">Processing Result</h2>
           <EmptyState
-            icon={Inbox}
+            icon={InboxIcon}
             title="Waiting for input"
             description="Paste an email on the left and click Process with AI"
           />
@@ -261,15 +261,7 @@ export default function UploadPage() {
 
         {/* Client verification (Step 1) */}
         {clientContext && enquiryId && (
-          <ClientVerificationPanel
-            enquiryId={enquiryId}
-            clientContext={clientContext}
-            onEvent={handleEvent}
-            onVerified={(res) => {
-              setClientVerified(res)
-              setClientContext(null)
-            }}
-          />
+          <ClientVerificationPanel />
         )}
 
         {/* Approved success banner */}
@@ -293,31 +285,7 @@ export default function UploadPage() {
 
         {/* HITL Panel (Step 2) */}
         {hitlContext && enquiryId && !approved && !clientContext && (
-          <HITLPanel
-            enquiryId={enquiryId}
-            hitlContext={hitlContext}
-            flowType={agentEvents.find(e => e.type === 'agent_complete' && e.agent === 'parser')?.data?.flow_type as string ?? ''}
-            cycle={hitlCycle}
-            hitlHistory={hitlHistory}
-            onDecisionSubmitted={(res) => {
-              if (res) setFinalResult(res)
-            }}
-            onHITLRequired={(ctx, cyc) => {
-              setHitlHistory((prev) => [
-                ...prev,
-                { cycle: hitlCycle, decision: 'submitted', prompt: null, timestamp: new Date().toISOString() },
-              ])
-              setHitlContext(ctx)
-              setHitlCycle(cyc)
-            }}
-            onApproved={() => {
-              setApproved(true)
-              setHitlContext(null)
-            }}
-            onNewEvents={(newEvents) => {
-              setAgentEvents((prev) => [...prev, ...newEvents])
-            }}
-          />
+          <HITLPanel />
         )}
 
         {/* Final result card */}
@@ -426,8 +394,23 @@ export default function UploadPage() {
                 </div>
               )}
 
+              {result.status === 'received' && !result.quotation_id && (
+                <div className="rounded-xl border border-surface-border bg-surface-page p-6 text-center">
+                  <InboxIcon className="mx-auto h-8 w-8 text-brand-green-400" />
+                  <p className="mt-3 text-[14px] font-medium">
+                    Enquiry Saved
+                  </p>
+                  <p className="mt-1 text-[12px] text-surface-muted">
+                    Your enquiry has been received.
+                    AI processing will be available
+                    in the next build.
+                  </p>
+                </div>
+              )}
+
               {result.status !== 'failed' &&
                 !showSuccess &&
+                result.status !== 'received' &&
                 result.flow_type !== 'incomplete' &&
                 result.flow_type !== 'not_found' && (
                   <div className="rounded-xl border border-[#E2E6DC] bg-surface-page p-4">

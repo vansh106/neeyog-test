@@ -1,13 +1,13 @@
-"""ORM models for per-sheet product tables.
+"""ORM models for per-sheet catalog tables (Parth revamp workbook).
 
-Each XLSX worksheet is imported into its own table with the same columns.
-These tables become the source of truth for the CPQ catalog (Option B).
+Each worksheet maps to one `catalog_*` table. These are the source of truth
+for Masters + manual entry cascades.
 """
 
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, Float, Integer, String, Text
+from sqlalchemy import DateTime, Float, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -18,7 +18,7 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-class _SheetBase(Base):
+class _CatalogBase(Base):
     __abstract__ = True
 
     row_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -28,265 +28,94 @@ class _SheetBase(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
 
 
-class ButterflyValveRow(_SheetBase):
-    __tablename__ = "products_butterfly_valve"
+class CatalogButterflyValveRow(_CatalogBase):
+    __tablename__ = "catalog_butterfly_valve"
 
-    id: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    pricelist_title: Mapped[str | None] = mapped_column(Text, nullable=True)
-    category: Mapped[str | None] = mapped_column(Text, nullable=True)
-    sub_category: Mapped[str | None] = mapped_column(Text, nullable=True)
-    product: Mapped[str | None] = mapped_column(Text, nullable=True)
-    body_material: Mapped[str | None] = mapped_column(Text, nullable=True)
-    seat_material: Mapped[str | None] = mapped_column(Text, nullable=True)
-    stem_material: Mapped[str | None] = mapped_column(Text, nullable=True)
-    pressure_rating: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sr_no: Mapped[float | None] = mapped_column(Float, nullable=True)
+    variant_type: Mapped[str | None] = mapped_column(Text, nullable=True)
+    construction: Mapped[str | None] = mapped_column(Text, nullable=True)
+    valve_size: Mapped[str | None] = mapped_column(Text, nullable=True)
+    bore_type: Mapped[str | None] = mapped_column(Text, nullable=True)
     end_connection: Mapped[str | None] = mapped_column(Text, nullable=True)
-    drilling_std: Mapped[str | None] = mapped_column(Text, nullable=True)
-    paint_finish: Mapped[str | None] = mapped_column(Text, nullable=True)
-    operator_config: Mapped[str | None] = mapped_column(Text, nullable=True)
-    size: Mapped[str | None] = mapped_column(Text, nullable=True)
-    disc_moc_variant: Mapped[str | None] = mapped_column(Text, nullable=True)
-
-    price_inr: Mapped[float | None] = mapped_column(Float, nullable=True)
-    price_unit: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    gst: Mapped[float | None] = mapped_column(Float, nullable=True)
-    p_f: Mapped[float | None] = mapped_column(Float, nullable=True)
-    gst_amt_inr: Mapped[float | None] = mapped_column(Float, nullable=True)
-    p_f_amt_inr: Mapped[float | None] = mapped_column(Float, nullable=True)
-    effective_price_inr: Mapped[float | None] = mapped_column(Float, nullable=True)
-    price_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    source_file: Mapped[str | None] = mapped_column(Text, nullable=True)
-
-
-class BallValveRow(_SheetBase):
-    __tablename__ = "products_ball_valve"
-
-    id: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    pricelist_title: Mapped[str | None] = mapped_column(Text, nullable=True)
-    category: Mapped[str | None] = mapped_column(Text, nullable=True)
-    sub_category: Mapped[str | None] = mapped_column(Text, nullable=True)
-    product: Mapped[str | None] = mapped_column(Text, nullable=True)
-    body_material: Mapped[str | None] = mapped_column(Text, nullable=True)
-    seat_material: Mapped[str | None] = mapped_column(Text, nullable=True)
-    stem_material: Mapped[str | None] = mapped_column(Text, nullable=True)
-    pressure_rating: Mapped[str | None] = mapped_column(Text, nullable=True)
-    end_connection: Mapped[str | None] = mapped_column(Text, nullable=True)
-    drilling_std: Mapped[str | None] = mapped_column(Text, nullable=True)
-    paint_finish: Mapped[str | None] = mapped_column(Text, nullable=True)
-    operator_config: Mapped[str | None] = mapped_column(Text, nullable=True)
-    size: Mapped[str | None] = mapped_column(Text, nullable=True)
-    moc_variant: Mapped[str | None] = mapped_column(Text, nullable=True)
-
-    price_inr: Mapped[float | None] = mapped_column(Float, nullable=True)
-    price_unit: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    gst: Mapped[float | None] = mapped_column(Float, nullable=True)
-    p_f: Mapped[float | None] = mapped_column(Float, nullable=True)
-    gst_amt_inr: Mapped[float | None] = mapped_column(Float, nullable=True)
-    p_f_amt_inr: Mapped[float | None] = mapped_column(Float, nullable=True)
-    effective_price_inr: Mapped[float | None] = mapped_column(Float, nullable=True)
-    price_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    source_file: Mapped[str | None] = mapped_column(Text, nullable=True)
-
-
-class DiaphragmValveRow(_SheetBase):
-    __tablename__ = "products_diaphragm_valve"
-
-    id: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    pricelist_title: Mapped[str | None] = mapped_column(Text, nullable=True)
-    category: Mapped[str | None] = mapped_column(Text, nullable=True)
-    sub_category: Mapped[str | None] = mapped_column(Text, nullable=True)
-    product: Mapped[str | None] = mapped_column(Text, nullable=True)
-    valve_way: Mapped[str | None] = mapped_column(Text, nullable=True)
-    body_material: Mapped[str | None] = mapped_column(Text, nullable=True)
-    bonnet: Mapped[str | None] = mapped_column(Text, nullable=True)
-    diaphragm: Mapped[str | None] = mapped_column(Text, nullable=True)
+    pressure: Mapped[str | None] = mapped_column(Text, nullable=True)
+    body: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ball_disc: Mapped[str | None] = mapped_column(Text, nullable=True)
+    stem: Mapped[str | None] = mapped_column(Text, nullable=True)
     seat: Mapped[str | None] = mapped_column(Text, nullable=True)
-    stem_spindle: Mapped[str | None] = mapped_column(Text, nullable=True)
-    stem_nut: Mapped[str | None] = mapped_column(Text, nullable=True)
-    compressor: Mapped[str | None] = mapped_column(Text, nullable=True)
-    handwheel: Mapped[str | None] = mapped_column(Text, nullable=True)
-    pin: Mapped[str | None] = mapped_column(Text, nullable=True)
-    stud_nut_washer: Mapped[str | None] = mapped_column(Text, nullable=True)
-    lever: Mapped[str | None] = mapped_column(Text, nullable=True)
-    pressure_rating: Mapped[str | None] = mapped_column(Text, nullable=True)
-    max_temp: Mapped[str | None] = mapped_column(Text, nullable=True)
+    fasteners: Mapped[str | None] = mapped_column(Text, nullable=True)
+    price_inr: Mapped[float | None] = mapped_column(Float, nullable=True)
+    source_file: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class CatalogBallValveRow(_CatalogBase):
+    __tablename__ = "catalog_ball_valve"
+
+    sr_no: Mapped[float | None] = mapped_column(Float, nullable=True)
+    variant_type: Mapped[str | None] = mapped_column(Text, nullable=True)
+    construction: Mapped[str | None] = mapped_column(Text, nullable=True)
+    valve_size: Mapped[str | None] = mapped_column(Text, nullable=True)
+    bore_type: Mapped[str | None] = mapped_column(Text, nullable=True)
     end_connection: Mapped[str | None] = mapped_column(Text, nullable=True)
-    actuator: Mapped[str | None] = mapped_column(Text, nullable=True)
-    operator_operation: Mapped[str | None] = mapped_column(Text, nullable=True)
-    paint_finish: Mapped[str | None] = mapped_column(Text, nullable=True)
-    moc_price_column: Mapped[str | None] = mapped_column(Text, nullable=True)
-    size: Mapped[str | None] = mapped_column(Text, nullable=True)
-
+    pressure: Mapped[str | None] = mapped_column(Text, nullable=True)
+    body: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ball: Mapped[str | None] = mapped_column(Text, nullable=True)
+    stem: Mapped[str | None] = mapped_column(Text, nullable=True)
+    seat: Mapped[str | None] = mapped_column(Text, nullable=True)
+    fasteners: Mapped[str | None] = mapped_column(Text, nullable=True)
     price_inr: Mapped[float | None] = mapped_column(Float, nullable=True)
-    price_unit: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    gst: Mapped[float | None] = mapped_column(Float, nullable=True)
-    p_f: Mapped[float | None] = mapped_column(Float, nullable=True)
-    gst_amt_inr: Mapped[float | None] = mapped_column(Float, nullable=True)
-    p_f_amt_inr: Mapped[float | None] = mapped_column(Float, nullable=True)
-    effective_price_inr: Mapped[float | None] = mapped_column(Float, nullable=True)
-    price_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     source_file: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
-class NvrRow(_SheetBase):
-    __tablename__ = "products_nvr"
+class CatalogOperatorRow(_CatalogBase):
+    __tablename__ = "catalog_operator"
 
-    id: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    pricelist_title: Mapped[str | None] = mapped_column(Text, nullable=True)
-    category: Mapped[str | None] = mapped_column(Text, nullable=True)
-    sub_category: Mapped[str | None] = mapped_column(Text, nullable=True)
-    product: Mapped[str | None] = mapped_column(Text, nullable=True)
-    design: Mapped[str | None] = mapped_column(Text, nullable=True)
-    body_material: Mapped[str | None] = mapped_column(Text, nullable=True)
-    seat_material: Mapped[str | None] = mapped_column(Text, nullable=True)
-    stem_material: Mapped[str | None] = mapped_column(Text, nullable=True)
-    pressure_rating: Mapped[str | None] = mapped_column(Text, nullable=True)
-    end_connection: Mapped[str | None] = mapped_column(Text, nullable=True)
-    drilling_std: Mapped[str | None] = mapped_column(Text, nullable=True)
-    paint_finish: Mapped[str | None] = mapped_column(Text, nullable=True)
-    operator_config: Mapped[str | None] = mapped_column(Text, nullable=True)
-    size: Mapped[str | None] = mapped_column(Text, nullable=True)
-    moc_variant: Mapped[str | None] = mapped_column(Text, nullable=True)
-
+    operator_for: Mapped[str | None] = mapped_column(Text, nullable=True)
+    construct: Mapped[str | None] = mapped_column(Text, nullable=True)
+    size_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    model_name: Mapped[str | None] = mapped_column(Text, nullable=True)
     price_inr: Mapped[float | None] = mapped_column(Float, nullable=True)
-    price_unit: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    gst: Mapped[float | None] = mapped_column(Float, nullable=True)
-    p_f: Mapped[float | None] = mapped_column(Float, nullable=True)
-    gst_amt_inr: Mapped[float | None] = mapped_column(Float, nullable=True)
-    p_f_amt_inr: Mapped[float | None] = mapped_column(Float, nullable=True)
-    effective_price_inr: Mapped[float | None] = mapped_column(Float, nullable=True)
-    price_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    source_file: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
-class HosesRow(_SheetBase):
-    __tablename__ = "products_hoses"
+class CatalogBracketsCouplerRow(_CatalogBase):
+    __tablename__ = "catalog_brackets_coupler"
 
-    id: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    pricelist_title: Mapped[str | None] = mapped_column(Text, nullable=True)
-    category: Mapped[str | None] = mapped_column(Text, nullable=True)
-    sub_category: Mapped[str | None] = mapped_column(Text, nullable=True)
-    product_name: Mapped[str | None] = mapped_column(Text, nullable=True)
-    hose_family: Mapped[str | None] = mapped_column(Text, nullable=True)
-    size_as_printed: Mapped[str | None] = mapped_column(Text, nullable=True)
-    id_mm: Mapped[float | None] = mapped_column(Float, nullable=True)
-    id_inch: Mapped[float | None] = mapped_column(Float, nullable=True)
-    od_mm: Mapped[float | None] = mapped_column(Float, nullable=True)
-    thickness_mm: Mapped[float | None] = mapped_column(Float, nullable=True)
-    std_length_m: Mapped[float | None] = mapped_column(Float, nullable=True)
-    temp_min_c: Mapped[float | None] = mapped_column(Float, nullable=True)
-    temp_max_c: Mapped[float | None] = mapped_column(Float, nullable=True)
-    moc_variant: Mapped[str | None] = mapped_column(Text, nullable=True)
-
+    bracket_operator: Mapped[str | None] = mapped_column(Text, nullable=True)
+    construct: Mapped[str | None] = mapped_column(Text, nullable=True)
+    size_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     price_inr: Mapped[float | None] = mapped_column(Float, nullable=True)
-    price_unit: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    gst: Mapped[float | None] = mapped_column(Float, nullable=True)
-    p_f: Mapped[float | None] = mapped_column(Float, nullable=True)
-    gst_amt_inr: Mapped[float | None] = mapped_column(Float, nullable=True)
-    p_f_amt_inr: Mapped[float | None] = mapped_column(Float, nullable=True)
-    effective_price_inr: Mapped[float | None] = mapped_column(Float, nullable=True)
-    price_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    source_file: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
-class SpecialityValveRow(_SheetBase):
-    __tablename__ = "products_speciality_valve"
+class CatalogSovRow(_CatalogBase):
+    __tablename__ = "catalog_sov"
 
-    id: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    pricelist_title: Mapped[str | None] = mapped_column(Text, nullable=True)
-    category: Mapped[str | None] = mapped_column(Text, nullable=True)
-    sub_category: Mapped[str | None] = mapped_column(Text, nullable=True)
-    product: Mapped[str | None] = mapped_column(Text, nullable=True)
-    body_material: Mapped[str | None] = mapped_column(Text, nullable=True)
-    seat_material: Mapped[str | None] = mapped_column(Text, nullable=True)
-    stem_material: Mapped[str | None] = mapped_column(Text, nullable=True)
-    pressure_rating: Mapped[str | None] = mapped_column(Text, nullable=True)
-    end_connection: Mapped[str | None] = mapped_column(Text, nullable=True)
-    drilling_std: Mapped[str | None] = mapped_column(Text, nullable=True)
-    paint_finish: Mapped[str | None] = mapped_column(Text, nullable=True)
-    operator_config: Mapped[str | None] = mapped_column(Text, nullable=True)
-    size: Mapped[str | None] = mapped_column(Text, nullable=True)
-    moc_variant: Mapped[str | None] = mapped_column(Text, nullable=True)
-
+    sr_no: Mapped[float | None] = mapped_column(Float, nullable=True)
+    variant_type: Mapped[str | None] = mapped_column(Text, nullable=True)
     price_inr: Mapped[float | None] = mapped_column(Float, nullable=True)
-    price_unit: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    gst: Mapped[float | None] = mapped_column(Float, nullable=True)
-    p_f: Mapped[float | None] = mapped_column(Float, nullable=True)
-    gst_amt_inr: Mapped[float | None] = mapped_column(Float, nullable=True)
-    p_f_amt_inr: Mapped[float | None] = mapped_column(Float, nullable=True)
-    effective_price_inr: Mapped[float | None] = mapped_column(Float, nullable=True)
-    price_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    source_file: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
-class SightGlassRow(_SheetBase):
-    __tablename__ = "products_sight_glass"
+class CatalogLimitSwitchRow(_CatalogBase):
+    __tablename__ = "catalog_limit_switch_box"
 
-    id: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    pricelist_title: Mapped[str | None] = mapped_column(Text, nullable=True)
-    category: Mapped[str | None] = mapped_column(Text, nullable=True)
-    sub_category: Mapped[str | None] = mapped_column(Text, nullable=True)
-    product: Mapped[str | None] = mapped_column(Text, nullable=True)
-    body_material: Mapped[str | None] = mapped_column(Text, nullable=True)
-    seat_material: Mapped[str | None] = mapped_column(Text, nullable=True)
-    stem_material: Mapped[str | None] = mapped_column(Text, nullable=True)
-    pressure_rating: Mapped[str | None] = mapped_column(Text, nullable=True)
-    end_connection: Mapped[str | None] = mapped_column(Text, nullable=True)
-    drilling_std: Mapped[str | None] = mapped_column(Text, nullable=True)
-    paint_finish: Mapped[str | None] = mapped_column(Text, nullable=True)
-    operator_config: Mapped[str | None] = mapped_column(Text, nullable=True)
-    size: Mapped[str | None] = mapped_column(Text, nullable=True)
-    moc_variant: Mapped[str | None] = mapped_column(Text, nullable=True)
-
+    sr_no: Mapped[float | None] = mapped_column(Float, nullable=True)
+    variant_type: Mapped[str | None] = mapped_column(Text, nullable=True)
     price_inr: Mapped[float | None] = mapped_column(Float, nullable=True)
-    price_unit: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    gst: Mapped[float | None] = mapped_column(Float, nullable=True)
-    p_f: Mapped[float | None] = mapped_column(Float, nullable=True)
-    gst_amt_inr: Mapped[float | None] = mapped_column(Float, nullable=True)
-    p_f_amt_inr: Mapped[float | None] = mapped_column(Float, nullable=True)
-    effective_price_inr: Mapped[float | None] = mapped_column(Float, nullable=True)
-    price_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    source_file: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
-class StrainerRow(_SheetBase):
-    __tablename__ = "products_strainer"
+class CatalogPositionerRow(_CatalogBase):
+    __tablename__ = "catalog_positioner"
 
-    id: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    pricelist_title: Mapped[str | None] = mapped_column(Text, nullable=True)
-    category: Mapped[str | None] = mapped_column(Text, nullable=True)
-    sub_category: Mapped[str | None] = mapped_column(Text, nullable=True)
-    product: Mapped[str | None] = mapped_column(Text, nullable=True)
-    body_material: Mapped[str | None] = mapped_column(Text, nullable=True)
-    seat_material: Mapped[str | None] = mapped_column(Text, nullable=True)
-    stem_material: Mapped[str | None] = mapped_column(Text, nullable=True)
-    pressure_rating: Mapped[str | None] = mapped_column(Text, nullable=True)
-    end_connection: Mapped[str | None] = mapped_column(Text, nullable=True)
-    drilling_std: Mapped[str | None] = mapped_column(Text, nullable=True)
-    paint_finish: Mapped[str | None] = mapped_column(Text, nullable=True)
-    operator_config: Mapped[str | None] = mapped_column(Text, nullable=True)
-    size: Mapped[str | None] = mapped_column(Text, nullable=True)
-    moc_variant: Mapped[str | None] = mapped_column(Text, nullable=True)
-
+    sr_no: Mapped[float | None] = mapped_column(Float, nullable=True)
+    variant_type: Mapped[str | None] = mapped_column(Text, nullable=True)
     price_inr: Mapped[float | None] = mapped_column(Float, nullable=True)
-    price_unit: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    gst: Mapped[float | None] = mapped_column(Float, nullable=True)
-    p_f: Mapped[float | None] = mapped_column(Float, nullable=True)
-    gst_amt_inr: Mapped[float | None] = mapped_column(Float, nullable=True)
-    p_f_amt_inr: Mapped[float | None] = mapped_column(Float, nullable=True)
-    effective_price_inr: Mapped[float | None] = mapped_column(Float, nullable=True)
-    price_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    source_file: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
-SHEET_MODELS = {
-    "Butterfly valve": ("butterfly_valve", ButterflyValveRow),
-    "Ball valve": ("ball_valve", BallValveRow),
-    "Diaphragm Valve ": ("diaphragm_valve", DiaphragmValveRow),
-    "NVR": ("nvr", NvrRow),
-    "Hoses": ("hoses", HosesRow),
-    "Speciality valve": ("speciality_valve", SpecialityValveRow),
-    "Sight glass": ("sight_glass", SightGlassRow),
-    "Strainer": ("strainer", StrainerRow),
+# Exact Excel worksheet name -> (stable API key, ORM model)
+EXCEL_SHEET_TO_MODEL: dict[str, tuple[str, type]] = {
+    "Butterfly Valve": ("butterfly_valve", CatalogButterflyValveRow),
+    "Ball valve": ("ball_valve", CatalogBallValveRow),
+    "Operator": ("operator", CatalogOperatorRow),
+    "Brackets and couplers": ("brackets_coupler", CatalogBracketsCouplerRow),
+    "SOV": ("sov", CatalogSovRow),
+    "Limit switch Box": ("limit_switch_box", CatalogLimitSwitchRow),
+    "Positioner": ("positioner", CatalogPositionerRow),
 }
-

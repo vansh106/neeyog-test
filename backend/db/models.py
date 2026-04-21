@@ -27,8 +27,6 @@ class Enquiry(Base):
         ForeignKey("client_records.id"),
         nullable=True,
     )
-    client_is_new: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
-    client_verification_status: Mapped[str | None] = mapped_column(String, nullable=True)
     erp_export_path: Mapped[str | None] = mapped_column(String, nullable=True)
 
     client: Mapped["ClientRecord | None"] = relationship()
@@ -39,8 +37,15 @@ class Enquiry(Base):
     missing_fields: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     assigned_to: Mapped[str | None] = mapped_column(String(255), nullable=True)
     flow_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    agent_state: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    processing_started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    processing_completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # Tracks when background processing started and finished
 
     quotations: Mapped[list["Quotation"]] = relationship(back_populates="enquiry")
 

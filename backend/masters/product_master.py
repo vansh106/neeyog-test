@@ -1,45 +1,92 @@
-"""Product master data access and helpers (Option B).
+"""Product master data access — Parth revamp `catalog_*` sheet tables.
 
-The catalog is stored in per-sheet tables (see `db/sheet_models.py`) rather than a
-single `products` table. This module provides cross-table search helpers and a
-formatter for passing catalog rows to the Matcher agent.
+Each worksheet from the revamp workbook maps to one table (see `db/sheet_models.py`).
 """
 
-import uuid
 import re
+import uuid
 
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database import async_session_factory
 from db.sheet_models import (
-    BallValveRow,
-    ButterflyValveRow,
-    DiaphragmValveRow,
-    HosesRow,
-    NvrRow,
-    SightGlassRow,
-    SpecialityValveRow,
-    StrainerRow,
+    CatalogBallValveRow,
+    CatalogBracketsCouplerRow,
+    CatalogButterflyValveRow,
+    CatalogLimitSwitchRow,
+    CatalogOperatorRow,
+    CatalogPositionerRow,
+    CatalogSovRow,
 )
 
 INCH_TO_MM: dict[float, float] = {
-    0.5: 15.0, 0.75: 20.0, 1.0: 25.0, 1.25: 32.0, 1.5: 38.0,
-    2.0: 51.0, 2.5: 63.5, 3.0: 76.0, 4.0: 102.0, 5.0: 125.0,
-    6.0: 150.0, 8.0: 200.0, 10.0: 250.0, 12.0: 300.0, 14.0: 350.0,
-    16.0: 400.0, 18.0: 450.0, 20.0: 500.0, 24.0: 600.0,
+    0.5: 15.0,
+    0.75: 20.0,
+    1.0: 25.0,
+    1.25: 32.0,
+    1.5: 38.0,
+    2.0: 51.0,
+    2.5: 63.5,
+    3.0: 76.0,
+    4.0: 102.0,
+    5.0: 125.0,
+    6.0: 150.0,
+    8.0: 200.0,
+    10.0: 250.0,
+    12.0: 300.0,
+    14.0: 350.0,
+    16.0: 400.0,
+    18.0: 450.0,
+    20.0: 500.0,
+    24.0: 600.0,
 }
 
 SHEET_TABLES: list[tuple[str, type]] = [
-    ("butterfly_valve", ButterflyValveRow),
-    ("ball_valve", BallValveRow),
-    ("diaphragm_valve", DiaphragmValveRow),
-    ("nvr", NvrRow),
-    ("hoses", HosesRow),
-    ("speciality_valve", SpecialityValveRow),
-    ("sight_glass", SightGlassRow),
-    ("strainer", StrainerRow),
+    ("butterfly_valve", CatalogButterflyValveRow),
+    ("ball_valve", CatalogBallValveRow),
+    ("operator", CatalogOperatorRow),
+    ("brackets_coupler", CatalogBracketsCouplerRow),
+    ("sov", CatalogSovRow),
+    ("limit_switch_box", CatalogLimitSwitchRow),
+    ("positioner", CatalogPositionerRow),
 ]
+
+_KEYWORD_COLUMNS: dict[str, list[str]] = {
+    "butterfly_valve": [
+        "variant_type",
+        "construction",
+        "valve_size",
+        "bore_type",
+        "end_connection",
+        "pressure",
+        "body",
+        "ball_disc",
+        "stem",
+        "seat",
+        "fasteners",
+        "source_file",
+    ],
+    "ball_valve": [
+        "variant_type",
+        "construction",
+        "valve_size",
+        "bore_type",
+        "end_connection",
+        "pressure",
+        "body",
+        "ball",
+        "stem",
+        "seat",
+        "fasteners",
+        "source_file",
+    ],
+    "operator": ["operator_for", "construct", "size_text", "model_name"],
+    "brackets_coupler": ["bracket_operator", "construct", "size_text"],
+    "sov": ["variant_type"],
+    "limit_switch_box": ["variant_type"],
+    "positioner": ["variant_type"],
+}
 
 
 def _parse_size_to_mm_inch(size_raw: object | None) -> tuple[float | None, float | None]:
@@ -75,29 +122,47 @@ def _parse_size_to_mm_inch(size_raw: object | None) -> tuple[float | None, float
     return None, None
 
 
+def _join_parts(*parts: object | None) -> str:
+    xs = [str(p).strip() for p in parts if p is not None and str(p).strip()]
+    return " ".join(xs)
+
+
 def _row_to_catalog_item(table_key: str, row: object) -> dict:
-    """Convert a sheet ORM row into a unified dict used by the matcher."""
-    if isinstance(row, HosesRow):
-        name = (row.product_name or "").strip() or "Hose"
-        size_mm = row.id_mm
-        size_inch = row.id_inch
-        material = row.moc_variant
-    else:
-        name = (getattr(row, "product", None) or "").strip() or "Product"
-        size_mm, size_inch = _parse_size_to_mm_inch(getattr(row, "size", None))
-        material = " / ".join(
-            [x for x in [
-                getattr(row, "body_material", None),
-                getattr(row, "seat_material", None),
-                getattr(row, "stem_material", None),
-                getattr(row, "moc_variant", None),
-                getattr(row, "disc_moc_variant", None),
-            ] if x]
-        ) or None
+    """Convert a catalog ORM row into a unified dict for Masters / matcher."""
+    name = "Product"
+    size_mm: float | None = None
+    size_inch: float | None = None
+    material: str | None = None
+    pressure_rating: str | None = None
+    sub_category: str | None = None
 
-    unit_raw = getattr(row, "price_unit", None) or "piece"
-    unit = "meter" if "meter" in str(unit_raw).lower() else "piece"
+    if isinstance(row, CatalogButterflyValveRow):
+        name = _join_parts(row.variant_type, row.construction, row.valve_size) or "Butterfly valve"
+        size_mm, size_inch = _parse_size_to_mm_inch(row.valve_size)
+        material = _join_parts(row.body, row.ball_disc, row.stem, row.seat, row.fasteners) or None
+        pressure_rating = row.pressure
+        sub_category = row.variant_type
+    elif isinstance(row, CatalogBallValveRow):
+        name = _join_parts(row.variant_type, row.construction, row.valve_size) or "Ball valve"
+        size_mm, size_inch = _parse_size_to_mm_inch(row.valve_size)
+        material = _join_parts(row.body, row.ball, row.stem, row.seat, row.fasteners) or None
+        pressure_rating = row.pressure
+        sub_category = row.variant_type
+    elif isinstance(row, CatalogOperatorRow):
+        name = (row.model_name or "").strip() or (row.operator_for or "").strip() or "Operator"
+        size_mm, size_inch = _parse_size_to_mm_inch(row.size_text)
+        material = _join_parts(row.construct, row.operator_for) or None
+        sub_category = row.operator_for
+    elif isinstance(row, CatalogBracketsCouplerRow):
+        name = _join_parts(row.bracket_operator, row.construct, row.size_text) or "Bracket / coupler"
+        size_mm, size_inch = _parse_size_to_mm_inch(row.size_text)
+        material = row.construct
+        sub_category = row.bracket_operator
+    elif isinstance(row, (CatalogSovRow, CatalogLimitSwitchRow, CatalogPositionerRow)):
+        name = (row.variant_type or "").strip() or table_key.replace("_", " ").title()
+        sub_category = row.variant_type
 
+    unit = "piece"
     price = getattr(row, "price_inr", None)
     try:
         base_price = float(price) if price is not None else 0.0
@@ -109,10 +174,10 @@ def _row_to_catalog_item(table_key: str, row: object) -> dict:
         "table": table_key,
         "name": name,
         "category": table_key,
-        "sub_category": getattr(row, "sub_category", None),
+        "sub_category": sub_category,
         "size_mm": size_mm,
         "size_inch": size_inch,
-        "pressure_rating": getattr(row, "pressure_rating", None),
+        "pressure_rating": pressure_rating,
         "material": material,
         "base_price": base_price,
         "unit": unit,
@@ -121,13 +186,25 @@ def _row_to_catalog_item(table_key: str, row: object) -> dict:
     }
 
 
+def _size_patterns(target_mm: float) -> list[str]:
+    dn = int(target_mm)
+    return [
+        f"DN{dn}",
+        f"DN {dn}",
+        f"{dn} MM",
+        f"{dn}MM",
+        f'{dn}"',
+        f"{dn} inch",
+        f"{dn} Inch",
+    ]
+
+
 async def get_all_products(
     client_id: str,
     category: str | None = None,
     active_only: bool = True,
     session: AsyncSession | None = None,
 ) -> list[dict]:
-    """Return catalog items across all sheet tables for a client."""
     async def _query(s: AsyncSession) -> list[dict]:
         out: list[dict] = []
         for table_key, model in SHEET_TABLES:
@@ -151,7 +228,6 @@ async def get_product_by_id(
     product_id: str | uuid.UUID,
     session: AsyncSession | None = None,
 ) -> dict | None:
-    """Retrieve a single catalog item by composite id: '<table>:<uuid>'."""
     if isinstance(product_id, uuid.UUID):
         return None
     if ":" not in product_id:
@@ -184,7 +260,6 @@ async def search_products_by_size(
     size_inch: float | None = None,
     session: AsyncSession | None = None,
 ) -> list[dict]:
-    """Return catalog items matching a given size (best-effort across tables)."""
     target_mm = size_mm
     if target_mm is None and size_inch is not None:
         target_mm = INCH_TO_MM.get(size_inch, size_inch * 25.4)
@@ -192,23 +267,26 @@ async def search_products_by_size(
     if target_mm is None:
         return []
 
+    patterns = _size_patterns(target_mm)
+
     async def _query(s: AsyncSession) -> list[dict]:
         out: list[dict] = []
         for table_key, model in SHEET_TABLES:
             if category and category != table_key:
                 continue
-            if model is HosesRow:
-                stmt = select(model).where(
-                    model.client_id == client_id,
-                    model.id_mm == target_mm,
-                )
-            else:
-                # Most sheets store size as text; we approximate by matching common encodings.
-                # e.g. DN100, 100 MM
-                patterns = [f"DN{int(target_mm)}", f"{int(target_mm)} MM", f"{int(target_mm)}MM"]
-                stmt = select(model).where(model.client_id == client_id)
-                stmt = stmt.where(or_(*[model.size.ilike(f"%{p}%") for p in patterns if hasattr(model, "size")]))
-
+            text_cols = []
+            if hasattr(model, "valve_size"):
+                text_cols.append(getattr(model, "valve_size"))
+            if hasattr(model, "size_text"):
+                text_cols.append(getattr(model, "size_text"))
+            if not text_cols:
+                continue
+            stmt = select(model).where(model.client_id == client_id)
+            conds = []
+            for col in text_cols:
+                for p in patterns:
+                    conds.append(col.ilike(f"%{p}%"))
+            stmt = stmt.where(or_(*conds))
             result = await s.execute(stmt)
             rows = list(result.scalars().all())
             out.extend([_row_to_catalog_item(table_key, r) for r in rows])
@@ -225,19 +303,20 @@ async def search_products_keyword(
     search_text: str,
     session: AsyncSession | None = None,
 ) -> list[dict]:
-    """ILIKE search across key text columns in all sheet tables."""
     pattern = f"%{search_text}%"
 
     async def _query(s: AsyncSession) -> list[dict]:
         out: list[dict] = []
         for table_key, model in SHEET_TABLES:
+            cols = _KEYWORD_COLUMNS.get(table_key, [])
             stmt = select(model).where(model.client_id == client_id)
             ors = []
-            for col in ["product", "product_name", "sub_category", "category", "moc_variant", "disc_moc_variant", "body_material"]:
+            for col in cols:
                 if hasattr(model, col):
                     ors.append(getattr(model, col).ilike(pattern))
-            if ors:
-                stmt = stmt.where(or_(*ors))
+            if not ors:
+                continue
+            stmt = stmt.where(or_(*ors))
             result = await s.execute(stmt)
             rows = list(result.scalars().all())
             out.extend([_row_to_catalog_item(table_key, r) for r in rows])
@@ -250,7 +329,6 @@ async def search_products_keyword(
 
 
 def format_products_for_agent(products: list[dict]) -> str:
-    """Format a product list as a clean string for the Matcher agent's user prompt."""
     if not products:
         return "No products found in catalog."
 
@@ -266,7 +344,7 @@ def format_products_for_agent(products: list[dict]) -> str:
 
         lines.append(
             f'ID: {p.get("id")} | {p.get("name")} | Size: {size_str} '
-            f'| Price: \u20b9{float(p.get("base_price") or 0.0):.2f}/{p.get("unit")} '
+            f'| Price: ₹{float(p.get("base_price") or 0.0):.2f}/{p.get("unit")} '
             f'| Material: {p.get("material") or "N/A"}'
         )
     return "\n".join(lines)

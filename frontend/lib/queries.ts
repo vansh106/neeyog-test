@@ -1,9 +1,10 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { enquiriesApi, quotationsApi, mastersApi, systemApi, syncApi } from './api'
+import { enquiriesApi, quotationsApi, mastersApi, systemApi, syncApi, configuratorApi } from './api'
 import type {
   EnquiryListItem, EnquiryDetail, EnquiryResponse,
   QuotationListItem, Quotation, Product,
   HealthResponse, ClientConfig, EmailSyncStatus,
+  Accessories,
 } from '@/types'
 
 export function useHealth() {
@@ -105,5 +106,21 @@ export function useClientConfig() {
     queryKey: ['clientConfig'],
     queryFn: () => mastersApi.getClientConfig<ClientConfig>(),
     staleTime: 300000,
+  })
+}
+
+export function useConfiguratorAccessories() {
+  return useQuery<Accessories>({
+    queryKey: ['configurator', 'accessories'],
+    queryFn: () => configuratorApi.getAccessories<Accessories>(),
+    staleTime: Infinity,
+  })
+}
+
+export function useConfiguratorValveTypes() {
+  return useQuery<string[]>({
+    queryKey: ['configurator', 'valve-types'],
+    queryFn: () => configuratorApi.getValveTypes<string[]>(),
+    staleTime: Infinity,
   })
 }

@@ -15,14 +15,13 @@ from db.models import (  # noqa: F401
     User,
 )
 from db.sheet_models import (  # noqa: F401
-    BallValveRow,
-    ButterflyValveRow,
-    DiaphragmValveRow,
-    HosesRow,
-    NvrRow,
-    SightGlassRow,
-    SpecialityValveRow,
-    StrainerRow,
+    CatalogBallValveRow,
+    CatalogBracketsCouplerRow,
+    CatalogButterflyValveRow,
+    CatalogLimitSwitchRow,
+    CatalogOperatorRow,
+    CatalogPositionerRow,
+    CatalogSovRow,
 )
 
 config = context.config
