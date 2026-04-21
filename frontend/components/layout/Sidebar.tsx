@@ -87,6 +87,17 @@ export default function Sidebar() {
 
                 {!sidebarCollapsed && mastersOpen && (
                   <div className="mt-1 ml-2 space-y-0.5">
+                    <Link
+                      href="/masters?tab=edit"
+                      className={cn(
+                        'flex items-center gap-3 px-3 py-2 rounded-md text-[12px] transition-colors',
+                        pathname === '/masters' && (new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '')).get('tab') === 'edit'
+                          ? 'bg-surface-sidebar2 text-white'
+                          : 'text-[#8AAF8E] hover:bg-surface-sidebar2 hover:text-white',
+                      )}
+                    >
+                      <span className="truncate">Edit Masters</span>
+                    </Link>
                     {MASTER_CATEGORIES.map(({ key, label }) => {
                       const href = `/masters/${key}`
                       const active = pathname === href

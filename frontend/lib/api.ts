@@ -48,6 +48,10 @@ function post<T>(url: string, data?: unknown): Promise<T> {
   return api.post(url, data) as unknown as Promise<T>
 }
 
+function patch<T>(url: string, data?: unknown): Promise<T> {
+  return api.patch(url, data) as unknown as Promise<T>
+}
+
 export const enquiriesApi = {
   uploadEmail: <T = unknown>(emailText: string, inputType: string = 'email') =>
     post<T>('/api/enquiries/upload-email', { email_text: emailText, input_type: inputType }),
@@ -95,6 +99,10 @@ export const mastersApi = {
     post<T>('/api/masters/products/cascade-values', body),
   postCascadeMatch: <T = unknown>(body: { category: string; filters: Record<string, string> }) =>
     post<T>('/api/masters/products/cascade-match', body),
+  postCascadeRows: <T = unknown>(body: { category: string; filters: Record<string, string>; limit?: number }) =>
+    post<T>('/api/masters/products/cascade-rows', body),
+  updateSheetRowPrice: <T = unknown>(sheet: string, row_id: string, price_inr: number | null) =>
+    patch<T>(`/api/masters/sheets/${sheet}/rows/${row_id}/price`, { price_inr }),
 }
 
 export const systemApi = {

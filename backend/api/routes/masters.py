@@ -20,6 +20,14 @@ class CascadeMatchBody(BaseModel):
     category: str
     filters: dict[str, str] = Field(default_factory=dict)
 
+class CascadeRowsBody(BaseModel):
+    category: str
+    filters: dict[str, str] = Field(default_factory=dict)
+    limit: int = 200
+
+class UpdatePriceBody(BaseModel):
+    price_inr: float | None = None
+
 
 # Catalog categories live here (not under /products/...) so an old server build cannot
 # accidentally match GET /products/{product_id} with product_id="categories" (404).
@@ -88,6 +96,10 @@ async def cascade_values_route(body: CascadeValuesBody, db: AsyncSession = Depen
 async def cascade_match_route(body: CascadeMatchBody, db: AsyncSession = Depends(get_db)):
     return await masters_controller.handle_cascade_match(db, body.category, body.filters)
 
+@router.post("/products/cascade-rows")
+async def cascade_rows_route(body: CascadeRowsBody, db: AsyncSession = Depends(get_db)):
+    return await masters_controller.handle_cascade_rows(db, body.category, body.filters, limit=body.limit)
+
 
 @router.get("/products/{product_id}")
 async def get_product_route(
@@ -110,6 +122,15 @@ async def list_sheet_rows_route(
     db: AsyncSession = Depends(get_db),
 ):
     return await masters_controller.handle_list_sheet_rows(db, sheet=sheet, skip=skip, limit=limit)
+
+@router.patch("/sheets/{sheet}/rows/{row_id}/price")
+async def update_sheet_row_price_route(
+    sheet: str,
+    row_id: str,
+    body: UpdatePriceBody,
+    db: AsyncSession = Depends(get_db),
+):
+    return await masters_controller.handle_update_catalog_price(db, sheet, row_id, body.price_inr)
 
 
 @router.get("/clients")

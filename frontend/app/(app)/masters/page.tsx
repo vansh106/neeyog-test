@@ -1,6 +1,7 @@
 'use client'
 
 import { useMemo, useState } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { Database } from 'lucide-react'
 import PageShell from '@/components/layout/PageShell'
 import EmptyState from '@/components/ui/EmptyState'
@@ -16,6 +17,7 @@ import {
 import { useProducts, useClientConfig } from '@/lib/queries'
 import { formatCurrency } from '@/lib/utils'
 import type { Product } from '@/types'
+import MastersEditor from '@/components/masters/MastersEditor'
 
 function formatProductSize(p: Product): string {
   if (p.size_inch != null && p.size_mm != null) {
@@ -68,6 +70,10 @@ function ConfigRow({ label, value }: { label: string; value: string }) {
 }
 
 export default function MastersPage() {
+  const searchParams = useSearchParams()
+  const defaultTab = (searchParams.get('tab') || 'catalog').toLowerCase()
+  const initialCategory = searchParams.get('category') || undefined
+
   const { data: products, isPending: productsPending } = useProducts()
   const { data: config, isPending: configPending, isError: configError, isFetched: configFetched } =
     useClientConfig()
@@ -89,9 +95,13 @@ export default function MastersPage() {
 
   return (
     <PageShell title="Masters">
-      <Tabs defaultValue="catalog" className="w-full">
+      <Tabs
+        defaultValue={defaultTab === 'edit' ? 'edit' : defaultTab === 'config' ? 'config' : 'catalog'}
+        className="w-full"
+      >
         <TabsList className="mb-6">
           <TabsTrigger value="catalog">Product Catalog</TabsTrigger>
+          <TabsTrigger value="edit">Edit Masters</TabsTrigger>
           <TabsTrigger value="config">Client Config</TabsTrigger>
         </TabsList>
 
@@ -188,6 +198,10 @@ export default function MastersPage() {
             To update prices, use the seed script with an updated XLSX file. Admin → Masters upload
             coming in next version.
           </div>
+        </TabsContent>
+
+        <TabsContent value="edit" className="mt-0">
+          <MastersEditor initialCategory={initialCategory} />
         </TabsContent>
 
         <TabsContent value="config" className="mt-0">

@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react'
 import { useParams } from 'next/navigation'
+import Link from 'next/link'
 import PageShell from '@/components/layout/PageShell'
 import EmptyState from '@/components/ui/EmptyState'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -44,6 +45,14 @@ export default function MastersCategoryPage() {
         </div>
 
         <div className="flex items-center gap-2">
+          {category && (
+            <Link
+              href={`/masters?tab=edit&category=${encodeURIComponent(category)}`}
+              className="h-9 inline-flex items-center rounded-md border border-surface-border bg-white px-3 text-[13px] hover:bg-[#F4F5F0]"
+            >
+              Edit prices
+            </Link>
+          )}
           <span className="text-[12px] text-[#8A9488]">Page size</span>
           <select
             className="h-9 rounded-md border border-surface-border bg-white px-2 text-[13px]"

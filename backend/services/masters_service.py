@@ -10,6 +10,7 @@ from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import flag_modified
 
 from core.config import get_settings
 from core.exceptions import ProductNotFoundError
@@ -378,6 +379,97 @@ async def get_cascade_matching_products(category: str, filters: dict[str, str], 
     rows = (await db.execute(q)).scalars().all()
     return [catalog_row_to_size_option(category, r) for r in rows]
 
+
+async def get_cascade_matching_rows(
+    category: str,
+    filters: dict[str, str],
+    db: AsyncSession,
+    *,
+    limit: int = 200,
+) -> dict:
+    """Raw catalog rows matching current cascade filters (for Masters editing)."""
+    model = SHEET_MODEL_BY_KEY.get(category)
+    if model is None:
+        return {"category": category, "columns": [], "items": []}
+
+    fdict = _sanitize_cascade_filters(category, filters)
+    if not fdict:
+        return {"category": category, "columns": list(model.__table__.columns.keys()), "items": []}
+
+    settings = get_settings()
+    client_id = settings.ACTIVE_CLIENT
+    limit = min(max(1, int(limit or 200)), 500)
+
+    q = select(model).where(model.client_id == client_id)
+    for k, v in fdict.items():
+        if not hasattr(model, k):
+            continue
+        q = q.where(getattr(model, k) == v)
+
+    # Keep the rows stable and easy to scan.
+    if hasattr(model, "valve_size"):
+        q = q.order_by(model.valve_size.asc().nulls_last())
+    elif hasattr(model, "size_text"):
+        q = q.order_by(model.size_text.asc().nulls_last())
+    elif hasattr(model, "variant_type"):
+        q = q.order_by(model.variant_type.asc().nulls_last())
+    elif hasattr(model, "model_name"):
+        q = q.order_by(model.model_name.asc().nulls_last())
+    q = q.limit(limit)
+
+    rows = (await db.execute(q)).scalars().all()
+    columns = list(model.__table__.columns.keys())
+    items: list[dict] = []
+    for r in rows:
+        items.append({c: _jsonable(getattr(r, c)) for c in columns})
+
+    return {"category": category, "columns": columns, "items": items}
+
+
+async def update_catalog_row_price(
+    category: str,
+    row_id: str,
+    price_inr: float | None,
+    db: AsyncSession,
+) -> dict:
+    """Update price for a single row in a catalog sheet table."""
+    model = SHEET_MODEL_BY_KEY.get(category)
+    if model is None:
+        raise ValueError(f"Unknown category: {category}")
+
+    settings = get_settings()
+    client_id = settings.ACTIVE_CLIENT
+
+    try:
+        rid = uuid.UUID(str(row_id))
+    except Exception as e:
+        raise ValueError(f"Invalid row_id: {row_id}") from e
+
+    stmt = select(model).where(model.client_id == client_id, model.row_id == rid).limit(1)
+    row = (await db.execute(stmt)).scalar_one_or_none()
+    if row is None:
+        raise ProductNotFoundError(f"Row {row_id} not found in {category}")
+
+    if price_inr is not None:
+        try:
+            price_inr = float(price_inr)
+        except Exception as e:
+            raise ValueError("price_inr must be a number or null") from e
+        if price_inr < 0:
+            raise ValueError("price_inr must be >= 0")
+
+    setattr(row, "price_inr", price_inr)
+    # Ensure SQLAlchemy marks it dirty even if value didn't change type.
+    try:
+        flag_modified(row, "price_inr")
+    except Exception:
+        pass
+
+    await db.commit()
+    await db.refresh(row)
+
+    columns = list(model.__table__.columns.keys())
+    return {"category": category, "row": {c: _jsonable(getattr(row, c)) for c in columns}}
 
 async def get_products_for_size_dropdown(category: str, subcategory: str | None, db: AsyncSession) -> list[dict]:
     """Return products for size dropdown from sheet tables."""
