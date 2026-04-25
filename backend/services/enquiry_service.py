@@ -15,7 +15,7 @@ from sqlalchemy.orm import selectinload
 
 from core.database import async_session_factory
 from core.exceptions import EnquiryParseError, ProductNotFoundError
-from db.models import AuditLog, Enquiry, Quotation
+from db.models import AuditLog, ClientBranch, Enquiry, Quotation
 
 logger = logging.getLogger(__name__)
 
@@ -202,7 +202,12 @@ async def process_enquiry(
 
 async def process_manual_dropdown(body: dict, db: AsyncSession) -> dict:
     """Manual dropdown flow: no parser/matcher/HITL; create enquiry + quote directly."""
-    from services.client_service import create_client_record, get_client_by_id
+    from services.client_service import (
+        client_for_export,
+        create_company_with_branch,
+        get_branch_with_company,
+        increment_branch_enquiry_count,
+    )
     from services.erp_export_service import generate_enquiry_list_excel
     from services.pdf_service import generate_quotation_pdf
 
@@ -223,35 +228,51 @@ async def process_manual_dropdown(body: dict, db: AsyncSession) -> dict:
     client_company = ""
     client_email = ""
     client_phone = ""
-    client_id_uuid: uuid.UUID | None = None
+    company_id_uuid: uuid.UUID | None = None
+    branch_id_uuid: uuid.UUID | None = None
     client_obj = None
 
     if mode == "existing" and isinstance(selected_client_id, str):
-        client_obj = await get_client_by_id(selected_client_id, db)
+        client_obj = await client_for_export(selected_client_id, db)
         if client_obj is not None:
             client_company = str(getattr(client_obj, "company_name", "") or "")
             client_name = str(getattr(client_obj, "contact_name", "") or "") or client_name
             client_email = str(getattr(client_obj, "email", "") or "")
             client_phone = str(getattr(client_obj, "phone", "") or "")
-            # Only persist FK when it's our real UUID client record
             if not selected_client_id.startswith("dummy-"):
-                client_id_uuid = uuid.UUID(selected_client_id)
+                branch_id_uuid = uuid.UUID(selected_client_id)
+                br = await get_branch_with_company(selected_client_id, db)
+                if br is not None:
+                    company_id_uuid = br.company_id
     elif mode == "new":
-        extracted = {
-            "company_name": new_client.get("company_name"),
-            "contact_name": new_client.get("contact_name"),
-            "email": new_client.get("email"),
-            "phone": new_client.get("phone"),
-            "city": None,
-            "country": "India",
-        }
-        created = await create_client_record(extracted, source="manual_dropdown", db=db)
-        client_id_uuid = created.id
-        client_obj = created
-        client_company = created.company_name
-        client_name = created.contact_name or client_name
-        client_email = created.email or ""
-        client_phone = created.phone or ""
+        addr = (new_client.get("address_line1") or new_client.get("address") or "").strip() or None
+        city = (new_client.get("city") or "").strip() or "Unknown"
+        company, branch = await create_company_with_branch(
+            client_config="parth_valves",
+            company_name=str(new_client.get("company_name") or "Unknown").strip(),
+            gst_number=(new_client.get("gst_number") or None),
+            industry=(new_client.get("industry") or None),
+            notes=None,
+            source="manual_dropdown",
+            branch_name=str(new_client.get("branch_name") or "Head Office").strip() or "Head Office",
+            contact_name=(new_client.get("contact_name") or None),
+            designation=(new_client.get("designation") or None),
+            phone=new_client.get("phone"),
+            email=new_client.get("email"),
+            city=city,
+            state=(new_client.get("state") or None),
+            pincode=(new_client.get("pincode") or None),
+            address_line1=addr,
+            country=str(new_client.get("country") or "India"),
+            db=db,
+        )
+        company_id_uuid = company.id
+        branch_id_uuid = branch.id
+        client_obj = await client_for_export(str(branch.id), db)
+        client_company = company.company_name
+        client_name = (branch.contact_name or client_name) if branch else client_name
+        client_email = (branch.email or "") if branch else ""
+        client_phone = (branch.phone or "") if branch else ""
 
     enquiry_id = uuid.uuid4()
 
@@ -316,21 +337,23 @@ async def process_manual_dropdown(body: dict, db: AsyncSession) -> dict:
         quote_line_items, gst_rate=gst_rate, pf_rate=pf_rate
     )
 
-    raw_input = json.dumps(
-        {
-            "source": "manual_dropdown",
-            "priority": priority,
-            "notes": notes,
-            "client": {
-                "name": client_name,
-                "company": client_company,
-                "email": client_email,
-                "phone": client_phone,
-            },
-            "line_items": quote_line_items,
+    raw_payload: dict = {
+        "source": "manual_dropdown",
+        "priority": priority,
+        "notes": notes,
+        "client": {
+            "name": client_name,
+            "company": client_company,
+            "email": client_email,
+            "phone": client_phone,
         },
-        ensure_ascii=False,
-    )
+        "line_items": quote_line_items,
+    }
+    sp = body.get("supplierPricing")
+    if isinstance(sp, dict):
+        raw_payload["supplierPricing"] = sp
+
+    raw_input = json.dumps(raw_payload, ensure_ascii=False)
 
     enquiry = Enquiry(
         id=enquiry_id,
@@ -350,8 +373,10 @@ async def process_manual_dropdown(body: dict, db: AsyncSession) -> dict:
         },
         matched_products=matched_products,
     )
-    if client_id_uuid is not None:
-        enquiry.client_id = client_id_uuid
+    if company_id_uuid is not None:
+        enquiry.company_id = company_id_uuid
+    if branch_id_uuid is not None:
+        enquiry.branch_id = branch_id_uuid
 
     db.add(enquiry)
     await db.commit()
@@ -405,7 +430,7 @@ async def process_manual_dropdown(body: dict, db: AsyncSession) -> dict:
     # Generate ERP Enquiry List (non-negotiable requirement)
     try:
         if client_obj is None and isinstance(selected_client_id, str):
-            client_obj = await get_client_by_id(selected_client_id, db)
+            client_obj = await client_for_export(selected_client_id, db)
         if client_obj is not None:
             erp_path = await generate_enquiry_list_excel(
                 enquiry_id=str(enquiry_id),
@@ -438,6 +463,9 @@ async def process_manual_dropdown(body: dict, db: AsyncSession) -> dict:
     )
     db.add(audit)
     await db.commit()
+
+    if branch_id_uuid is not None:
+        await increment_branch_enquiry_count(str(branch_id_uuid), db)
 
     return {
         "enquiry_id": str(enquiry_id),
@@ -495,17 +523,27 @@ async def list_enquiries(
     flow_type: str | None = None,
     limit: int = 50,
     offset: int = 0,
+    company_id: str | None = None,
 ) -> list[Enquiry]:
     """Return filtered list of enquiries."""
     stmt = (
         select(Enquiry)
-        .options(selectinload(Enquiry.client))
+        .options(
+            selectinload(Enquiry.branch).selectinload(ClientBranch.company),
+        )
         .order_by(Enquiry.created_at.desc())
     )
     if status:
         stmt = stmt.where(Enquiry.status == status)
     if flow_type:
         stmt = stmt.where(Enquiry.flow_type == flow_type)
+    if company_id:
+        try:
+            cid = uuid.UUID(company_id)
+        except ValueError:
+            cid = None
+        if cid is not None:
+            stmt = stmt.where(Enquiry.company_id == cid)
     stmt = stmt.offset(offset).limit(limit)
     result = await db.execute(stmt)
     return list(result.scalars().all())
@@ -582,7 +620,7 @@ def _format_for_inbox(e: Enquiry) -> dict:
         "confidence": e.confidence_score,
         "input_type": e.input_type,
         "created_at": e.created_at.isoformat() if e.created_at else "",
-        "has_quotation": bool(getattr(e, "client_id", None)) or bool((e.parsed_data or {}).get("quotation_id") if isinstance(e.parsed_data, dict) else False),
+        "has_quotation": bool(getattr(e, "branch_id", None)) or bool((e.parsed_data or {}).get("quotation_id") if isinstance(e.parsed_data, dict) else False),
         "awaiting_human": awaiting_human,
         "hitl_cycle": int(getattr(e, "hitl_cycle", 0) or 0),
     }

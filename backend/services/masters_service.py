@@ -15,8 +15,7 @@ from sqlalchemy.orm.attributes import flag_modified
 from core.config import get_settings
 from core.exceptions import ProductNotFoundError
 from masters.product_master import _parse_size_to_mm_inch, get_all_products, get_product_by_id
-from services.client_service import get_dummy_clients
-from db.models import ClientRecord
+from services.client_service import get_dummy_clients, search_companies
 from db.sheet_models import (
     CatalogBallValveRow,
     CatalogBracketsCouplerRow,
@@ -149,34 +148,36 @@ def _normalize_distinct_cell(v: Any) -> str | None:
 
 
 async def get_clients_for_dropdown(search: str | None, db: AsyncSession) -> list[dict]:
-    """Client dropdown options (DB + dummy)."""
-    q = select(ClientRecord).order_by(ClientRecord.company_name).limit(50)
-    if search:
-        s = f"%{search.lower()}%"
-        q = q.where(func.lower(ClientRecord.company_name).like(s) | func.lower(func.coalesce(ClientRecord.contact_name, "")).like(s))
-    result = await db.execute(q)
-    db_clients = result.scalars().all()
+    """Client dropdown options (DB branches + dummy). Each row id is a branch UUID for FK linking."""
+    settings = get_settings()
+    companies = await search_companies(settings.ACTIVE_CLIENT, search, db, limit=50)
+    db_clients: list[dict] = []
+    for c in companies:
+        active_branches = [b for b in (c.branches or []) if b.is_active]
+        n_br = len(active_branches)
+        for b in active_branches:
+            label = c.company_name if n_br <= 1 else f"{c.company_name} — {b.branch_name}"
+            db_clients.append(
+                {
+                    "id": str(b.id),
+                    "company_name": label,
+                    "contact_name": b.contact_name or "",
+                    "email": b.email or "",
+                    "phone": b.phone or "",
+                    "city": b.city or "",
+                    "erp_code": c.erp_code or "",
+                    "source": "db",
+                }
+            )
 
-    all_clients: list[dict] = [
-        {
-            "id": str(c.id),
-            "company_name": c.company_name,
-            "contact_name": c.contact_name or "",
-            "email": c.email or "",
-            "phone": c.phone or "",
-            "city": c.city or "",
-            "erp_code": c.erp_code or "",
-            "source": "db",
-        }
-        for c in db_clients
-    ] + [{**d, "source": "dummy"} for d in get_dummy_clients()]
+    all_clients: list[dict] = db_clients + [{**d, "source": "dummy"} for d in get_dummy_clients()]
 
     if search:
         s2 = search.lower()
         all_clients = [
             c
             for c in all_clients
-            if s2 in c["company_name"].lower()
+            if s2 in (c.get("company_name") or "").lower()
             or s2 in (c.get("contact_name") or "").lower()
         ]
 
@@ -426,50 +427,43 @@ async def get_cascade_matching_rows(
     return {"category": category, "columns": columns, "items": items}
 
 
+async def get_full_category_catalog(category: str, db: AsyncSession) -> list[dict[str, Any]]:
+    """Return every catalog row for a category as JSON-serializable dicts.
+
+    Used for client-side cascade filtering in the Masters editor (one fetch
+    per category per browser session on the frontend).
+    """
+    model = SHEET_MODEL_BY_KEY.get(category)
+    if model is None:
+        return []
+
+    settings = get_settings()
+    client_id = settings.ACTIVE_CLIENT
+
+    q = select(model).where(model.client_id == client_id)
+    if hasattr(model, "valve_size"):
+        q = q.order_by(model.valve_size.asc().nulls_last())
+    elif hasattr(model, "size_text"):
+        q = q.order_by(model.size_text.asc().nulls_last())
+    elif hasattr(model, "variant_type"):
+        q = q.order_by(model.variant_type.asc().nulls_last())
+    elif hasattr(model, "model_name"):
+        q = q.order_by(model.model_name.asc().nulls_last())
+    else:
+        q = q.order_by(model.row_id)
+
+    rows = (await db.execute(q)).scalars().all()
+    columns = list(model.__table__.columns.keys())
+    return [{c: _jsonable(getattr(r, c)) for c in columns} for r in rows]
+
+
 async def update_catalog_row_price(
     category: str,
     row_id: str,
     price_inr: float | None,
     db: AsyncSession,
 ) -> dict:
-    """Update price for a single row in a catalog sheet table."""
-    model = SHEET_MODEL_BY_KEY.get(category)
-    if model is None:
-        raise ValueError(f"Unknown category: {category}")
-
-    settings = get_settings()
-    client_id = settings.ACTIVE_CLIENT
-
-    try:
-        rid = uuid.UUID(str(row_id))
-    except Exception as e:
-        raise ValueError(f"Invalid row_id: {row_id}") from e
-
-    stmt = select(model).where(model.client_id == client_id, model.row_id == rid).limit(1)
-    row = (await db.execute(stmt)).scalar_one_or_none()
-    if row is None:
-        raise ProductNotFoundError(f"Row {row_id} not found in {category}")
-
-    if price_inr is not None:
-        try:
-            price_inr = float(price_inr)
-        except Exception as e:
-            raise ValueError("price_inr must be a number or null") from e
-        if price_inr < 0:
-            raise ValueError("price_inr must be >= 0")
-
-    setattr(row, "price_inr", price_inr)
-    # Ensure SQLAlchemy marks it dirty even if value didn't change type.
-    try:
-        flag_modified(row, "price_inr")
-    except Exception:
-        pass
-
-    await db.commit()
-    await db.refresh(row)
-
-    columns = list(model.__table__.columns.keys())
-    return {"category": category, "row": {c: _jsonable(getattr(row, c)) for c in columns}}
+    raise ValueError("price_inr is no longer supported; pricing is supplier-specific")
 
 async def get_products_for_size_dropdown(category: str, subcategory: str | None, db: AsyncSession) -> list[dict]:
     """Return products for size dropdown from sheet tables."""

@@ -13,6 +13,9 @@ const api = axios.create({
 })
 
 api.interceptors.request.use((config) => {
+  if (config.data instanceof FormData && config.headers && typeof config.headers.delete === 'function') {
+    config.headers.delete('Content-Type')
+  }
   if (process.env.NODE_ENV === 'development') {
     console.log(`[API] ${config.method?.toUpperCase()} ${config.url}`)
   }
@@ -52,12 +55,23 @@ function patch<T>(url: string, data?: unknown): Promise<T> {
   return api.patch(url, data) as unknown as Promise<T>
 }
 
+function postFormData<T>(url: string, formData: FormData): Promise<T> {
+  return api.post(url, formData) as unknown as Promise<T>
+}
+
 export const enquiriesApi = {
   uploadEmail: <T = unknown>(emailText: string, inputType: string = 'email') =>
     post<T>('/api/enquiries/upload-email', { email_text: emailText, input_type: inputType }),
   getEnquiry: <T = unknown>(id: string) => get<T>(`/api/enquiries/${id}`),
-  listEnquiries: <T = unknown>(params?: { status?: string; flow_type?: string; limit?: number; offset?: number }) =>
-    get<T>('/api/enquiries/', params as Record<string, unknown>),
+  listEnquiries: <T = unknown>(
+    params?: {
+      status?: string
+      flow_type?: string
+      company_id?: string
+      limit?: number
+      offset?: number
+    },
+  ) => get<T>('/api/enquiries/', params as Record<string, unknown>),
   listEmailInbox: <T = unknown>(params?: { status?: string; limit?: number; offset?: number }) =>
     get<T>('/api/enquiries/emails/inbox', params as Record<string, unknown>),
   getHITLState: <T = unknown>(enquiryId: string) => get<T>(`/api/enquiries/${enquiryId}/hitl-state`),
@@ -101,8 +115,162 @@ export const mastersApi = {
     post<T>('/api/masters/products/cascade-match', body),
   postCascadeRows: <T = unknown>(body: { category: string; filters: Record<string, string>; limit?: number }) =>
     post<T>('/api/masters/products/cascade-rows', body),
-  updateSheetRowPrice: <T = unknown>(sheet: string, row_id: string, price_inr: number | null) =>
-    patch<T>(`/api/masters/sheets/${sheet}/rows/${row_id}/price`, { price_inr }),
+}
+
+export const clientsApi = {
+  searchCompanies: (search?: string, limit = 80) =>
+    get<import('@/types').CompanyResponse[]>('/api/clients/', {
+      ...(search ? { search } : {}),
+      limit,
+    }),
+  getCompany: (companyId: string) =>
+    get<import('@/types').CompanyResponse>(`/api/clients/${companyId}`),
+  createCompany: (data: import('@/types').CreateCompanyRequestPayload) =>
+    post<import('@/types').CompanyResponse>('/api/clients/', data),
+  updateCompany: (companyId: string, data: Partial<import('@/types').CreateCompanyRequestPayload>) =>
+    patch<import('@/types').CompanyResponse>(`/api/clients/${companyId}`, data),
+  addBranch: (companyId: string, data: import('@/types').AddBranchRequestPayload) =>
+    post<import('@/types').BranchResponse>(`/api/clients/${companyId}/branches`, data),
+  updateBranch: (
+    companyId: string,
+    branchId: string,
+    data: Partial<import('@/types').AddBranchRequestPayload & { is_active?: boolean }>,
+  ) => patch<import('@/types').BranchResponse>(`/api/clients/${companyId}/branches/${branchId}`, data),
+  deactivateBranch: (companyId: string, branchId: string) =>
+    patch<import('@/types').BranchResponse>(
+      `/api/clients/${companyId}/branches/${branchId}/deactivate`,
+      {},
+    ),
+}
+
+export const suppliersApi = {
+  getSuppliers: (activeOnly = false) =>
+    get<import('@/types').SupplierResponse[]>('/api/suppliers/', { active_only: activeOnly }),
+  createSupplier: (data: {
+    name: string
+    primary_category_key?: string
+    margin_multiplier?: number | null
+    supplier_discount_pct?: number | null
+    customer_discount_pct?: number | null
+    contact_person?: string | null
+    phone?: string | null
+    email?: string | null
+    address?: string | null
+    notes?: string | null
+  }) => post<import('@/types').SupplierResponse>('/api/suppliers/', data),
+  updateSupplier: (
+    id: string,
+    data: Partial<{
+      name: string
+      primary_category_key: string
+      contact_person: string | null
+      phone: string | null
+      email: string | null
+      address: string | null
+      notes: string | null
+    }>,
+  ) => patch<import('@/types').SupplierResponse>(`/api/suppliers/${id}`, data),
+  setPreferred: (id: string) => patch<import('@/types').SupplierResponse>(`/api/suppliers/${id}/preferred`, {}),
+  deactivate: (id: string) => patch<import('@/types').SupplierResponse>(`/api/suppliers/${id}/deactivate`, {}),
+  getSupplierPrices: (supplierId: string, catalogTable?: string) =>
+    get<import('@/types').SupplierPriceRow[]>(
+      `/api/suppliers/${supplierId}/prices`,
+      catalogTable ? { catalog_table: catalogTable } : undefined,
+    ),
+  listCategoryPricing: (supplierId: string) =>
+    get<import('@/types').SupplierCategoryPricing[]>(`/api/suppliers/${supplierId}/category-pricing`),
+  getResolvedCategoryPricing: (supplierId: string, categoryKey: string) =>
+    get<import('@/types').ResolvedSupplierCategoryPricing>(
+      `/api/suppliers/${supplierId}/category-pricing/${categoryKey}`,
+    ),
+  upsertCategoryPricing: (
+    supplierId: string,
+    categoryKey: string,
+    data: Partial<{
+      margin_multiplier: number | null
+      supplier_discount_pct: number | null
+      customer_discount_pct: number | null
+    }>,
+  ) =>
+    patch<import('@/types').SupplierCategoryPricing>(
+      `/api/suppliers/${supplierId}/category-pricing/${categoryKey}`,
+      data,
+    ),
+  upsertPrice: (
+    supplierId: string,
+    data: {
+      catalog_table: string
+      catalog_row_id: string
+      list_price_inr: number
+      discount_pct_override?: number | null
+    },
+  ) => post<import('@/types').SupplierPriceRow>(`/api/suppliers/${supplierId}/prices`, data),
+  bulkUpsertPrices: (
+    supplierId: string,
+    prices: Array<{
+      catalog_table: string
+      catalog_row_id: string
+      list_price_inr: number
+      discount_pct_override?: number | null
+    }>,
+  ) => post<{ created: number; updated: number; failed: number }>(`/api/suppliers/${supplierId}/prices/bulk`, {
+    prices,
+  }),
+  getProductPrice: async (
+    supplierId: string,
+    catalogTable: string,
+    catalogRowId: string,
+  ): Promise<import('@/types').SupplierPriceRow | null> => {
+    try {
+      return await get<import('@/types').SupplierPriceRow>(
+        `/api/suppliers/${supplierId}/prices/${catalogTable}/${catalogRowId}`,
+      )
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e)
+      if (/404|not found/i.test(msg)) return null
+      throw e
+    }
+  },
+  // pricing-config endpoints deprecated (client-level pricing removed)
+  calculatePrice: (data: {
+    list_price: number
+    supplier_discount_pct: number
+    margin_multiplier: number
+    customer_discount_pct: number
+    quantity?: number
+  }) => post<import('@/types').PriceCalculationResult>('/api/suppliers/calculate-price', data),
+
+  previewPricelist: (
+    supplierId: string,
+    catalogTable: string,
+    columnMap: Record<string, string>,
+    file: File,
+  ) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    fd.append('catalog_table', catalogTable)
+    fd.append('column_map', JSON.stringify(columnMap))
+    return postFormData<import('@/types').PreviewResult>(
+      `/api/suppliers/${supplierId}/preview-pricelist`,
+      fd,
+    )
+  },
+
+  importPricelist: (
+    supplierId: string,
+    catalogTable: string,
+    columnMap: Record<string, string>,
+    file: File,
+  ) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    fd.append('catalog_table', catalogTable)
+    fd.append('column_map', JSON.stringify(columnMap))
+    return postFormData<import('@/types').ImportResult>(
+      `/api/suppliers/${supplierId}/import-pricelist`,
+      fd,
+    )
+  },
 }
 
 export const systemApi = {
@@ -150,6 +318,14 @@ export const configuratorApi = {
     positioner_price: number | null
     bracket_price: number | null
   }) => post<T>('/api/configurator/calculate-price', body),
+
+  /** Full valve sheet for client-side cascades (one request per valve type per session). */
+  getFullCatalog: <T = unknown>(valveType: string) =>
+    get<T>('/api/configurator/full-catalog', { valve_type: valveType }),
+
+  /** Full masters sheet for client-side cascades (one request per category per session). */
+  getFullCategoryCatalog: <T = unknown>(category: string) =>
+    get<T>('/api/configurator/full-category-catalog', { category }),
 }
 
 export const syncApi = {

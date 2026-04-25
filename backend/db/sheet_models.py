@@ -43,7 +43,6 @@ class CatalogButterflyValveRow(_CatalogBase):
     stem: Mapped[str | None] = mapped_column(Text, nullable=True)
     seat: Mapped[str | None] = mapped_column(Text, nullable=True)
     fasteners: Mapped[str | None] = mapped_column(Text, nullable=True)
-    price_inr: Mapped[float | None] = mapped_column(Float, nullable=True)
     source_file: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
@@ -62,7 +61,6 @@ class CatalogBallValveRow(_CatalogBase):
     stem: Mapped[str | None] = mapped_column(Text, nullable=True)
     seat: Mapped[str | None] = mapped_column(Text, nullable=True)
     fasteners: Mapped[str | None] = mapped_column(Text, nullable=True)
-    price_inr: Mapped[float | None] = mapped_column(Float, nullable=True)
     source_file: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
@@ -73,7 +71,6 @@ class CatalogOperatorRow(_CatalogBase):
     construct: Mapped[str | None] = mapped_column(Text, nullable=True)
     size_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     model_name: Mapped[str | None] = mapped_column(Text, nullable=True)
-    price_inr: Mapped[float | None] = mapped_column(Float, nullable=True)
 
 
 class CatalogBracketsCouplerRow(_CatalogBase):
@@ -82,7 +79,6 @@ class CatalogBracketsCouplerRow(_CatalogBase):
     bracket_operator: Mapped[str | None] = mapped_column(Text, nullable=True)
     construct: Mapped[str | None] = mapped_column(Text, nullable=True)
     size_text: Mapped[str | None] = mapped_column(Text, nullable=True)
-    price_inr: Mapped[float | None] = mapped_column(Float, nullable=True)
 
 
 class CatalogSovRow(_CatalogBase):
@@ -90,7 +86,6 @@ class CatalogSovRow(_CatalogBase):
 
     sr_no: Mapped[float | None] = mapped_column(Float, nullable=True)
     variant_type: Mapped[str | None] = mapped_column(Text, nullable=True)
-    price_inr: Mapped[float | None] = mapped_column(Float, nullable=True)
 
 
 class CatalogLimitSwitchRow(_CatalogBase):
@@ -98,7 +93,6 @@ class CatalogLimitSwitchRow(_CatalogBase):
 
     sr_no: Mapped[float | None] = mapped_column(Float, nullable=True)
     variant_type: Mapped[str | None] = mapped_column(Text, nullable=True)
-    price_inr: Mapped[float | None] = mapped_column(Float, nullable=True)
 
 
 class CatalogPositionerRow(_CatalogBase):
@@ -106,7 +100,6 @@ class CatalogPositionerRow(_CatalogBase):
 
     sr_no: Mapped[float | None] = mapped_column(Float, nullable=True)
     variant_type: Mapped[str | None] = mapped_column(Text, nullable=True)
-    price_inr: Mapped[float | None] = mapped_column(Float, nullable=True)
 
 
 # Exact Excel worksheet name -> (stable API key, ORM model)

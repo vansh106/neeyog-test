@@ -25,9 +25,6 @@ class CascadeRowsBody(BaseModel):
     filters: dict[str, str] = Field(default_factory=dict)
     limit: int = 200
 
-class UpdatePriceBody(BaseModel):
-    price_inr: float | None = None
-
 
 # Catalog categories live here (not under /products/...) so an old server build cannot
 # accidentally match GET /products/{product_id} with product_id="categories" (404).
@@ -122,16 +119,6 @@ async def list_sheet_rows_route(
     db: AsyncSession = Depends(get_db),
 ):
     return await masters_controller.handle_list_sheet_rows(db, sheet=sheet, skip=skip, limit=limit)
-
-@router.patch("/sheets/{sheet}/rows/{row_id}/price")
-async def update_sheet_row_price_route(
-    sheet: str,
-    row_id: str,
-    body: UpdatePriceBody,
-    db: AsyncSession = Depends(get_db),
-):
-    return await masters_controller.handle_update_catalog_price(db, sheet, row_id, body.price_inr)
-
 
 @router.get("/clients")
 async def list_clients_dropdown_route(

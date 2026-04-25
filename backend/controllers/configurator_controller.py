@@ -10,7 +10,7 @@ from fastapi import HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from services import configurator_service
+from services import configurator_service, masters_service
 from services.configurator_service import VALVE_SPEC_COLUMNS, build_operator_options
 
 logger = logging.getLogger(__name__)
@@ -57,6 +57,18 @@ class PriceCalcResponse(BaseModel):
     has_unknown_prices: bool
     unknown_components: list[str]
     breakdown: list[dict] = Field(default_factory=list)
+
+
+class FullValveCatalogResponse(BaseModel):
+    valve_type: str
+    count: int
+    rows: list[dict[str, Any]]
+
+
+class FullCategoryCatalogResponse(BaseModel):
+    category: str
+    count: int
+    rows: list[dict[str, Any]]
 
 
 # ── Handlers ─────────────────────────────────────────────────────────────
@@ -168,3 +180,23 @@ def handle_calculate_price(body: PriceCalcRequest) -> PriceCalcResponse:
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return PriceCalcResponse(**result)
+
+
+async def handle_get_full_catalog(valve_type: str, db: AsyncSession) -> FullValveCatalogResponse:
+    try:
+        rows = await configurator_service.get_full_valve_catalog(valve_type, db)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.exception("full-catalog failed")
+        raise HTTPException(status_code=500, detail=str(e))
+    return FullValveCatalogResponse(valve_type=valve_type, count=len(rows), rows=rows)
+
+
+async def handle_get_full_category_catalog(category: str, db: AsyncSession) -> FullCategoryCatalogResponse:
+    try:
+        rows = await masters_service.get_full_category_catalog(category, db)
+    except Exception as e:
+        logger.exception("full-category-catalog failed")
+        raise HTTPException(status_code=500, detail=str(e))
+    return FullCategoryCatalogResponse(category=category, count=len(rows), rows=rows)

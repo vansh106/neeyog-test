@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { Database } from 'lucide-react'
+import { useQuery } from '@tanstack/react-query'
 import PageShell from '@/components/layout/PageShell'
 import EmptyState from '@/components/ui/EmptyState'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -16,8 +17,12 @@ import {
 } from '@/components/ui/select'
 import { useProducts, useClientConfig } from '@/lib/queries'
 import { formatCurrency } from '@/lib/utils'
-import type { Product } from '@/types'
+import { suppliersApi } from '@/lib/api'
+import type { Product, SupplierPriceRow, SupplierResponse } from '@/types'
 import MastersEditor from '@/components/masters/MastersEditor'
+import SupplierPricingTab from '@/components/masters/SupplierPricingTab'
+import SuppliersTab from '@/components/masters/SuppliersTab'
+import ClientsTab from '@/components/masters/ClientsTab'
 
 function formatProductSize(p: Product): string {
   if (p.size_inch != null && p.size_mm != null) {
@@ -69,17 +74,48 @@ function ConfigRow({ label, value }: { label: string; value: string }) {
   )
 }
 
+function parseCatalogRefFromProductId(productId: string): { catalog_table: string; catalog_row_id: string } | null {
+  const parts = String(productId || '').split(':')
+  if (parts.length < 2) return null
+  const catalog_table = parts[0]?.trim()
+  const catalog_row_id = parts.slice(1).join(':').trim()
+  if (!catalog_table || !catalog_row_id) return null
+  return { catalog_table, catalog_row_id }
+}
+
+const MASTERS_TABS = new Set([
+  'catalog',
+  'edit',
+  'config',
+  'clients',
+  'suppliers',
+  'supplier-pricing',
+])
+
 export default function MastersPage() {
   const searchParams = useSearchParams()
   const defaultTab = (searchParams.get('tab') || 'catalog').toLowerCase()
   const initialCategory = searchParams.get('category') || undefined
+  const initialTab = MASTERS_TABS.has(defaultTab) ? defaultTab : 'catalog'
 
   const { data: products, isPending: productsPending } = useProducts()
   const { data: config, isPending: configPending, isError: configError, isFetched: configFetched } =
     useClientConfig()
 
   const [category, setCategory] = useState<string>('all')
+  const [supplierId, setSupplierId] = useState<string>('') // empty = no supplier filter (table unchanged)
   const list = products ?? []
+
+  const { data: suppliers = [] } = useQuery<SupplierResponse[]>({
+    queryKey: ['suppliers', 'active'],
+    queryFn: () => suppliersApi.getSuppliers(true),
+    staleTime: 60_000,
+  })
+
+  const supplierLabel = useMemo(() => {
+    if (!supplierId) return null
+    return suppliers.find((s) => s.id === supplierId)?.name ?? null
+  }, [supplierId, suppliers])
 
   const categories = useMemo(() => {
     const set = new Set(list.map((p) => p.category).filter(Boolean))
@@ -91,18 +127,35 @@ export default function MastersPage() {
     return list.filter((p) => p.category === category)
   }, [list, category])
 
+  const supplierPricingEnabled = Boolean(supplierId)
+  const supplierPricingTable = category !== 'all' ? category : undefined
+  const { data: supplierPrices = [] } = useQuery<SupplierPriceRow[]>({
+    queryKey: ['supplierPrices', supplierId, supplierPricingTable ?? 'all'],
+    queryFn: () => suppliersApi.getSupplierPrices(supplierId, supplierPricingTable),
+    enabled: supplierPricingEnabled,
+    staleTime: 30_000,
+  })
+
+  const supplierPriceByCatalogRowId = useMemo(() => {
+    const map = new Map<string, SupplierPriceRow>()
+    for (const r of supplierPrices) {
+      map.set(`${r.catalog_table}:${r.catalog_row_id}`, r)
+    }
+    return map
+  }, [supplierPrices])
+
   const configEmpty = configFetched && !configPending && (configError || config == null)
 
   return (
     <PageShell title="Masters">
-      <Tabs
-        defaultValue={defaultTab === 'edit' ? 'edit' : defaultTab === 'config' ? 'config' : 'catalog'}
-        className="w-full"
-      >
-        <TabsList className="mb-6">
+      <Tabs defaultValue={initialTab} className="w-full">
+        <TabsList className="mb-6 flex flex-wrap gap-1">
           <TabsTrigger value="catalog">Product Catalog</TabsTrigger>
           <TabsTrigger value="edit">Edit Masters</TabsTrigger>
           <TabsTrigger value="config">Client Config</TabsTrigger>
+          <TabsTrigger value="clients">Clients</TabsTrigger>
+          <TabsTrigger value="suppliers">Suppliers</TabsTrigger>
+          <TabsTrigger value="supplier-pricing">Supplier pricing</TabsTrigger>
         </TabsList>
 
         <TabsContent value="catalog" className="mt-0">
@@ -129,6 +182,26 @@ export default function MastersPage() {
                   ))}
                 </SelectContent>
               </Select>
+
+              <span className="ml-2 text-[12px] text-[#8A9488]">Supplier</span>
+              <Select value={supplierId || '__none__'} onValueChange={(v) => setSupplierId(v === '__none__' ? '' : v)}>
+                <SelectTrigger className="w-[240px]">
+                  <SelectValue placeholder="No supplier">
+                    {supplierLabel}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">
+                    <span className="text-muted-foreground">No supplier</span>
+                  </SelectItem>
+                  {suppliers.map((s) => (
+                    <SelectItem key={s.id} value={s.id}>
+                      {s.name}
+                      {s.is_preferred ? ' ★' : ''}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           </div>
 
@@ -141,7 +214,8 @@ export default function MastersPage() {
                     <th className="px-4 py-3">Category</th>
                     <th className="px-4 py-3">Size</th>
                     <th className="px-4 py-3">Material</th>
-                    <th className="px-4 py-3 text-right">Unit Price</th>
+                    {supplierPricingEnabled && <th className="px-4 py-3">Supplier</th>}
+                    {supplierPricingEnabled && <th className="px-4 py-3 text-right">Supplier list price</th>}
                     <th className="px-4 py-3">Unit</th>
                     <th className="px-4 py-3">Active</th>
                   </tr>
@@ -151,7 +225,7 @@ export default function MastersPage() {
                 ) : filtered.length === 0 ? (
                   <tbody>
                     <tr>
-                      <td colSpan={7} className="p-0">
+                      <td colSpan={supplierPricingEnabled ? 8 : 6} className="p-0">
                         <EmptyState
                           icon={Database}
                           title="No products"
@@ -162,32 +236,43 @@ export default function MastersPage() {
                   </tbody>
                 ) : (
                   <tbody>
-                    {filtered.map((p) => (
-                      <tr
-                        key={p.id}
-                        className="border-b border-[#E2E6DC] bg-white text-[13px] transition-colors hover:bg-[#F4F5F0]"
-                      >
-                        <td className="px-4 py-3 font-medium text-gray-900">{p.name}</td>
-                        <td className="px-4 py-3">
-                          <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] text-gray-600">
-                            {p.category}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-surface-muted">{formatProductSize(p)}</td>
-                        <td className="px-4 py-3 text-surface-muted">{p.material ?? '—'}</td>
-                        <td className="px-4 py-3 text-right font-mono text-brand-gold-500">
-                          {formatCurrency(p.base_price)}
-                        </td>
-                        <td className="px-4 py-3 text-surface-muted">{p.unit}</td>
-                        <td className="px-4 py-3">
-                          <span
-                            className={`mx-auto block size-2 rounded-full ${p.is_active ? 'bg-brand-green-400' : 'bg-gray-300'}`}
-                            title={p.is_active ? 'Active' : 'Inactive'}
-                            aria-label={p.is_active ? 'Active' : 'Inactive'}
-                          />
-                        </td>
-                      </tr>
-                    ))}
+                    {filtered.map((p) => {
+                      const ref = parseCatalogRefFromProductId(p.id)
+                      const priceRow = ref
+                        ? supplierPriceByCatalogRowId.get(`${ref.catalog_table}:${ref.catalog_row_id}`)
+                        : undefined
+                      return (
+                        <tr
+                          key={p.id}
+                          className="border-b border-[#E2E6DC] bg-white text-[13px] transition-colors hover:bg-[#F4F5F0]"
+                        >
+                          <td className="px-4 py-3 font-medium text-gray-900">{p.name}</td>
+                          <td className="px-4 py-3">
+                            <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] text-gray-600">
+                              {p.category}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-surface-muted">{formatProductSize(p)}</td>
+                          <td className="px-4 py-3 text-surface-muted">{p.material ?? '—'}</td>
+                          {supplierPricingEnabled && (
+                            <td className="px-4 py-3 text-surface-muted">{supplierLabel ?? '—'}</td>
+                          )}
+                          {supplierPricingEnabled && (
+                            <td className="px-4 py-3 text-right font-mono text-surface-muted">
+                              {priceRow?.list_price_inr != null ? formatCurrency(priceRow.list_price_inr) : '—'}
+                            </td>
+                          )}
+                          <td className="px-4 py-3 text-surface-muted">{p.unit}</td>
+                          <td className="px-4 py-3">
+                            <span
+                              className={`mx-auto block size-2 rounded-full ${p.is_active ? 'bg-brand-green-400' : 'bg-gray-300'}`}
+                              title={p.is_active ? 'Active' : 'Inactive'}
+                              aria-label={p.is_active ? 'Active' : 'Inactive'}
+                            />
+                          </td>
+                        </tr>
+                      )
+                    })}
                   </tbody>
                 )}
               </table>
@@ -195,13 +280,24 @@ export default function MastersPage() {
           </div>
 
           <div className="mt-4 rounded-xl border border-[#E2E6DC] bg-[#F9FAF7] p-4 text-[13px] leading-relaxed text-[#8A9488]">
-            To update prices, use the seed script with an updated XLSX file. Admin → Masters upload
-            coming in next version.
+            Prices are supplier-specific. Use the Suppliers tab / pricelist import to update list prices per supplier.
           </div>
         </TabsContent>
 
         <TabsContent value="edit" className="mt-0">
           <MastersEditor initialCategory={initialCategory} />
+        </TabsContent>
+
+        <TabsContent value="clients" className="mt-0">
+          <ClientsTab />
+        </TabsContent>
+
+        <TabsContent value="suppliers" className="mt-0">
+          <SuppliersTab />
+        </TabsContent>
+
+        <TabsContent value="supplier-pricing" className="mt-0">
+          <SupplierPricingTab />
         </TabsContent>
 
         <TabsContent value="config" className="mt-0">

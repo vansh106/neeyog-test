@@ -8,8 +8,22 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
+    # ── Database ───────────────────────────────────────────────
+    # Async URL for FastAPI (asyncpg). Points at Supabase's transaction
+    # pooler (port 6543) in production, or localhost in dev.
     DATABASE_URL: str
+    # Sync URL (psycopg2) — session pooler on Supabase (port 5432).
     DATABASE_URL_SYNC: str
+    # Direct connection URL — used only for Alembic migrations, since
+    # PgBouncer transaction mode does not support DDL / prepared statements.
+    # Falls back to DATABASE_URL_SYNC when not explicitly configured.
+    DATABASE_URL_DIRECT: str = ""
+
+    # ── Supabase API (optional — only used if Supabase is the DB) ──
+    SUPABASE_URL: str = ""
+    SUPABASE_ANON_KEY: str = ""
+    SUPABASE_SERVICE_ROLE_KEY: str = ""
+
     REDIS_URL: str
 
     LITELLM_MODEL: str = "gemini/gemini-2.5-pro"
@@ -67,6 +81,24 @@ class Settings(BaseSettings):
     @property
     def enquiry_keywords_list(self) -> list[str]:
         return [k.strip().lower() for k in self.email_enquiry_keywords.split(",") if k.strip()]
+
+    @property
+    def migration_url(self) -> str:
+        """URL Alembic should use.
+
+        Prefers the direct connection (``DATABASE_URL_DIRECT``) over the
+        pooler, falling back to ``DATABASE_URL_SYNC``. Always returns a
+        plain ``postgresql://`` URL (asyncpg driver stripped) because
+        Alembic runs synchronously via psycopg2.
+        """
+        url = self.DATABASE_URL_DIRECT or self.DATABASE_URL_SYNC
+        return url.replace("postgresql+asyncpg://", "postgresql://")
+
+    @property
+    def is_supabase(self) -> bool:
+        """True when the primary DATABASE_URL points at a Supabase host."""
+        url = (self.DATABASE_URL or "").lower()
+        return "supabase.co" in url or "supabase.com" in url
 
 
 @lru_cache

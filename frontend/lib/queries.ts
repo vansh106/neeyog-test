@@ -37,7 +37,13 @@ export function useTriggerEmailSync() {
   })
 }
 
-export function useEnquiries(params?: { status?: string; flow_type?: string; limit?: number; offset?: number }) {
+export function useEnquiries(params?: {
+  status?: string
+  flow_type?: string
+  company_id?: string
+  limit?: number
+  offset?: number
+}) {
   return useQuery<EnquiryListItem[]>({
     queryKey: ['enquiries', params],
     queryFn: () => enquiriesApi.listEnquiries<EnquiryListItem[]>(params),

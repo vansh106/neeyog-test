@@ -54,11 +54,14 @@ async def manual_dropdown_process_route(
 async def list_enquiries_route(
     status: str | None = Query(None),
     flow_type: str | None = Query(None),
+    company_id: str | None = Query(None),
     limit: int = Query(50, le=500),
     offset: int = Query(0),
     db: AsyncSession = Depends(get_db),
 ):
-    return await enquiry_controller.handle_list_enquiries(db, status, flow_type, limit, offset)
+    return await enquiry_controller.handle_list_enquiries(
+        db, status, flow_type, limit, offset, company_id=company_id
+    )
 
 
 @router.get("/emails/inbox", response_model=list[EmailInboxItem])

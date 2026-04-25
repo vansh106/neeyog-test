@@ -1,12 +1,13 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Check, ChevronLeft, ChevronRight, Pencil, Trash2 } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Check, ChevronLeft, ChevronRight, Loader2, Pencil, Trash2 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { cn, formatCurrency } from '@/lib/utils'
+import { useValveCatalog, type CatalogRow, computeDistinctOptions } from '@/hooks/useValveCatalog'
 import { configuratorApi } from '@/lib/api'
 import { useConfiguratorAccessories } from '@/lib/queries'
 import type {
@@ -18,6 +19,7 @@ import type {
   OperatorModel,
   OperatorOption,
   OperatorsResponsePayload,
+  SupplierResponse,
   ValveProduct,
   ValveSpecSelections,
 } from '@/types'
@@ -87,13 +89,42 @@ const SPEC_LABEL: Record<SpecKey, string> = {
   fasteners: 'Fasteners',
 }
 
-type Stage = 'valve_specs' | 'operator' | 'actuator' | 'accessories' | 'complete'
+function catalogRowToValveProduct(row: CatalogRow, valveType: string): ValveProduct {
+  const priceRaw = row.price_inr
+  const basePrice =
+    priceRaw == null || priceRaw === ''
+      ? null
+      : typeof priceRaw === 'number'
+        ? priceRaw
+        : Number(priceRaw)
+  const priceOk = basePrice != null && Number.isFinite(basePrice)
+  return {
+    id: String(row.id ?? ''),
+    type: valveType,
+    construction: row.construction != null ? String(row.construction) : null,
+    valve_size: row.valve_size != null ? String(row.valve_size) : null,
+    bore_type: row.bore_type != null ? String(row.bore_type) : null,
+    end_connection: row.end_connection != null ? String(row.end_connection) : null,
+    pressure: row.pressure != null ? String(row.pressure) : null,
+    body: row.body != null ? String(row.body) : null,
+    ball_disc: row.ball_disc != null ? String(row.ball_disc) : undefined,
+    ball: row.ball != null ? String(row.ball) : undefined,
+    stem: row.stem != null ? String(row.stem) : null,
+    seat: row.seat != null ? String(row.seat) : null,
+    fasteners: row.fasteners != null ? String(row.fasteners) : null,
+    base_price: priceOk ? basePrice : null,
+    has_price: priceOk,
+  }
+}
+
+type Stage = 'valve_specs' | 'operator' | 'actuator' | 'accessories' | 'supplier' | 'complete'
 
 type Props = {
   productIndex: number
   onProductComplete: (product: AssembledProduct) => void
   onProductRemove?: () => void
   initialProduct?: AssembledProduct
+  suppliers?: SupplierResponse[]
 }
 
 function emptySpecs(): ValveSpecSelections {
@@ -221,6 +252,11 @@ export function CompletedProductCard({
             </p>
           </>
         )}
+        {product.supplier_name && (
+          <p className="text-surface-muted">
+            Supplier: <span className="font-medium text-gray-900">{product.supplier_name}</span>
+          </p>
+        )}
         <p className="text-surface-muted">
           Operator: {OperatorKeyLabel(product.operator_key)}
           {product.operator_model
@@ -269,6 +305,7 @@ export function ValveConfigurator({
   onProductComplete,
   onProductRemove,
   initialProduct,
+  suppliers = [],
 }: Props) {
   const [stage, setStage] = useState<Stage>('valve_specs')
   const [specs, setSpecs] = useState<ValveSpecSelections>(() => {
@@ -289,14 +326,6 @@ export function ValveConfigurator({
       fasteners: v.fasteners,
     }
   })
-  const [stepOptions, setStepOptions] = useState<Record<SpecKey, string[]>>(
-    {} as Record<SpecKey, string[]>,
-  )
-  const [loadingOptions, setLoadingOptions] = useState(false)
-  const [resolvedValve, setResolvedValve] = useState<ValveProduct | null>(
-    initialProduct?.valve ?? null,
-  )
-
   const [operatorOptions, setOperatorOptions] = useState<OperatorOption[]>([])
   const [daOps, setDaOps] = useState<OperatorModel[]>([])
   const [saOps, setSaOps] = useState<OperatorModel[]>([])
@@ -327,87 +356,91 @@ export function ValveConfigurator({
 
   const [quantity, setQuantity] = useState<number>(initialProduct?.quantity ?? 1)
 
-  // ── Load cascading options for all spec columns ───────────────────────
-  const loadOptions = useCallback(
-    async (valveType: ValveType, currentSpecs: ValveSpecSelections) => {
-      const cols = SPEC_COLUMNS[valveType]
-      setLoadingOptions(true)
-      try {
-        const next: Record<SpecKey, string[]> = {} as Record<SpecKey, string[]>
-        let updatedSpecs: ValveSpecSelections = { ...currentSpecs }
-        for (const field of cols) {
-          const filters: Record<string, string> = {}
-          for (const prior of cols) {
-            if (prior === field) break
-            const v = getSpec(updatedSpecs, prior)
-            if (v) filters[prior] = v
-          }
-          try {
-            const res = await configuratorApi.getValveOptions<{ field: string; options: string[] }>(
-              valveType,
-              field,
-              filters,
-            )
-            const options = (res.options ?? []).filter(Boolean)
-            next[field] = options
-            const current = getSpec(updatedSpecs, field)
-            if (current && !options.includes(current)) {
-              updatedSpecs = setSpec(updatedSpecs, field, null)
-              for (const after of cols.slice(cols.indexOf(field) + 1)) {
-                updatedSpecs = setSpec(updatedSpecs, after, null)
-              }
-            }
-            if (!getSpec(updatedSpecs, field) && options.length === 1) {
-              updatedSpecs = setSpec(updatedSpecs, field, options[0])
-            }
-          } catch {
-            next[field] = []
-          }
-        }
-        setStepOptions(next)
-        if (JSON.stringify(updatedSpecs) !== JSON.stringify(currentSpecs)) {
-          setSpecs(updatedSpecs)
-        }
-      } finally {
-        setLoadingOptions(false)
-      }
-    },
-    [],
-  )
+  const [supplierId, setSupplierId] = useState<string | null>(initialProduct?.supplier_id ?? null)
+  const supplierLabel = useMemo(() => {
+    if (!supplierId) return null
+    return (suppliers ?? []).find((s) => s.id === supplierId)?.name ?? null
+  }, [supplierId, suppliers])
 
   useEffect(() => {
-    if (stage !== 'valve_specs') return
+    if (supplierId) return
+    const active = (suppliers ?? []).filter((s) => s.is_active)
+    if (!active.length) return
+    const pref = active.find((s) => s.is_preferred)
+    setSupplierId(pref?.id ?? active[0].id)
+  }, [supplierId, suppliers])
+
+  const {
+    catalog,
+    isLoading: catalogLoading,
+    error: catalogError,
+    loadCatalog,
+    getOptions,
+    resolve,
+    rowCount,
+  } = useValveCatalog(specs.valve_type)
+
+  useEffect(() => {
     if (!specs.valve_type) return
-    void loadOptions(specs.valve_type as ValveType, specs)
-  }, [specs, stage, loadOptions])
+    void loadCatalog(specs.valve_type)
+  }, [specs.valve_type, loadCatalog])
 
-  // ── Try to resolve the valve whenever specs change on stage 1 ─────────
-  const resolveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  useEffect(() => {
-    if (stage !== 'valve_specs' || !specs.valve_type) return
-    if (resolveTimer.current) clearTimeout(resolveTimer.current)
-    resolveTimer.current = setTimeout(async () => {
-      const record = specsToRecord(specs)
-      const cols = SPEC_COLUMNS[specs.valve_type as ValveType]
-      const allFilled = cols.every((c) => record[c])
-      if (!allFilled) {
-        setResolvedValve(null)
-        return
+  const stepOptions = useMemo(() => {
+    if (!specs.valve_type || catalog.length === 0) return {} as Record<SpecKey, string[]>
+    const cols = SPEC_COLUMNS[specs.valve_type as ValveType]
+    const o = {} as Record<SpecKey, string[]>
+    for (const field of cols) {
+      const prior: Record<string, string> = {}
+      for (const priorCol of cols) {
+        if (priorCol === field) break
+        const v = getSpec(specs, priorCol)
+        if (v) prior[priorCol] = v
       }
-      try {
-        const res = await configuratorApi.resolveValve<{ found: boolean; product: ValveProduct | null }>(
-          specs.valve_type as string,
-          record,
-        )
-        setResolvedValve(res.found ? res.product : null)
-      } catch {
-        setResolvedValve(null)
-      }
-    }, 220)
-    return () => {
-      if (resolveTimer.current) clearTimeout(resolveTimer.current)
+      o[field] = getOptions(field, prior) as string[]
     }
-  }, [specs, stage])
+    return o
+  }, [specs, catalog, getOptions])
+
+  const resolvedValve = useMemo((): ValveProduct | null => {
+    if (!specs.valve_type || catalog.length === 0) return null
+    const cols = SPEC_COLUMNS[specs.valve_type as ValveType]
+    const filters: Record<string, string> = {}
+    for (const c of cols) {
+      const v = getSpec(specs, c)
+      if (!v) return null
+      filters[c] = v
+    }
+    const row = resolve(filters)
+    if (!row) return null
+    return catalogRowToValveProduct(row, specs.valve_type)
+  }, [specs, catalog, resolve])
+
+  useEffect(() => {
+    if (catalogLoading || !specs.valve_type || catalog.length === 0) return
+    setSpecs((prev) => {
+      if (!prev.valve_type) return prev
+      const cols = SPEC_COLUMNS[prev.valve_type as ValveType]
+      let next = { ...prev }
+      let changed = false
+      for (const field of cols) {
+        if (getSpec(next, field)) continue
+        const prior: Record<string, string> = {}
+        for (const pc of cols) {
+          if (pc === field) break
+          const v = getSpec(next, pc)
+          if (v) prior[pc] = v
+        }
+        const opts = computeDistinctOptions(catalog, field, prior)
+        if (opts.length === 1) {
+          next = setSpec(next, field, opts[0])
+          changed = true
+        } else {
+          break
+        }
+      }
+      return changed ? next : prev
+    })
+  }, [specs, catalog, catalogLoading])
 
   // ── Fetch operators once the valve is resolved (and we're past specs) ─
   useEffect(() => {
@@ -495,8 +528,7 @@ export function ValveConfigurator({
   // ── Handlers ──────────────────────────────────────────────────────────
   const pickValveType = (t: ValveType) => {
     setSpecs({ ...emptySpecs(), valve_type: t })
-    setResolvedValve(null)
-    setStepOptions({} as Record<SpecKey, string[]>)
+    void loadCatalog(t)
   }
 
   const pickSpec = (field: SpecKey, value: string) => {
@@ -517,6 +549,8 @@ export function ValveConfigurator({
     operator_key: operatorKey,
     operator_model:
       operatorKey === 'da' || operatorKey === 'sa' ? operatorModel : null,
+    supplier_id: supplierId,
+    supplier_name: (suppliers ?? []).find((s) => s.id === supplierId)?.name ?? null,
     sov,
     limit_switch_box: lsb,
     positioner,
@@ -530,15 +564,15 @@ export function ValveConfigurator({
   })
 
   const finishAndEmit = () => {
+    if (!supplierId && (suppliers ?? []).length) return
     onProductComplete(buildAssembled())
     setStage('complete')
   }
 
   // ── Stage indicator ───────────────────────────────────────────────────
-  // DA/SA path: 4 steps (specs → operator → actuator → accessories).
-  // Other paths: 3 steps max (specs → operator → accessories for electric,
-  // or just specs → operator for bare/manual/gear).
-  const totalSteps = isDaSa ? 4 : operatorUnlocksAccessories ? 3 : 2
+  // Supplier selection is always the last step before completion.
+  const baseSteps = isDaSa ? 4 : operatorUnlocksAccessories ? 3 : 2
+  const totalSteps = baseSteps + 1
   const stageNumber =
     stage === 'valve_specs'
       ? 1
@@ -550,7 +584,9 @@ export function ValveConfigurator({
             ? isDaSa
               ? 4
               : 3
-            : totalSteps
+            : stage === 'supplier'
+              ? totalSteps
+              : totalSteps
   const stageTitle =
     stage === 'valve_specs'
       ? `Step 1 of ${totalSteps} — Select Valve Specifications`
@@ -558,7 +594,9 @@ export function ValveConfigurator({
         ? `Step 2 of ${totalSteps} — Select Operator Type`
         : stage === 'actuator'
           ? `Step 3 of ${totalSteps} — Select ${operatorKey === 'da' ? 'Double Acting' : 'Single Acting'} Actuator`
-          : `Step ${isDaSa ? 4 : 3} of ${totalSteps} — Optional Accessories`
+          : stage === 'accessories'
+            ? `Step ${isDaSa ? 4 : 3} of ${totalSteps} — Optional Accessories`
+            : `Step ${totalSteps} of ${totalSteps} — Select Supplier`
 
   // ── Render ────────────────────────────────────────────────────────────
   if (stage === 'complete') {
@@ -566,7 +604,7 @@ export function ValveConfigurator({
       <CompletedProductCard
         product={buildAssembled()}
         index={productIndex}
-        onEdit={() => setStage('accessories')}
+        onEdit={() => setStage('supplier')}
         onRemove={onProductRemove}
       />
     )
@@ -632,7 +670,19 @@ export function ValveConfigurator({
             })}
           </div>
 
-          {specs.valve_type && (
+          {specs.valve_type && catalogError && (
+            <p className="text-[12px] text-red-600">{catalogError}</p>
+          )}
+
+          {specs.valve_type && catalogLoading && (
+            <div className="flex items-center gap-2 text-[12px] text-surface-muted">
+              <Loader2 className="size-4 animate-spin" />
+              Loading {specs.valve_type} catalog
+              {rowCount > 0 ? ` (${rowCount} rows)` : '…'}
+            </div>
+          )}
+
+          {specs.valve_type && !catalogLoading && (
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               {SPEC_COLUMNS[specs.valve_type as ValveType].map((field, idx) => {
                 const opts = stepOptions[field] ?? []
@@ -653,17 +703,11 @@ export function ValveConfigurator({
                     <Select
                       value={toSelectValue(getSpec(specs, field) ?? '')}
                       onValueChange={(raw) => pickSpec(field, fromSelectValue(raw ?? ''))}
-                      disabled={!priorOk || loadingOptions}
+                      disabled={!priorOk}
                     >
                       <SelectTrigger className="h-10 w-full min-w-0">
                         <SelectValue
-                          placeholder={
-                            !priorOk
-                              ? 'Complete fields above'
-                              : loadingOptions
-                                ? 'Loading…'
-                                : `Select ${SPEC_LABEL[field]}`
-                          }
+                          placeholder={!priorOk ? 'Complete fields above' : `Select ${SPEC_LABEL[field]}`}
                         />
                       </SelectTrigger>
                       <SelectContent>
@@ -809,10 +853,10 @@ export function ValveConfigurator({
             {canFinishNow && (
               <Button
                 type="button"
-                onClick={finishAndEmit}
+                onClick={() => setStage('supplier')}
                 className="bg-brand-green-500 text-white hover:bg-brand-green-600"
               >
-                Set Quantity & Done <ChevronRight className="ml-1 size-4" />
+                Next <ChevronRight className="ml-1 size-4" />
               </Button>
             )}
           </div>
@@ -841,7 +885,11 @@ export function ValveConfigurator({
               }}
             >
               <SelectTrigger className="h-11 w-full">
-                <SelectValue placeholder="Select an actuator model" />
+                <SelectValue placeholder="Select an actuator model">
+                  {operatorModel
+                    ? `${operatorModel.model_name}${operatorModel.size ? ` — ${operatorModel.size}` : ''}`
+                    : null}
+                </SelectValue>
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value={SELECT_EMPTY}>
@@ -961,8 +1009,75 @@ export function ValveConfigurator({
             </Button>
             <Button
               type="button"
-              onClick={finishAndEmit}
+              onClick={() => setStage('supplier')}
               className="bg-brand-green-500 text-white hover:bg-brand-green-600"
+            >
+              Next: Supplier <ChevronRight className="ml-1 size-4" />
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {stage === 'supplier' && (
+        <div className="mt-4 space-y-4">
+          <p className="text-[12px] text-surface-muted">
+            Select which supplier will provide this assembled product.
+          </p>
+
+          {(suppliers ?? []).length === 0 ? (
+            <p className="text-[13px] text-surface-muted">
+              No suppliers configured. Add suppliers under Masters.
+            </p>
+          ) : (
+            <div className="space-y-1.5">
+              <div className="text-[10px] font-medium uppercase tracking-wide text-[#8A9488]">
+                Supplier
+              </div>
+              <Select
+                value={toSelectValue(supplierId ?? '')}
+                onValueChange={(raw) => setSupplierId(fromSelectValue(raw) || null)}
+              >
+                <SelectTrigger className="h-11 w-full">
+                  <SelectValue placeholder="Select supplier">
+                    {supplierLabel}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={SELECT_EMPTY}>
+                    <span className="text-muted-foreground">Select…</span>
+                  </SelectItem>
+                  {(suppliers ?? [])
+                    .filter((s) => s.is_active)
+                    .map((s) => (
+                      <SelectItem key={s.id} value={s.id}>
+                        {s.name}
+                        {s.is_preferred ? ' ★' : ''}
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
+          <PriceSummary
+            price={priceInfo}
+            quantity={quantity}
+            onQuantityChange={setQuantity}
+          />
+
+          <div className="flex items-center justify-between">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setStage(operatorUnlocksAccessories ? 'accessories' : 'operator')}
+            >
+              <ChevronLeft className="mr-1 size-4" /> Back
+            </Button>
+            <Button
+              type="button"
+              onClick={finishAndEmit}
+              disabled={(suppliers ?? []).length > 0 && !supplierId}
+              className="bg-brand-green-500 text-white hover:bg-brand-green-600 disabled:opacity-50"
             >
               <Check className="mr-1 size-4" /> Add to Quote
             </Button>

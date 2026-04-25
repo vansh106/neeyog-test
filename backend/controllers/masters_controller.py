@@ -122,14 +122,4 @@ async def handle_cascade_rows(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-async def handle_update_catalog_price(
-    db: AsyncSession, category: str, row_id: str, price_inr: float | None
-) -> dict:
-    try:
-        return await masters_service.update_catalog_row_price(category, row_id, price_inr, db)
-    except ProductNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+

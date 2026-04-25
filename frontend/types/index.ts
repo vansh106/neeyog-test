@@ -132,6 +132,111 @@ export interface ClientDropdownOption {
   source: 'db' | 'dummy'
 }
 
+export const CLIENT_INDUSTRY_OPTIONS = [
+  'Pharmaceutical',
+  'Dairy',
+  'Chemical',
+  'Food & Beverage',
+  'Oil & Gas',
+  'Water Treatment',
+  'General Manufacturing',
+  'Other',
+] as const
+
+export interface BranchResponse {
+  id: string
+  branch_name: string
+  is_headquarters: boolean
+  contact_name: string | null
+  designation: string | null
+  phone: string | null
+  email: string | null
+  city: string
+  state: string | null
+  pincode: string | null
+  address_line1: string | null
+  country: string
+  enquiry_count: number
+  is_active: boolean
+}
+
+export interface CompanyRecentEnquiry {
+  enquiry_id: string
+  created_at: string
+  branch_name: string
+  status: string
+}
+
+export interface CompanyResponse {
+  id: string
+  company_name: string
+  gst_number: string | null
+  industry: string | null
+  erp_code: string | null
+  is_erp_synced: boolean
+  total_enquiry_count: number
+  branch_count: number
+  branches: BranchResponse[]
+  is_active: boolean
+  created_at: string
+  recent_enquiries?: CompanyRecentEnquiry[]
+}
+
+export interface CreateCompanyRequestPayload {
+  company_name?: string
+  gst_number?: string | null
+  industry?: string | null
+  notes?: string | null
+  is_active?: boolean
+  branch_name?: string
+  contact_name?: string | null
+  designation?: string | null
+  phone?: string | null
+  email?: string | null
+  city: string
+  state?: string | null
+  pincode?: string | null
+  address_line1?: string | null
+  country?: string
+}
+
+export interface AddBranchRequestPayload {
+  branch_name: string
+  contact_name?: string | null
+  designation?: string | null
+  phone?: string | null
+  email?: string | null
+  city: string
+  state?: string | null
+  pincode?: string | null
+  address_line1?: string | null
+  country?: string
+}
+
+/** UI state for branch-aware client selection (manual entry / CRM). */
+export interface ClientSelection {
+  mode: 'existing' | 'new'
+  selectedCompany: CompanyResponse | null
+  selectedBranch: BranchResponse | null
+  newCompany: {
+    company_name: string
+    gst_number: string
+    industry: string
+  }
+  newBranch: {
+    branch_name: string
+    contact_name: string
+    designation: string
+    phone: string
+    email: string
+    city: string
+    state: string
+    pincode: string
+    address_line1: string
+    country: string
+  }
+}
+
 export interface ProductSizeOption {
   id: string
   name: string
@@ -167,17 +272,41 @@ export interface ManualLineItem {
 
 export interface ManualEnquiryForm {
   clientMode: 'existing' | 'new'
+  /** Selected branch id (UUID) for DB clients; dummy-* for demo clients. */
   selectedClientId: string | null
   newClient: {
     company_name: string
+    gst_number: string
+    industry: string
+    branch_name: string
     contact_name: string
+    designation: string
     phone: string
     email: string
+    city: string
+    state: string
+    pincode: string
+    address_line1: string
+    country: string
+    /** @deprecated use address_line1 */
     address: string
   }
   lineItems: ManualLineItem[]
   priority: 'Normal' | 'High' | 'Urgent'
   notes: string
+  /** Optional supplier + pricing context for manual flow (stored on enquiry raw JSON when supported). */
+  supplierPricing?: ManualSupplierPricingContext | null
+}
+
+export interface ManualSupplierPricingContext {
+  supplier_id: string
+  supplier_name: string
+  margin_multiplier: number
+  customer_discount_pct: number
+  subtotal: number
+  gst_amount: number
+  pf_amount: number
+  grand_total: number
 }
 
 export interface ClientConfig {
@@ -388,6 +517,9 @@ export interface AssembledProduct {
   valve: ValveProduct | null
   operator_key: OperatorKey | null
   operator_model: OperatorModel | null
+  /** Supplier selected for this assembled product (per-product supplier selection). */
+  supplier_id: string | null
+  supplier_name?: string | null
   sov: AccessoryItem | null
   limit_switch_box: AccessoryItem | null
   positioner: AccessoryItem | null
@@ -398,4 +530,91 @@ export interface AssembledProduct {
   has_unknown_prices: boolean
   unknown_components: string[]
   price_breakdown: Array<{ component: string; price: number | null }>
+}
+
+export interface SupplierResponse {
+  id: string
+  name: string
+  primary_category_key: string
+  contact_person: string | null
+  phone: string | null
+  email: string | null
+  is_active: boolean
+  is_preferred: boolean
+  created_at: string
+}
+
+export interface SupplierCategoryPricing {
+  id: string
+  supplier_id: string
+  category_key: string
+  margin_multiplier: number | null
+  supplier_discount_pct: number | null
+  customer_discount_pct: number | null
+}
+
+export interface ResolvedSupplierCategoryPricing {
+  margin_multiplier: number
+  supplier_discount_pct: number
+  customer_discount_pct: number
+}
+
+export interface SupplierPriceRow {
+  id: string
+  supplier_id: string
+  catalog_table: string
+  catalog_row_id: string
+  list_price_inr: number
+  discount_pct_override: number | null
+  effective_discount_pct: number
+  cost_to_parth: number
+}
+
+export interface PricingConfigResponse {
+  margin_multiplier: number
+  default_customer_discount_pct: number
+  default_supplier_id: string | null
+  default_supplier_name: string | null
+}
+
+export interface PriceCalculationResult {
+  list_price: number
+  supplier_discount_pct: number
+  cost_to_parth: number
+  margin_multiplier: number
+  parth_selling_price: number
+  customer_discount_pct: number
+  customer_discount_amount: number
+  final_unit_price: number
+  quantity: number
+  line_total: number
+}
+
+export interface PreviewRow {
+  excel_data: Record<string, string>
+  matched_catalog: {
+    row_id: string
+    description: string
+  } | null
+  price: number | null
+  status: 'will_create' | 'will_update' | 'no_match'
+  reason: string | null
+}
+
+export interface PreviewResult {
+  total: number
+  will_match: number
+  will_fail: number
+  will_update?: number
+  will_create?: number
+  preview_rows: PreviewRow[]
+}
+
+export interface ImportResult {
+  total: number
+  matched: number
+  unmatched: number
+  updated: number
+  created: number
+  unmatched_rows: Record<string, string>[]
 }

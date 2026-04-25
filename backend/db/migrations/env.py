@@ -7,11 +7,15 @@ from core.config import get_settings
 from core.database import Base
 from db.models import (  # noqa: F401
     AuditLog,
-    ClientRecord,
+    ClientBranch,
+    ClientCompany,
+    ClientPricingConfig,
     EmailSyncState,
     Enquiry,
     ProcessedEmail,
     Quotation,
+    Supplier,
+    SupplierProductPrice,
     User,
 )
 from db.sheet_models import (  # noqa: F401
@@ -30,7 +34,14 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 settings = get_settings()
-config.set_main_option("sqlalchemy.url", settings.DATABASE_URL_SYNC)
+
+# IMPORTANT FOR SUPABASE:
+# Alembic must use DATABASE_URL_DIRECT (port 5432 — the direct connection),
+# NOT the transaction pooler (port 6543 / PgBouncer). PgBouncer in
+# transaction mode does not support the DDL / advisory-lock patterns
+# Alembic relies on. ``settings.migration_url`` resolves to DIRECT when
+# set, otherwise falls back to DATABASE_URL_SYNC (suitable for local dev).
+config.set_main_option("sqlalchemy.url", settings.migration_url)
 
 target_metadata = Base.metadata
 

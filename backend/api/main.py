@@ -4,13 +4,14 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.routes import configurator, enquiries, masters, quotations, stream, sync
+from api.routes import clients, configurator, enquiries, masters, quotations, stream, suppliers, sync
 from core.config import get_settings
-from core.database import async_session_factory, init_db
+from core.database import async_session_factory, get_db, init_db
 from db.sheet_models import (
     CatalogBallValveRow,
     CatalogBracketsCouplerRow,
@@ -95,16 +96,36 @@ app.add_middleware(
 app.include_router(enquiries.router)
 app.include_router(quotations.router)
 app.include_router(masters.router, prefix="/api")
+app.include_router(clients.router, prefix="/api")
+app.include_router(suppliers.router, prefix="/api")
 app.include_router(sync.router)
 app.include_router(stream.router)
 app.include_router(configurator.router)
 
 
 @app.get("/health")
-async def health():
+async def health(db: AsyncSession = Depends(get_db)):
     settings = get_settings()
-    return {
+    checks: dict = {
         "status": "ok",
-        "client": settings.ACTIVE_CLIENT,
-        "model": settings.LITELLM_MODEL,
+        "database": "checking",
+        "db_type": "supabase" if settings.is_supabase else "local",
     }
+
+    try:
+        await db.execute(text("SELECT 1"))
+        checks["database"] = "ok"
+    except Exception as exc:  # noqa: BLE001
+        checks["database"] = "error"
+        checks["database_error"] = str(exc)
+        checks["status"] = "degraded"
+
+    checks["llm_configured"] = bool(settings.ANTHROPIC_API_KEY or settings.GEMINI_API_KEY)
+    checks["email_sync"] = (
+        "enabled"
+        if settings.email_sync_enabled and settings.email_address
+        else "disabled"
+    )
+    checks["client"] = settings.ACTIVE_CLIENT
+    checks["model"] = settings.LITELLM_MODEL
+    return checks

@@ -1,4 +1,9 @@
 services:
+  # ── PostgreSQL ─────────────────────────────────────────────
+  # LOCAL DEVELOPMENT ONLY. Gated behind the "local" profile so it does
+  # not start by default when the primary DB is Supabase.
+  # Start with:   docker-compose --profile local up -d
+  #        or:    docker-compose -f docker-compose.local.yml up -d
   postgres:
     image: pgvector/pgvector:pg16
     container_name: cpq_postgres
@@ -16,6 +21,8 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    profiles:
+      - local
 
   redis:
     image: redis:7-alpine
@@ -26,6 +33,7 @@ services:
     volumes:
       - redis_data:/data
 
+  # pgAdmin — local-only, depends on the local Postgres.
   pgadmin:
     image: dpage/pgadmin4:latest
     container_name: cpq_pgadmin
@@ -38,7 +46,12 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    profiles:
+      - local
 
+  # The API container uses whatever DATABASE_URL is set in .env — Supabase
+  # in production, or the local Postgres when started with the "local"
+  # profile + .env.local. Do NOT override DATABASE_URL here.
   api:
     build:
       context: .
@@ -50,16 +63,12 @@ services:
     env_file:
       - .env
     environment:
-      # Override host-local URLs for in-cluster service names
-      DATABASE_URL: postgresql+asyncpg://admin:localpassword@postgres:5432/quotation_system
-      DATABASE_URL_SYNC: postgresql://admin:localpassword@postgres:5432/quotation_system
+      # Redis still points at the in-cluster service name.
       REDIS_URL: redis://redis:6379/0
       PDF_OUTPUT_DIR: /app/output/pdfs
     volumes:
       - ./output:/app/output
     depends_on:
-      postgres:
-        condition: service_healthy
       redis:
         condition: service_started
 

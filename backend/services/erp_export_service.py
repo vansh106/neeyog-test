@@ -97,7 +97,7 @@ def _source_label(input_type: str) -> str:
 async def generate_enquiry_list_excel(
     *,
     enquiry_id: str,
-    client: Any,  # ClientRecord or DummyClient
+    client: Any,  # ClientExportAdapter, DummyClient, or legacy duck-typed client
     parsed_data: dict,
     matched_products: list[dict],
     quotation_data: dict | None,

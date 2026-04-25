@@ -9,7 +9,7 @@ import logging
 from typing import AsyncGenerator
 
 from fastapi import HTTPException
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.exceptions import EnquiryParseError, ProductNotFoundError
@@ -73,19 +73,42 @@ class ManualLineItemRequest(BaseModel):
 
 class ManualNewClientRequest(BaseModel):
     company_name: str
+    gst_number: str | None = None
+    industry: str | None = None
+    branch_name: str = "Head Office"
     contact_name: str = ""
+    designation: str | None = None
     phone: str = ""
     email: str = ""
+    city: str = ""
+    state: str | None = None
+    pincode: str | None = None
+    address_line1: str | None = None
+    country: str = "India"
     address: str = ""
 
 
+class ManualSupplierPricingPayload(BaseModel):
+    supplier_id: str
+    supplier_name: str
+    margin_multiplier: float
+    customer_discount_pct: float
+    subtotal: float
+    gst_amount: float
+    pf_amount: float
+    grand_total: float
+
+
 class ManualDropdownProcessRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     clientMode: str
     selectedClientId: str | None = None
     newClient: ManualNewClientRequest | None = None
     lineItems: list[ManualLineItemRequest]
     priority: str = "Normal"
     notes: str = ""
+    supplier_pricing: ManualSupplierPricingPayload | None = Field(None, alias="supplierPricing")
 
     @model_validator(mode="after")
     def validate_fields(self):
@@ -122,10 +145,11 @@ class EmailInboxItem(BaseModel):
 
 
 def _enquiry_client_org_name(e: Enquiry) -> str:
-    """Display name for list rows: linked client record, else parsed enquiry fields."""
-    client = getattr(e, "client", None)
-    if client is not None and getattr(client, "company_name", None):
-        name = str(client.company_name).strip()
+    """Display name for list rows: linked company via branch, else parsed enquiry fields."""
+    branch = getattr(e, "branch", None)
+    company = getattr(branch, "company", None) if branch is not None else None
+    if company is not None and getattr(company, "company_name", None):
+        name = str(company.company_name).strip()
         if name:
             return name
     pd = e.parsed_data
@@ -201,10 +225,16 @@ async def handle_list_enquiries(
     flow_type: str | None = None,
     limit: int = 50,
     offset: int = 0,
+    company_id: str | None = None,
 ) -> list[EnquiryListItem]:
     try:
         enquiries = await enquiry_service.list_enquiries(
-            db, status=status, flow_type=flow_type, limit=limit, offset=offset,
+            db,
+            status=status,
+            flow_type=flow_type,
+            limit=limit,
+            offset=offset,
+            company_id=company_id,
         )
         return [
             EnquiryListItem(
@@ -228,7 +258,7 @@ async def handle_process_manual_dropdown(
 ) -> EnquiryResponse:
     """Manual dropdown processing: skip AI pipeline and generate quote directly."""
     try:
-        result = await enquiry_service.process_manual_dropdown(body.model_dump(), db)
+        result = await enquiry_service.process_manual_dropdown(body.model_dump(by_alias=True), db)
         return EnquiryResponse(**result)
     except Exception as e:
         logger.exception("Manual dropdown processing failed")

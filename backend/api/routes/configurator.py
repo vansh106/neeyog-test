@@ -6,6 +6,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from controllers import configurator_controller
 from controllers.configurator_controller import (
     AccessoriesResponse,
+    FullCategoryCatalogResponse,
+    FullValveCatalogResponse,
     OperatorsResponse,
     PriceCalcRequest,
     PriceCalcResponse,
@@ -33,6 +35,24 @@ async def valve_options_route(
     return await configurator_controller.handle_valve_options(
         valve_type=valve_type, field=field, filters_json=filters, db=db
     )
+
+
+@router.get("/full-catalog", response_model=FullValveCatalogResponse)
+async def full_catalog_route(
+    valve_type: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return all valve rows for one valve type (one-shot client-side cascade)."""
+    return await configurator_controller.handle_get_full_catalog(valve_type, db)
+
+
+@router.get("/full-category-catalog", response_model=FullCategoryCatalogResponse)
+async def full_category_catalog_route(
+    category: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return all catalog rows for a masters category (one-shot client-side cascade)."""
+    return await configurator_controller.handle_get_full_category_catalog(category, db)
 
 
 @router.get("/resolve-valve", response_model=ResolveValveResponse)

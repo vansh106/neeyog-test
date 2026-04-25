@@ -1,0 +1,51 @@
+# Full local stack — PostgreSQL + Redis + pgAdmin + API.
+# Convenience wrapper that forces the "local" profile on.
+#
+# Usage:
+#     cp .env.local .env
+#     docker-compose -f docker-compose.local.yml up -d
+#
+# NOTE: With this file the api container talks to the in-cluster
+# "postgres" service on port 5432 — override DATABASE_URL accordingly
+# via .env (see .env.local).
+
+services:
+  postgres:
+    extends:
+      file: docker-compose.yml
+      service: postgres
+    profiles: []  # force-on regardless of parent profile
+
+  redis:
+    extends:
+      file: docker-compose.yml
+      service: redis
+
+  pgadmin:
+    extends:
+      file: docker-compose.yml
+      service: pgadmin
+    profiles: []
+
+  api:
+    extends:
+      file: docker-compose.yml
+      service: api
+    environment:
+      # When running the full local stack, point the api at the in-cluster
+      # Postgres container on its internal port (5432). These keys overlay
+      # whatever .env provides.
+      DATABASE_URL: postgresql+asyncpg://admin:localpassword@postgres:5432/quotation_system
+      DATABASE_URL_SYNC: postgresql://admin:localpassword@postgres:5432/quotation_system
+      DATABASE_URL_DIRECT: postgresql://admin:localpassword@postgres:5432/quotation_system
+      REDIS_URL: redis://redis:6379/0
+      PDF_OUTPUT_DIR: /app/output/pdfs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+volumes:
+  postgres_data:
+  redis_data:

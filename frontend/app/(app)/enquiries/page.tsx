@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
 import { useQueries } from '@tanstack/react-query'
 import { Download, Eye, FileText, Inbox } from 'lucide-react'
 import PageShell from '@/components/layout/PageShell'
@@ -92,6 +93,9 @@ function TableSkeletonRows() {
 }
 
 export default function EnquiriesPage() {
+  const searchParams = useSearchParams()
+  const companyFilter = searchParams.get('company_id') || undefined
+
   const [pipeline, setPipeline] = useState<Pipeline>('all')
   const [statusSelect, setStatusSelect] = useState('all')
   const [flowSelect, setFlowSelect] = useState('all')
@@ -99,12 +103,17 @@ export default function EnquiriesPage() {
   const { data: countsData = [] } = useEnquiries({ limit: 500 })
 
   const tableParams = useMemo(
-    () => buildTableParams(pipeline, statusSelect, flowSelect),
-    [pipeline, statusSelect, flowSelect],
+    () => ({
+      ...buildTableParams(pipeline, statusSelect, flowSelect),
+      ...(companyFilter ? { company_id: companyFilter } : {}),
+    }),
+    [pipeline, statusSelect, flowSelect, companyFilter],
   )
 
   const { data: tableRaw, isPending } = useEnquiries(
-    pipeline === 'pending' ? { limit: 300 } : tableParams,
+    pipeline === 'pending'
+      ? { limit: 300, ...(companyFilter ? { company_id: companyFilter } : {}) }
+      : tableParams,
   )
 
   const rows = useMemo(() => {

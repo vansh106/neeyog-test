@@ -168,6 +168,37 @@ async def get_distinct_values(
     return out
 
 
+async def get_full_valve_catalog(valve_type: str, db: AsyncSession) -> list[dict[str, Any]]:
+    """Return every catalog row for a valve type as plain dicts (client-side cascades).
+
+    Payload is intentionally small: ``row_id``/``id``, ``price_inr``, and the
+    spec columns used by the configurator UI — no ORM-only internals.
+    """
+    key = _valve_type_key(valve_type)
+    model = _model_for_valve_type(valve_type)
+    cols = VALVE_SPEC_COLUMNS.get(key, [])
+    col_attrs = [getattr(model, c) for c in cols if getattr(model, c, None) is not None]
+
+    stmt = (
+        select(model.row_id, *col_attrs)
+        .where(
+            model.client_id == _active_client_id(),
+            model.variant_type.ilike(key),
+        )
+        .order_by(model.row_id)
+    )
+    result = await db.execute(stmt)
+    out: list[dict[str, Any]] = []
+    for row in result.mappings().all():
+        d = dict(row)
+        rid = d.pop("row_id")
+        d["id"] = str(rid)
+        # Universal price removed; pricing is supplier-specific.
+        d["price_inr"] = None
+        out.append(d)
+    return out
+
+
 # ── FUNCTION 2: resolve_valve ─────────────────────────────────────────────
 async def resolve_valve(
     valve_type: str,
@@ -206,9 +237,8 @@ async def resolve_valve(
     }
     for col_name in allowed:
         out[col_name] = getattr(row, col_name, None)
-    price = getattr(row, "price_inr", None)
-    out["base_price"] = float(price) if price is not None else None
-    out["has_price"] = price is not None
+    out["base_price"] = None
+    out["has_price"] = False
     return out
 
 
@@ -221,7 +251,7 @@ def _row_to_operator(r: CatalogOperatorRow) -> dict | None:
         "id": str(r.row_id),
         "model_name": r.model_name,
         "size": r.size_text,
-        "base_price": float(r.price_inr) if r.price_inr is not None else None,
+        "base_price": None,
         "operator_type": otype,
     }
 
@@ -294,7 +324,7 @@ async def get_bracket_for_valve(
     return {
         "id": str(row.row_id),
         "size": row.size_text,
-        "price": float(row.price_inr) if row.price_inr is not None else None,
+        "price": None,
     }
 
 
@@ -312,7 +342,7 @@ async def get_all_accessories(db: AsyncSession) -> dict:
                     "id": str(r.row_id),
                     "sr_no": int(r.sr_no) if r.sr_no is not None else 0,
                     "type": r.variant_type or "",
-                    "price": float(r.price_inr) if r.price_inr is not None else None,
+                    "price": None,
                 }
             )
         return out
