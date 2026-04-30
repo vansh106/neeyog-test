@@ -13,9 +13,10 @@ from sqlalchemy import desc, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from core.config import get_settings
 from core.database import async_session_factory
 from core.exceptions import EnquiryParseError, ProductNotFoundError
-from db.models import AuditLog, ClientBranch, Enquiry, Quotation
+from db.models import AuditLog, ClientBranch, Enquiry, Quotation, QuotationProductHistory
 
 logger = logging.getLogger(__name__)
 
@@ -279,6 +280,7 @@ async def process_manual_dropdown(body: dict, db: AsyncSession) -> dict:
     parsed_products: list[dict] = []
     matched_products: list[dict] = []
     quote_line_items: list[dict] = []
+    history_rows: list[dict] = []
 
     for li in line_items_in:
         if not isinstance(li, dict):
@@ -324,12 +326,47 @@ async def process_manual_dropdown(body: dict, db: AsyncSession) -> dict:
                 "unit": unit,
             }
         )
+        cascade = li.get("cascadeSelections") or {}
+        if not isinstance(cascade, dict):
+            cascade = {}
+        cat = str(li.get("category") or "unknown").strip().lower()
+        catalog_table = None
+        catalog_row_id = None
+        raw_sp_id = sp.get("id")
+        if isinstance(raw_sp_id, str) and ":" in raw_sp_id:
+            parts = raw_sp_id.split(":", 1)
+            if len(parts) == 2 and parts[0] and parts[1]:
+                catalog_table = parts[0].strip().lower()
+                try:
+                    catalog_row_id = uuid.UUID(parts[1].strip())
+                except ValueError:
+                    catalog_row_id = None
         quote_line_items.append(
             {
                 "description": description,
                 "quantity": qty,
                 "unit_price": unit_price,
                 "unit": unit,
+                # Preserve product identity for downstream features (history lookup, etc).
+                "category": cat,
+                "catalog_table": catalog_table,
+                "catalog_row_id": str(catalog_row_id) if catalog_row_id else None,
+            }
+        )
+        history_rows.append(
+            {
+                "category": cat,
+                "catalog_table": catalog_table,
+                "catalog_row_id": catalog_row_id,
+                "variant_type": str(cascade.get("variant_type") or "") or None,
+                "construction": str(cascade.get("construction") or "") or None,
+                "valve_size": str(cascade.get("valve_size") or "") or None,
+                "end_connection": str(cascade.get("end_connection") or "") or None,
+                "pressure": str(cascade.get("pressure") or "") or None,
+                "body": str(cascade.get("body") or "") or None,
+                "ball_disc": str(cascade.get("ball_disc") or cascade.get("ball") or "") or None,
+                "stem": str(cascade.get("stem") or "") or None,
+                "seat": str(cascade.get("seat") or "") or None,
             }
         )
 
@@ -420,6 +457,41 @@ async def process_manual_dropdown(body: dict, db: AsyncSession) -> dict:
         notes=notes or None,
     )
     db.add(quotation)
+    await db.commit()
+
+    for idx, qli in enumerate(quote_line_items):
+        h = history_rows[idx] if idx < len(history_rows) else {}
+        unit_price = _clean_float(qli.get("unit_price"), 0.0)
+        quantity = _normalize_int(qli.get("quantity"), 1)
+        line_total = round(unit_price * quantity, 2)
+        db.add(
+            QuotationProductHistory(
+                id=uuid.uuid4(),
+                quotation_id=quotation_id,
+                enquiry_id=enquiry_id,
+                client_config=settings.ACTIVE_CLIENT,
+                quote_number=quote_number,
+                client_name=client_name or None,
+                client_company=client_company or None,
+                line_index=idx,
+                unit_price=unit_price,
+                quantity=quantity,
+                line_total=line_total,
+                currency="INR",
+                category=str(h.get("category") or "unknown"),
+                catalog_table=h.get("catalog_table"),
+                catalog_row_id=h.get("catalog_row_id"),
+                variant_type=h.get("variant_type"),
+                construction=h.get("construction"),
+                valve_size=h.get("valve_size"),
+                end_connection=h.get("end_connection"),
+                pressure=h.get("pressure"),
+                body=h.get("body"),
+                ball_disc=h.get("ball_disc"),
+                stem=h.get("stem"),
+                seat=h.get("seat"),
+            )
+        )
     await db.commit()
 
     pdf_path = await generate_quotation_pdf(quotation_data, client_json)

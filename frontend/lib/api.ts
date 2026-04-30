@@ -85,6 +85,25 @@ export const quotationsApi = {
   getQuotation: <T = unknown>(id: string) => get<T>(`/api/quotations/${id}`),
   listQuotations: <T = unknown>(params?: { limit?: number; offset?: number }) =>
     get<T>('/api/quotations/', params as Record<string, unknown>),
+  getQuoteHistory: <T = unknown>(
+    params: {
+      category: string
+      catalog_table?: string
+      catalog_row_id?: string
+      limit?: number
+      offset?: number
+    } & Partial<{
+      variant_type: string
+      construction: string
+      valve_size: string
+      end_connection: string
+      pressure: string
+      body: string
+      ball_disc: string
+      stem: string
+      seat: string
+    }>,
+  ) => get<T>('/api/quotations/history', params as Record<string, unknown>),
   getPdfUrl: (id: string) => {
     const base = apiBaseURL()
     return `${base}/api/quotations/${id}/pdf`

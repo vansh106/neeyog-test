@@ -1,6 +1,7 @@
 """Route definitions for enquiry endpoints — thin router, no logic."""
 
 from fastapi import APIRouter, Depends, Query
+from fastapi.responses import FileResponse
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -87,3 +88,16 @@ async def get_enquiry_route(
     db: AsyncSession = Depends(get_db),
 ):
     return await enquiry_controller.handle_get_enquiry(enquiry_id, db)
+
+
+@router.get("/{enquiry_id}/erp-export")
+async def get_enquiry_erp_export_route(
+    enquiry_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    path = await enquiry_controller.handle_get_erp_export(enquiry_id, db)
+    return FileResponse(
+        path=path,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        filename=f"EnquiryList_{enquiry_id}.xlsx",
+    )

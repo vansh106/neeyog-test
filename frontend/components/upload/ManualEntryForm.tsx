@@ -160,8 +160,17 @@ function assembledToLineItem(p: AssembledProduct, unitPriceOverride: number | nu
         .join(' — ')
     : 'Valve Assembly'
 
+  const catalogTable = valveTypeToCatalogTable(v?.type)
+  const rawCatalogId = v?.id ?? uuidv4()
+  const catalogId =
+    typeof rawCatalogId === 'string' && rawCatalogId.includes(':')
+      ? rawCatalogId
+      : catalogTable && rawCatalogId
+        ? `${catalogTable}:${rawCatalogId}`
+        : rawCatalogId
+
   const sel = {
-    id: v?.id ?? uuidv4(),
+    id: catalogId,
     name,
     size_inch: parseSizeInch(v?.valve_size ?? null),
     size_mm: parseSizeMm(v?.valve_size ?? null),
@@ -200,7 +209,7 @@ function assembledToLineItem(p: AssembledProduct, unitPriceOverride: number | nu
 
   return {
     id: p.id,
-    category: v?.type ?? 'Valve',
+    category: catalogTable ?? 'unknown',
     cascadeSelections: cascade,
     selectedProduct: sel,
     quantity: p.quantity,
@@ -455,6 +464,7 @@ export default function ManualEntryForm({ onSubmitManual, isProcessing }: Props)
   const [suppliers, setSuppliers] = useState<SupplierResponse[]>([])
   const [productCalcs, setProductCalcs] = useState<ProductPricingCalc[]>([])
   const [pricingLoading, setPricingLoading] = useState(false)
+  const [tempQuoteUnitByProduct, setTempQuoteUnitByProduct] = useState<Record<string, string>>({})
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedCompanyQuery(companyQuery), 300)
@@ -537,14 +547,29 @@ export default function ManualEntryForm({ onSubmitManual, isProcessing }: Props)
   }, [selectedCompany, selectedBranchId])
 
   const totalEstimate = useMemo(() => {
+    const parseOverride = (id: string): number | null => {
+      const raw = (tempQuoteUnitByProduct[id] ?? '').trim()
+      if (!raw) return null
+      const n = Number(raw)
+      if (!Number.isFinite(n) || n <= 0) return null
+      return n
+    }
+
     if (productCalcs.length && productCalcs.every((c) => c.ok)) {
-      return productCalcs.reduce((s, c) => s + c.lineTotal, 0)
+      return assembledProducts.reduce((sum, p) => {
+        const ov = parseOverride(p.id)
+        if (ov != null) return sum + ov * p.quantity
+        const pc = productCalcs.find((c) => c.productId === p.id)
+        return sum + (pc?.lineTotal ?? 0)
+      }, 0)
     }
     return assembledProducts.reduce((sum, p) => {
+      const ov = parseOverride(p.id)
+      if (ov != null) return sum + ov * p.quantity
       if (p.unit_price == null) return sum
       return sum + p.unit_price * p.quantity
     }, 0)
-  }, [assembledProducts, productCalcs])
+  }, [assembledProducts, productCalcs, tempQuoteUnitByProduct])
 
   useEffect(() => {
     if (assembledProducts.length === 0) {
@@ -615,18 +640,53 @@ export default function ManualEntryForm({ onSubmitManual, isProcessing }: Props)
   }, [assembledProducts, suppliers.length])
 
   const pricingTotals = useMemo(() => {
-    if (!productCalcs.length || !productCalcs.every((c) => c.ok)) return null
-    const subtotal = productCalcs.reduce((s, c) => s + c.lineTotal, 0)
+    const parseOverride = (id: string): number | null => {
+      const raw = (tempQuoteUnitByProduct[id] ?? '').trim()
+      if (!raw) return null
+      const n = Number(raw)
+      if (!Number.isFinite(n) || n <= 0) return null
+      return n
+    }
+
+    if (!productCalcs.length) return null
+    if (assembledProducts.length === 0) return null
+
+    // Subtotal: per product we accept either an override unit price OR supplier-calculated price.
+    let subtotal = 0
+    for (const p of assembledProducts) {
+      const ov = parseOverride(p.id)
+      if (ov != null) {
+        subtotal += ov * p.quantity
+        continue
+      }
+      const pc = productCalcs.find((c) => c.productId === p.id)
+      if (!pc?.ok) return null
+      subtotal += pc.lineTotal
+    }
     const gst = subtotal * 0.18
     const pf = subtotal * 0.03
     const grand = subtotal + gst + pf
     return { subtotal, gst, pf, grand }
-  }, [productCalcs])
+  }, [assembledProducts, productCalcs, tempQuoteUnitByProduct])
 
   const supplierRequired = suppliers.length > 0
-  const pricingReady =
-    !supplierRequired ||
-    (productCalcs.length === assembledProducts.length && productCalcs.every((c) => c.ok))
+  const pricingReady = useMemo(() => {
+    if (!supplierRequired) return true
+    if (assembledProducts.length === 0) return false
+    const parseOverride = (id: string): number | null => {
+      const raw = (tempQuoteUnitByProduct[id] ?? '').trim()
+      if (!raw) return null
+      const n = Number(raw)
+      if (!Number.isFinite(n) || n <= 0) return null
+      return n
+    }
+    return assembledProducts.every((p) => {
+      const ov = parseOverride(p.id)
+      if (ov != null) return true
+      const pc = productCalcs.find((c) => c.productId === p.id)
+      return Boolean(pc?.ok)
+    })
+  }, [assembledProducts, productCalcs, supplierRequired, tempQuoteUnitByProduct])
 
   const handleProductComplete = useCallback(
     (configId: string) => (product: AssembledProduct) => {
@@ -682,7 +742,10 @@ export default function ManualEntryForm({ onSubmitManual, isProcessing }: Props)
     if (supplierRequired) {
       const missingSupplier = assembledProducts.some((p) => !p.supplier_id)
       if (missingSupplier) e.supplier = 'Please select a supplier for each product'
-      else if (!pricingReady) e.pricing = 'Supplier list prices are missing for one or more components'
+      else if (!pricingReady) {
+        e.pricing =
+          'Prices are missing for one or more products. Either configure supplier list prices, or enter a temporary quote unit price override.'
+      }
     }
     setErrors(e)
     return Object.keys(e).length === 0
@@ -710,6 +773,13 @@ export default function ManualEntryForm({ onSubmitManual, isProcessing }: Props)
 
   async function submit() {
     if (!validate()) return
+    const overrideByProductId = new Map<string, number>()
+    for (const [pid, raw] of Object.entries(tempQuoteUnitByProduct)) {
+      const t = String(raw ?? '').trim()
+      if (!t) continue
+      const n = Number(t)
+      if (Number.isFinite(n) && n > 0) overrideByProductId.set(pid, n)
+    }
     const unitByProduct = new Map(
       productCalcs.filter((c) => c.ok).map((c) => [c.productId, c.assemblyUnit]),
     )
@@ -720,7 +790,9 @@ export default function ManualEntryForm({ onSubmitManual, isProcessing }: Props)
         ...newClient,
         address: newClient.address_line1 || newClient.address,
       },
-      lineItems: assembledProducts.map((p) => assembledToLineItem(p, unitByProduct.get(p.id) ?? null)),
+      lineItems: assembledProducts.map((p) =>
+        assembledToLineItem(p, overrideByProductId.get(p.id) ?? unitByProduct.get(p.id) ?? null),
+      ),
       priority,
       notes,
     }
@@ -1295,17 +1367,23 @@ export default function ManualEntryForm({ onSubmitManual, isProcessing }: Props)
                         <th className="px-3 py-2">Supplier price</th>
                         <th className="px-3 py-2">Cost to Parth</th>
                         <th className="px-3 py-2">Selling (unit)</th>
+                        <th className="px-3 py-2">Quote unit (temp)</th>
                         <th className="px-3 py-2 text-right">Line total</th>
                       </tr>
                     </thead>
                     <tbody>
                       {assembledProducts.map((p) => {
                         const pc = productCalcs.find((c) => c.productId === p.id)
+                        const overrideRaw = (tempQuoteUnitByProduct[p.id] ?? '').trim()
+                        const overrideNum =
+                          overrideRaw && Number.isFinite(Number(overrideRaw)) && Number(overrideRaw) > 0
+                            ? Number(overrideRaw)
+                            : null
                         if (!pc) {
                           return (
                             <tr key={p.id} className="border-b border-[#E2E6DC]">
                               <td className="px-3 py-2">{assemblyLabel(p)}</td>
-                              <td colSpan={4} className="px-3 py-2 text-surface-muted">
+                              <td colSpan={5} className="px-3 py-2 text-surface-muted">
                                 —
                               </td>
                             </tr>
@@ -1315,21 +1393,51 @@ export default function ManualEntryForm({ onSubmitManual, isProcessing }: Props)
                           return (
                             <tr key={p.id} className="border-b border-[#E2E6DC]">
                               <td className="px-3 py-2">{pc.label}</td>
-                              <td colSpan={4} className="px-3 py-2 text-amber-800">
-                                Price not configured for this supplier — {pc.missing.join(', ')} — contact admin.
+                              <td colSpan={3} className="px-3 py-2 text-amber-800">
+                                Price not configured for this supplier — {pc.missing.join(', ')}
+                              </td>
+                              <td className="px-3 py-2">
+                                <Input
+                                  value={tempQuoteUnitByProduct[p.id] ?? ''}
+                                  onChange={(e) =>
+                                    setTempQuoteUnitByProduct((cur) => ({ ...cur, [p.id]: e.target.value }))
+                                  }
+                                  className="h-8 w-32 font-mono"
+                                  placeholder="e.g. 12500"
+                                />
+                                <p className="mt-1 text-[10px] text-surface-muted">
+                                  Temporary quote price (doesn&apos;t change Masters)
+                                </p>
+                              </td>
+                              <td className="px-3 py-2 text-right font-mono text-surface-muted">
+                                {overrideNum != null ? formatCurrency(overrideNum * p.quantity) : '—'}
                               </td>
                             </tr>
                           )
                         }
                         const listSum = pc.rows.reduce((s, r) => s + r.calc.list_price, 0)
                         const costSum = pc.rows.reduce((s, r) => s + r.calc.cost_to_parth, 0)
+                        const effectiveUnit = overrideNum ?? pc.assemblyUnit
+                        const effectiveLine = effectiveUnit * p.quantity
                         return (
                           <tr key={p.id} className="border-b border-[#E2E6DC]">
                             <td className="px-3 py-2 font-medium text-gray-900">{pc.label}</td>
                             <td className="px-3 py-2 font-mono">{formatCurrency(listSum)}</td>
                             <td className="px-3 py-2 font-mono">{formatCurrency(costSum)}</td>
                             <td className="px-3 py-2 font-mono">{formatCurrency(pc.assemblyUnit)}</td>
-                            <td className="px-3 py-2 text-right font-mono">{formatCurrency(pc.lineTotal)}</td>
+                            <td className="px-3 py-2">
+                              <Input
+                                value={tempQuoteUnitByProduct[p.id] ?? ''}
+                                onChange={(e) =>
+                                  setTempQuoteUnitByProduct((cur) => ({ ...cur, [p.id]: e.target.value }))
+                                }
+                                className="h-8 w-32 font-mono"
+                                placeholder="(optional)"
+                              />
+                            </td>
+                            <td className="px-3 py-2 text-right font-mono">
+                              {formatCurrency(effectiveLine)}
+                            </td>
                           </tr>
                         )
                       })}

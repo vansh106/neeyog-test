@@ -5,10 +5,47 @@ from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from controllers import quotation_controller
-from controllers.quotation_controller import QuotationListItem
+from controllers.quotation_controller import QuotationHistoryResponse, QuotationListItem
 from core.database import get_db
 
 router = APIRouter(prefix="/api/quotations", tags=["quotations"])
+
+
+@router.get("/history", response_model=QuotationHistoryResponse)
+async def get_product_quote_history_route(
+    category: str = Query(..., description="Product category key, e.g. butterfly_valve"),
+    catalog_table: str | None = Query(None, description="Exact match: catalog table key"),
+    catalog_row_id: str | None = Query(None, description="Exact match: catalog row UUID"),
+    variant_type: str | None = Query(None),
+    construction: str | None = Query(None),
+    valve_size: str | None = Query(None),
+    end_connection: str | None = Query(None),
+    pressure: str | None = Query(None),
+    body: str | None = Query(None),
+    ball_disc: str | None = Query(None),
+    stem: str | None = Query(None),
+    seat: str | None = Query(None),
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+):
+    return await quotation_controller.handle_get_product_quote_history(
+        db,
+        category=category,
+        catalog_table=catalog_table,
+        catalog_row_id=catalog_row_id,
+        variant_type=variant_type,
+        construction=construction,
+        valve_size=valve_size,
+        end_connection=end_connection,
+        pressure=pressure,
+        body=body,
+        ball_disc=ball_disc,
+        stem=stem,
+        seat=seat,
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.get("/{quotation_id}/pdf")

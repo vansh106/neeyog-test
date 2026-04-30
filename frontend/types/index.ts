@@ -54,6 +54,9 @@ export interface QuotationLineItem {
   line_total: number
   total?: number
   product_name?: string
+  category?: string | null
+  catalog_table?: string | null
+  catalog_row_id?: string | null
 }
 
 export interface Quotation {
@@ -77,6 +80,38 @@ export interface Quotation {
   pdf_path: string | null
   notes: string | null
   created_at: string | null
+}
+
+export interface QuotationHistoryItem {
+  quotation_id: string
+  enquiry_id: string
+  quote_number: string
+  quoted_at: string
+  client_name: string | null
+  client_company: string | null
+  unit_price: number
+  quantity: number
+  line_total: number
+  currency: string
+  category: string
+  product: {
+    catalog_table: string | null
+    catalog_row_id: string | null
+    variant_type: string | null
+    construction: string | null
+    valve_size: string | null
+    end_connection: string | null
+    pressure: string | null
+    body: string | null
+    ball_disc: string | null
+    stem: string | null
+    seat: string | null
+  }
+}
+
+export interface QuotationHistoryResponse {
+  total: number
+  items: QuotationHistoryItem[]
 }
 
 export interface QuotationListItem {

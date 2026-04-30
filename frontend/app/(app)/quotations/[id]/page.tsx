@@ -2,16 +2,25 @@
 
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
-import { FileText } from 'lucide-react'
+import { FileText, Info } from 'lucide-react'
+import { useMemo, useState } from 'react'
 import PageShell from '@/components/layout/PageShell'
 import StatusBadge from '@/components/ui/StatusBadge'
 import EmptyState from '@/components/ui/EmptyState'
 import { Skeleton } from '@/components/ui/skeleton'
-import { buttonVariants } from '@/components/ui/button'
+import { Button, buttonVariants } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { useQuotation, useClientConfig, useEnquiry } from '@/lib/queries'
 import { quotationsApi } from '@/lib/api'
 import { cn, formatCurrency } from '@/lib/utils'
-import type { QuotationLineItem } from '@/types'
+import type { QuotationHistoryResponse, QuotationLineItem } from '@/types'
 
 function formatQuoteDate(iso: string | null): string {
   if (!iso) return '—'
@@ -38,6 +47,49 @@ function QuotationDetailSkeleton() {
 export default function QuotationDetailPage() {
   const params = useParams()
   const id = typeof params?.id === 'string' ? params.id : Array.isArray(params?.id) ? params.id[0] : ''
+
+  // Hooks MUST be declared before any conditional returns.
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [historyLoading, setHistoryLoading] = useState(false)
+  const [historyError, setHistoryError] = useState<string | null>(null)
+  const [historyData, setHistoryData] = useState<QuotationHistoryResponse | null>(null)
+  const [activeLine, setActiveLine] = useState<QuotationLineItem | null>(null)
+
+  const activeLineLabel = useMemo(() => {
+    if (!activeLine) return ''
+    return (activeLine.product_name || activeLine.description || 'Line item').toString()
+  }, [activeLine])
+
+  const openHistory = async (line: QuotationLineItem) => {
+    setActiveLine(line)
+    setHistoryOpen(true)
+    setHistoryError(null)
+    setHistoryData(null)
+
+    const category = (line.category || line.catalog_table || '').toString().trim()
+    const catalog_table = (line.catalog_table || '').toString().trim()
+    const catalog_row_id = (line.catalog_row_id || '').toString().trim()
+    if (!category || !catalog_table || !catalog_row_id) {
+      setHistoryError('History lookup is unavailable for this line item (missing product identifiers).')
+      return
+    }
+
+    setHistoryLoading(true)
+    try {
+      const res = await quotationsApi.getQuoteHistory<QuotationHistoryResponse>({
+        category,
+        catalog_table,
+        catalog_row_id,
+        limit: 20,
+        offset: 0,
+      })
+      setHistoryData(res)
+    } catch (e: unknown) {
+      setHistoryError(e instanceof Error ? e.message : 'Failed to load history')
+    } finally {
+      setHistoryLoading(false)
+    }
+  }
 
   const { data: quotation, isPending, isError } = useQuotation(id)
   const { data: clientConfig } = useClientConfig()
@@ -158,7 +210,21 @@ export default function QuotationDetailPage() {
                           idx % 2 === 1 ? 'bg-[#F9FAF7]' : 'bg-white',
                         )}
                       >
-                        <td className="px-2 py-2.5 text-surface-muted">{idx + 1}</td>
+                        <td className="px-2 py-2.5 text-surface-muted">
+                          <div className="flex items-center gap-2">
+                            <span>{idx + 1}</span>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              className="h-7 w-7 p-0 text-surface-muted hover:text-gray-900"
+                              onClick={() => void openHistory(line)}
+                              title="View quote history"
+                            >
+                              <Info className="size-4" />
+                              <span className="sr-only">View quote history</span>
+                            </Button>
+                          </div>
+                        </td>
                         <td className="max-w-[200px] px-2 py-2.5 text-gray-900">
                           {line.product_name || line.description}
                         </td>
@@ -222,6 +288,54 @@ export default function QuotationDetailPage() {
             </div>
           </div>
         </div>
+
+        <Dialog open={historyOpen} onOpenChange={setHistoryOpen}>
+          <DialogContent className="sm:max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>Quoted price history</DialogTitle>
+              <DialogDescription className="line-clamp-2">
+                {activeLineLabel}
+              </DialogDescription>
+            </DialogHeader>
+
+            {historyLoading ? (
+              <p className="text-[13px] text-surface-muted">Loading history…</p>
+            ) : historyError ? (
+              <p className="text-[13px] text-red-600">{historyError}</p>
+            ) : !historyData || historyData.items.length === 0 ? (
+              <p className="text-[13px] text-surface-muted">No prior quotes found for this product.</p>
+            ) : (
+              <div className="overflow-x-auto rounded-lg border border-surface-border">
+                <table className="w-full border-collapse text-left text-[13px]">
+                  <thead>
+                    <tr className="bg-[#F4F5F0] text-[11px] font-medium uppercase tracking-wide text-[#8A9488]">
+                      <th className="px-3 py-2">Client</th>
+                      <th className="px-3 py-2 text-right">Price quoted</th>
+                      <th className="px-3 py-2">Date quoted</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {historyData.items.map((h, i) => (
+                      <tr key={`${h.quotation_id}-${i}`} className="border-b border-[#E2E6DC] last:border-0">
+                        <td className="px-3 py-2 text-gray-900">
+                          {(h.client_company || h.client_name || '—').toString()}
+                        </td>
+                        <td className="px-3 py-2 text-right font-mono text-gray-900">
+                          {formatCurrency(h.unit_price)}
+                        </td>
+                        <td className="px-3 py-2 text-surface-muted">
+                          {formatQuoteDate(h.quoted_at)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <DialogFooter showCloseButton />
+          </DialogContent>
+        </Dialog>
 
         <aside className="lg:col-span-2">
           <div className="sticky top-6 space-y-4">

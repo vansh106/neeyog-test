@@ -161,6 +161,55 @@ class Quotation(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
 
 
+class QuotationProductHistory(Base):
+    """Searchable snapshot of quoted product pricing per quote line."""
+
+    __tablename__ = "quotation_product_history"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    quotation_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("quotations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    enquiry_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("enquiries.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    client_config: Mapped[str] = mapped_column(String(100), nullable=False, default="parth_valves", index=True)
+
+    quote_number: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    quoted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow, index=True)
+    client_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    client_company: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    line_index: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    unit_price: Mapped[float] = mapped_column(Float, nullable=False)
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    line_total: Mapped[float] = mapped_column(Float, nullable=False)
+    currency: Mapped[str] = mapped_column(String(10), nullable=False, default="INR")
+
+    category: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    catalog_table: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    catalog_row_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
+
+    variant_type: Mapped[str | None] = mapped_column(Text, nullable=True)
+    construction: Mapped[str | None] = mapped_column(Text, nullable=True)
+    valve_size: Mapped[str | None] = mapped_column(Text, nullable=True)
+    end_connection: Mapped[str | None] = mapped_column(Text, nullable=True)
+    pressure: Mapped[str | None] = mapped_column(Text, nullable=True)
+    body: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ball_disc: Mapped[str | None] = mapped_column(Text, nullable=True)
+    stem: Mapped[str | None] = mapped_column(Text, nullable=True)
+    seat: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+
+
 class User(Base):
     __tablename__ = "users"
 

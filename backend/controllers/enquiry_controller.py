@@ -219,6 +219,19 @@ async def handle_get_enquiry(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+async def handle_get_erp_export(
+    enquiry_id: str,
+    db: AsyncSession,
+) -> str:
+    """Return absolute path to the generated ERP export XLSX for this enquiry."""
+    try:
+        return await enquiry_service.get_erp_export_path(enquiry_id, db)
+    except ProductNotFoundError:
+        raise HTTPException(status_code=404, detail="ERP export not found for this enquiry")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 async def handle_list_enquiries(
     db: AsyncSession,
     status: str | None = None,
