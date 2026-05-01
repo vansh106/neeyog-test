@@ -4,7 +4,7 @@ import { useCallback, useState } from 'react'
 
 import { configuratorApi } from '@/lib/api'
 
-/** Session cache: valve type string → rows */
+/** Session cache: catalog API key (e.g. ``butterfly_valve``) → rows */
 const valveCatalogCache = new Map<string, CatalogRow[]>()
 
 /** Session cache: `masters_${category}` → rows */
@@ -56,29 +56,32 @@ export function resolveMatchingRow(catalog: CatalogRow[], allFilters: Filters): 
   return matches[0]
 }
 
-export function useValveCatalog(valveType: string | null) {
+export function useValveCatalog(categoryKey: string | null) {
   const [catalog, setCatalog] = useState<CatalogRow[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const loadCatalog = useCallback(async (type: string, force = false) => {
-    if (!type) return
-    if (!force && valveCatalogCache.has(type)) {
-      setCatalog(valveCatalogCache.get(type)!)
+  const loadCatalog = useCallback(async (cat: string, force = false) => {
+    if (!cat) return
+    if (!force && valveCatalogCache.has(cat)) {
+      setCatalog(valveCatalogCache.get(cat)!)
       setError(null)
       return
     }
-    if (force) valveCatalogCache.delete(type)
+    if (force) valveCatalogCache.delete(cat)
     setIsLoading(true)
     setError(null)
     try {
-      const res = await configuratorApi.getFullCatalog<{
-        valve_type: string
+      const res = await configuratorApi.getFullCategoryCatalog<{
+        category: string
         count: number
         rows: CatalogRow[]
-      }>(type)
-      const rows = res.rows ?? []
-      valveCatalogCache.set(type, rows)
+      }>(cat)
+      const rows = (res.rows ?? []).map((r) => ({
+        ...r,
+        id: r.id ?? (r.row_id != null ? String(r.row_id) : ''),
+      }))
+      valveCatalogCache.set(cat, rows)
       setCatalog(rows)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load catalog')
@@ -117,17 +120,27 @@ export function useValveCatalog(valveType: string | null) {
 
 /** Warm the in-memory valve catalog cache (e.g. from Manual Entry mount). */
 export async function prefetchValveCatalogs(): Promise<void> {
-  for (const vt of ['Butterfly Valve', 'Ball Valve'] as const) {
-    try {
-      const res = await configuratorApi.getFullCatalog<{
-        valve_type: string
-        count: number
-        rows: CatalogRow[]
-      }>(vt)
-      valveCatalogCache.set(vt, res.rows ?? [])
-    } catch {
-      /* non-fatal — configurator will fetch on demand */
+  try {
+    const cats = await configuratorApi.getValveTypes<{ key: string; label: string }[]>()
+    for (const c of cats || []) {
+      if (!c?.key) continue
+      try {
+        const res = await configuratorApi.getFullCategoryCatalog<{
+          category: string
+          count: number
+          rows: CatalogRow[]
+        }>(c.key)
+        const rows = (res.rows ?? []).map((r) => ({
+          ...r,
+          id: r.id ?? (r.row_id != null ? String(r.row_id) : ''),
+        }))
+        valveCatalogCache.set(c.key, rows)
+      } catch {
+        /* skip category */
+      }
     }
+  } catch {
+    /* non-fatal — configurator will fetch on demand */
   }
 }
 

@@ -16,6 +16,12 @@ from core.config import get_settings
 from core.exceptions import ProductNotFoundError
 from masters.product_master import _parse_size_to_mm_inch, get_all_products, get_product_by_id
 from services.client_service import get_dummy_clients, search_companies
+from db.final_product_models import (
+    FINAL_PRODUCT_CASCADE_STEPS,
+    FINAL_PRODUCT_LABEL_BY_KEY,
+    FINAL_PRODUCT_SHEET_MODELS,
+    FinalProductSheetMarker,
+)
 from db.sheet_models import (
     CatalogBallValveRow,
     CatalogBracketsCouplerRow,
@@ -36,6 +42,7 @@ SHEET_MODEL_BY_KEY: dict[str, type] = {
     "limit_switch_box": CatalogLimitSwitchRow,
     "positioner": CatalogPositionerRow,
 }
+SHEET_MODEL_BY_KEY.update(dict(FINAL_PRODUCT_SHEET_MODELS))
 
 # Human-readable names for manual entry / masters UI (keys stay stable for APIs).
 CATEGORY_LABEL_BY_KEY: dict[str, str] = {
@@ -46,6 +53,7 @@ CATEGORY_LABEL_BY_KEY: dict[str, str] = {
     "sov": "SOV",
     "limit_switch_box": "Limit switch box",
     "positioner": "Positioner",
+    **FINAL_PRODUCT_LABEL_BY_KEY,
 }
 
 # Distinct-value column used like a sub-category in the Masters UI.
@@ -58,6 +66,9 @@ _SUBCATEGORY_FIELD: dict[str, str] = {
     "limit_switch_box": "variant_type",
     "positioner": "variant_type",
 }
+for _fp_key, _fp_model in FINAL_PRODUCT_SHEET_MODELS:
+    if hasattr(_fp_model, "variant_type"):
+        _SUBCATEGORY_FIELD[_fp_key] = "variant_type"
 
 
 def _category_label(key: str) -> str:
@@ -81,6 +92,7 @@ CASCADE_STEPS: dict[str, list[str]] = {
     ],
     "ball_valve": [
         "variant_type",
+        "product_sheet",
         "construction",
         "valve_size",
         "bore_type",
@@ -97,6 +109,7 @@ CASCADE_STEPS: dict[str, list[str]] = {
     "sov": ["variant_type"],
     "limit_switch_box": ["variant_type"],
     "positioner": ["variant_type"],
+    **FINAL_PRODUCT_CASCADE_STEPS,
 }
 
 
@@ -274,8 +287,35 @@ def catalog_row_to_size_option(category: str, row: object) -> dict:
             ]
             if x
         )
+        if getattr(row, "product_sheet", None):
+            name = f"{name} ({row.product_sheet})".strip()
         size_mm, size_inch = _parse_size_to_mm_inch(row.valve_size)
         material = " / ".join(x for x in [row.body, row.ball, row.stem, row.seat, row.fasteners] if x)
+    elif isinstance(row, FinalProductSheetMarker):
+        name = " ".join(
+            x
+            for x in [
+                str(getattr(row, "variant_type", None) or "").strip(),
+                str(getattr(row, "construction", None) or "").strip(),
+                str(getattr(row, "valve_size", None) or "").strip(),
+            ]
+            if x
+        ) or FINAL_PRODUCT_LABEL_BY_KEY.get(category, category.replace("_", " ").title())
+        size_mm, size_inch = _parse_size_to_mm_inch(getattr(row, "valve_size", None))
+        material = " / ".join(
+            x
+            for x in [
+                getattr(row, "body", None),
+                getattr(row, "bonnet", None),
+                getattr(row, "stem", None),
+                getattr(row, "seat", None),
+                getattr(row, "ball", None),
+                getattr(row, "diaphragm", None),
+                getattr(row, "wheel_moc", None),
+                getattr(row, "actuator_moc", None),
+            ]
+            if x
+        )
     elif isinstance(row, CatalogOperatorRow):
         name = ((row.model_name or "").strip() or (row.operator_for or "").strip() or "Operator")
         size_mm, size_inch = _parse_size_to_mm_inch(row.size_text)

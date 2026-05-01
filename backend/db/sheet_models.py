@@ -29,7 +29,7 @@ class _CatalogBase(Base):
 
 
 class CatalogButterflyValveRow(_CatalogBase):
-    __tablename__ = "catalog_butterfly_valve"
+    __tablename__ = "catalog_fp_butterfly_all_products"
 
     sr_no: Mapped[float | None] = mapped_column(Float, nullable=True)
     variant_type: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -47,7 +47,7 @@ class CatalogButterflyValveRow(_CatalogBase):
 
 
 class CatalogBallValveRow(_CatalogBase):
-    __tablename__ = "catalog_ball_valve"
+    __tablename__ = "catalog_fp_ball_flush"
 
     sr_no: Mapped[float | None] = mapped_column(Float, nullable=True)
     variant_type: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -62,6 +62,7 @@ class CatalogBallValveRow(_CatalogBase):
     seat: Mapped[str | None] = mapped_column(Text, nullable=True)
     fasteners: Mapped[str | None] = mapped_column(Text, nullable=True)
     source_file: Mapped[str | None] = mapped_column(Text, nullable=True)
+    product_sheet: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class CatalogOperatorRow(_CatalogBase):
@@ -112,3 +113,6 @@ EXCEL_SHEET_TO_MODEL: dict[str, tuple[str, type]] = {
     "Limit switch Box": ("limit_switch_box", CatalogLimitSwitchRow),
     "Positioner": ("positioner", CatalogPositionerRow),
 }
+
+# Register Final_Products ORM tables on the same metadata (``init_db`` / Alembic).
+import db.final_product_models  # noqa: E402, F401

@@ -70,6 +70,44 @@ export const CATALOG_SPEC_FIELDS: Record<string, CatalogSpecField[]> = {
   ],
 }
 
+/** Generic pricelist column mapping for ``fp_*`` final-product tables. */
+const FP_CATALOG_GENERIC: CatalogSpecField[] = [
+  { key: 'variant_type', label: 'Variant / Type' },
+  { key: 'construction', label: 'Construction' },
+  { key: 'valve_size', label: 'Valve size' },
+  { key: 'end_connection', label: 'End connection' },
+  { key: 'pressure', label: 'Pressure' },
+  { key: 'bore_type', label: 'Bore type' },
+  { key: 'body', label: 'Body' },
+  { key: 'bonnet', label: 'Bonnet' },
+  { key: 'stem', label: 'Stem' },
+  { key: 'seat', label: 'Seat' },
+  { key: 'ball', label: 'Ball' },
+  { key: 'ball_disc', label: 'Disc' },
+  { key: 'diaphragm', label: 'Diaphragm' },
+  { key: 'tc_od', label: 'TC OD' },
+  { key: 'pipe_od', label: 'Pipe OD' },
+  { key: 'wheel_moc', label: 'Wheel MOC' },
+  { key: 'actuator_moc', label: 'Actuator MOC' },
+  { key: 'set_pressure', label: 'Set pressure' },
+  { key: 'inlet_pressure', label: 'Inlet pressure' },
+  { key: 'set_pressure_range', label: 'Set pressure range' },
+  { key: 'temperature', label: 'Temperature' },
+  { key: 'seating', label: 'Seating' },
+  { key: 'fasteners', label: 'Fasteners' },
+  { key: 'product_sheet', label: 'Product sheet (flush)' },
+  { key: 'price', label: 'Price (₹)' },
+  { key: 'discount_override', label: 'Discount Override (%)' },
+  { key: '__skip__', label: '(Skip this column)' },
+]
+
+export function catalogSpecFieldsFor(category: string): CatalogSpecField[] {
+  const direct = CATALOG_SPEC_FIELDS[category as keyof typeof CATALOG_SPEC_FIELDS]
+  if (direct) return direct
+  if (category.startsWith('fp_')) return FP_CATALOG_GENERIC
+  return CATALOG_SPEC_FIELDS.operator
+}
+
 /** Normalize Excel header → suggested our field key. */
 export const SMART_COLUMN_MAP: Record<string, string> = {
   price: 'price',

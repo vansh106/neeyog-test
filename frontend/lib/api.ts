@@ -310,20 +310,20 @@ export const configuratorApi = {
       filters: JSON.stringify(filters || {}),
     }),
 
-  resolveValve: <T = unknown>(
-    valve_type: string,
-    specs: Record<string, string>,
-  ) => get<T>('/api/configurator/resolve-valve', { valve_type, ...specs }),
+  resolveValve: <T = unknown>(params: Record<string, string>) =>
+    get<T>('/api/configurator/resolve-valve', params),
 
   getOperators: <T = unknown>(
     valve_type: string,
     construction: string,
     valve_size: string,
+    category?: string | null,
   ) =>
     get<T>('/api/configurator/operators', {
       valve_type,
       construction,
       valve_size,
+      ...(category ? { category } : {}),
     }),
 
   getAccessories: <T = unknown>() => get<T>('/api/configurator/accessories'),

@@ -12,15 +12,14 @@ from controllers.configurator_controller import (
     PriceCalcRequest,
     PriceCalcResponse,
     ResolveValveResponse,
+    ValveCategoryItem,
     ValveOptionsResponse,
 )
 from core.database import get_db
-from services.configurator_service import VALVE_SPEC_COLUMNS
-
 router = APIRouter(prefix="/api/configurator", tags=["configurator"])
 
 
-@router.get("/valve-types", response_model=list[str])
+@router.get("/valve-types", response_model=list[ValveCategoryItem])
 async def list_valve_types_route():
     return configurator_controller.handle_list_valve_types()
 
@@ -58,20 +57,10 @@ async def full_category_catalog_route(
 @router.get("/resolve-valve", response_model=ResolveValveResponse)
 async def resolve_valve_route(
     request: Request,
-    valve_type: str = Query(...),
     db: AsyncSession = Depends(get_db),
 ):
-    """All spec fields are passed as individual query params (construction, valve_size, ...).
-
-    Rather than binding each param explicitly, pull the whole query string and
-    forward any spec columns we know about to the service.
-    """
-    allowed = set(VALVE_SPEC_COLUMNS.get(valve_type, []))
-    qp = dict(request.query_params)
-    specs = {k: v for k, v in qp.items() if k in allowed}
-    return await configurator_controller.handle_resolve_valve(
-        valve_type=valve_type, specs=specs, db=db
-    )
+    """Cascade field values as query params plus ``category`` (API key) or legacy ``valve_type``."""
+    return await configurator_controller.handle_resolve_valve(request, db)
 
 
 @router.get("/operators", response_model=OperatorsResponse)
@@ -79,6 +68,7 @@ async def operators_route(
     valve_type: str = Query(...),
     construction: str = Query(...),
     valve_size: str = Query(...),
+    category: str | None = Query(None, description="Catalog API key, e.g. butterfly_valve"),
     db: AsyncSession = Depends(get_db),
 ):
     return await configurator_controller.handle_get_operators(
@@ -86,6 +76,7 @@ async def operators_route(
         construction=construction,
         valve_size=valve_size,
         db=db,
+        catalog_category=category,
     )
 
 

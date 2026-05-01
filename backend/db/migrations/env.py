@@ -27,6 +27,7 @@ from db.sheet_models import (  # noqa: F401
     CatalogPositionerRow,
     CatalogSovRow,
 )
+import db.final_product_models  # noqa: F401
 
 config = context.config
 

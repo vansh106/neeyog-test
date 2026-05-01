@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { suppliersApi } from '@/lib/api'
+import { SIDEBAR_MASTER_CATEGORIES } from '@/lib/masterCatalogCategories'
 import { cn } from '@/lib/utils'
 import type {
   ResolvedSupplierCategoryPricing,
@@ -14,13 +15,7 @@ import type {
 
 const CATEGORIES: { id: string; label: string; key: string }[] = [
   { id: 'all', label: 'All', key: 'all' },
-  { id: 'butterfly_valve', label: 'Butterfly', key: 'butterfly_valve' },
-  { id: 'ball_valve', label: 'Ball valve', key: 'ball_valve' },
-  { id: 'operator', label: 'Operator', key: 'operator' },
-  { id: 'sov', label: 'SOV', key: 'sov' },
-  { id: 'limit_switch_box', label: 'LSB', key: 'limit_switch_box' },
-  { id: 'positioner', label: 'Positioner', key: 'positioner' },
-  { id: 'brackets_coupler', label: 'Brackets', key: 'brackets_coupler' },
+  ...SIDEBAR_MASTER_CATEGORIES.map((c) => ({ id: c.key, label: c.label, key: c.key })),
 ]
 
 export default function SupplierPricingTab() {

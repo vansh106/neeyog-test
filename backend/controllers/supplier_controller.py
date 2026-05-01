@@ -10,10 +10,10 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import Supplier, SupplierCategoryPricing, SupplierProductPrice
-from db.sheet_models import EXCEL_SHEET_TO_MODEL
+from masters.product_master import SHEET_TABLES
 from services import pricing_service
 
-VALID_CATALOG_TABLES = frozenset(key for _, (key, _) in EXCEL_SHEET_TO_MODEL.items())
+VALID_CATALOG_TABLES = frozenset(k for k, _ in SHEET_TABLES)
 
 
 class CreateSupplierRequest(BaseModel):

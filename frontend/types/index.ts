@@ -463,6 +463,9 @@ export type OperatorKey =
 export interface ValveProduct {
   id: string
   type: string
+  /** Masters / catalog API key (e.g. ``butterfly_valve``, ``fp_needle_valve``). */
+  catalog_category?: string | null
+  variant_type?: string | null
   construction: string | null
   valve_size: string | null
   bore_type: string | null
@@ -474,6 +477,8 @@ export interface ValveProduct {
   stem: string | null
   seat: string | null
   fasteners: string | null
+  /** Flush bottom ball rows (``catalog_fp_ball_flush``). */
+  product_sheet?: string | null
   base_price: number | null
   has_price: boolean
 }
@@ -532,19 +537,16 @@ export interface AssemblyPriceBreakdown {
   breakdown: Array<{ component: string; price: number | null }>
 }
 
+export interface CascadeStep {
+  key: string
+  label: string
+}
+
 export interface ValveSpecSelections {
-  valve_type: string | null
-  construction: string | null
-  valve_size: string | null
-  bore_type: string | null
-  end_connection: string | null
-  pressure: string | null
-  body: string | null
-  ball_disc: string | null
-  ball: string | null
-  stem: string | null
-  seat: string | null
-  fasteners: string | null
+  /** Catalog API key from ``/api/configurator/valve-types`` (e.g. ``butterfly_valve``). */
+  catalog_category: string | null
+  /** Values keyed by DB / cascade field name. */
+  field_values: Record<string, string>
 }
 
 export interface AssembledProduct {

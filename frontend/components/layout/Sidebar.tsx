@@ -12,16 +12,7 @@ import {
   BarChart2, Database, Shield, PanelLeftClose, PanelLeft, ChevronDown, ChevronRight,
   Mail,
 } from 'lucide-react'
-
-const MASTER_CATEGORIES = [
-  { key: 'butterfly_valve', label: 'Butterfly valve' },
-  { key: 'ball_valve', label: 'Ball valve' },
-  { key: 'operator', label: 'Operator' },
-  { key: 'brackets_coupler', label: 'Brackets & couplers' },
-  { key: 'sov', label: 'SOV' },
-  { key: 'limit_switch_box', label: 'Limit switch box' },
-  { key: 'positioner', label: 'Positioner' },
-] as const
+import { SIDEBAR_MASTER_CATEGORIES } from '@/lib/masterCatalogCategories'
 
 const NAV_ITEMS = [
   { href: '/dashboard', label: 'Home', icon: LayoutDashboard },
@@ -44,11 +35,18 @@ export default function Sidebar() {
   const [mastersOpen, setMastersOpen] = React.useState<boolean>(mastersActive)
 
   return (
-    <aside className={cn(
-      'h-screen flex flex-col bg-surface-sidebar transition-all duration-200 flex-shrink-0',
-      sidebarCollapsed ? 'w-16' : 'w-[220px]'
-    )}>
-      <div className={cn('px-4 pt-5 pb-4 flex items-center gap-3', sidebarCollapsed && 'justify-center px-2')}>
+    <aside
+      className={cn(
+        'flex h-screen min-h-0 w-[220px] flex-shrink-0 flex-col overflow-hidden bg-surface-sidebar transition-all duration-200',
+        sidebarCollapsed && 'w-16',
+      )}
+    >
+      <div
+        className={cn(
+          'flex flex-shrink-0 items-center gap-3 px-4 pb-4 pt-5',
+          sidebarCollapsed && 'justify-center px-2',
+        )}
+      >
         <div className="w-8 h-8 rounded-lg bg-brand-green-500 flex items-center justify-center text-white font-bold text-[14px] flex-shrink-0">
           PV
         </div>
@@ -60,7 +58,7 @@ export default function Sidebar() {
         )}
       </div>
 
-      <nav className="flex-1 px-2 space-y-0.5">
+      <nav className="min-h-0 flex-1 space-y-0.5 overflow-x-hidden overflow-y-auto overscroll-y-contain px-2 [-webkit-overflow-scrolling:touch]">
         {NAV_ITEMS.map((item) => {
           if (item.href === '/masters') {
             return (
@@ -98,7 +96,7 @@ export default function Sidebar() {
                     >
                       <span className="truncate">Edit Masters</span>
                     </Link>
-                    {MASTER_CATEGORIES.map(({ key, label }) => {
+                    {SIDEBAR_MASTER_CATEGORIES.map(({ key, label }) => {
                       const href = `/masters/${key}`
                       const active = pathname === href
                       return (
@@ -151,7 +149,7 @@ export default function Sidebar() {
         })}
       </nav>
 
-      <div className="px-3 pb-4 space-y-3">
+      <div className="flex-shrink-0 space-y-3 px-3 pb-4">
         <div className="h-px bg-[#1A4526]" />
         {!sidebarCollapsed && (
           <>

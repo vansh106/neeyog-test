@@ -12,15 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.routes import clients, configurator, enquiries, masters, quotations, stream, suppliers, sync
 from core.config import get_settings
 from core.database import async_session_factory, get_db, init_db
-from db.sheet_models import (
-    CatalogBallValveRow,
-    CatalogBracketsCouplerRow,
-    CatalogButterflyValveRow,
-    CatalogLimitSwitchRow,
-    CatalogOperatorRow,
-    CatalogPositionerRow,
-    CatalogSovRow,
-)
+from masters.product_master import SHEET_TABLES
 
 logger = logging.getLogger(__name__)
 
@@ -34,17 +26,8 @@ async def lifespan(app: FastAPI):
     logger.info("Database initialised, pgvector enabled.")
 
     async with async_session_factory() as session:
-        models = [
-            ("butterfly_valve", CatalogButterflyValveRow),
-            ("ball_valve", CatalogBallValveRow),
-            ("operator", CatalogOperatorRow),
-            ("brackets_coupler", CatalogBracketsCouplerRow),
-            ("sov", CatalogSovRow),
-            ("limit_switch_box", CatalogLimitSwitchRow),
-            ("positioner", CatalogPositionerRow),
-        ]
         total = 0
-        for key, model in models:
+        for key, model in SHEET_TABLES:
             result = await session.execute(
                 select(func.count(model.row_id)).where(model.client_id == settings.ACTIVE_CLIENT)
             )
@@ -54,7 +37,7 @@ async def lifespan(app: FastAPI):
 
     if total == 0:
         logger.warning(
-            "Catalog is empty for client_id=%s. Run: python -m db.import_revamp_catalog --clear-existing",
+            "Catalog is empty for client_id=%s. Run: python -m db.import_final_products_catalog",
             settings.ACTIVE_CLIENT,
         )
     else:

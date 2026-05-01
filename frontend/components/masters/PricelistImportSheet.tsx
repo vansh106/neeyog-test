@@ -21,21 +21,16 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet'
-import { CATALOG_SPEC_FIELDS, smartMapExcelHeader } from '@/lib/constants'
+import { catalogSpecFieldsFor, smartMapExcelHeader } from '@/lib/constants'
+import { SIDEBAR_MASTER_CATEGORIES } from '@/lib/masterCatalogCategories'
 import { suppliersApi } from '@/lib/api'
 import { formatCurrency } from '@/lib/utils'
 import type { ImportResult, PreviewResult, PreviewRow } from '@/types'
 import { cn } from '@/lib/utils'
 
-const IMPORT_CATEGORIES: { key: string; label: string }[] = [
-  { key: 'butterfly_valve', label: 'Butterfly Valve' },
-  { key: 'ball_valve', label: 'Ball Valve' },
-  { key: 'operator', label: 'Operator' },
-  { key: 'sov', label: 'SOV' },
-  { key: 'limit_switch_box', label: 'Limit Switch Box' },
-  { key: 'positioner', label: 'Positioner' },
-  { key: 'brackets_coupler', label: 'Brackets / coupler' },
-]
+const IMPORT_CATEGORIES: { key: string; label: string }[] = SIDEBAR_MASTER_CATEGORIES.map(
+  ({ key, label }) => ({ key, label }),
+)
 
 function hasSpecMapping(map: Record<string, string>): boolean {
   return Object.values(map).some(
@@ -88,7 +83,7 @@ export default function PricelistImportSheet({
   const [localErr, setLocalErr] = useState<string | null>(null)
 
   const fieldOptions = useMemo(() => {
-    return CATALOG_SPEC_FIELDS[importCategory] ?? CATALOG_SPEC_FIELDS.operator
+    return catalogSpecFieldsFor(importCategory)
   }, [importCategory])
 
   useEffect(() => {

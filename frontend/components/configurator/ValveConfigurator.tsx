@@ -8,13 +8,14 @@ import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { cn, formatCurrency } from '@/lib/utils'
 import { useValveCatalog, type CatalogRow, computeDistinctOptions } from '@/hooks/useValveCatalog'
-import { configuratorApi } from '@/lib/api'
-import { useConfiguratorAccessories } from '@/lib/queries'
+import { configuratorApi, mastersApi } from '@/lib/api'
+import { useConfiguratorAccessories, useConfiguratorValveTypes } from '@/lib/queries'
 import type {
   Accessories,
   AccessoryItem,
   AssembledProduct,
   BracketCoupler,
+  CascadeStep,
   OperatorKey,
   OperatorModel,
   OperatorOption,
@@ -32,64 +33,11 @@ const toSelectValue = (v: string | null | undefined): string =>
 const fromSelectValue = (v: string | null | undefined): string =>
   !v || v === SELECT_EMPTY ? '' : v
 
-const VALVE_TYPES = ['Butterfly Valve', 'Ball Valve'] as const
-type ValveType = (typeof VALVE_TYPES)[number]
-
-type SpecKey =
-  | 'construction'
-  | 'valve_size'
-  | 'bore_type'
-  | 'end_connection'
-  | 'pressure'
-  | 'body'
-  | 'ball_disc'
-  | 'ball'
-  | 'stem'
-  | 'seat'
-  | 'fasteners'
-
-const SPEC_COLUMNS: Record<ValveType, SpecKey[]> = {
-  'Butterfly Valve': [
-    'construction',
-    'valve_size',
-    'bore_type',
-    'end_connection',
-    'pressure',
-    'body',
-    'ball_disc',
-    'stem',
-    'seat',
-    'fasteners',
-  ],
-  'Ball Valve': [
-    'construction',
-    'valve_size',
-    'bore_type',
-    'end_connection',
-    'pressure',
-    'body',
-    'ball',
-    'stem',
-    'seat',
-    'fasteners',
-  ],
-}
-
-const SPEC_LABEL: Record<SpecKey, string> = {
-  construction: 'Construction',
-  valve_size: 'Valve Size',
-  bore_type: 'Bore Type',
-  end_connection: 'End Connection',
-  pressure: 'Pressure',
-  body: 'Body',
-  ball_disc: 'Disc',
-  ball: 'Ball',
-  stem: 'Stem',
-  seat: 'Seat',
-  fasteners: 'Fasteners',
-}
-
-function catalogRowToValveProduct(row: CatalogRow, valveType: string): ValveProduct {
+function catalogRowToValveProduct(
+  row: CatalogRow,
+  displayType: string,
+  catalogCategory: string,
+): ValveProduct {
   const priceRaw = row.price_inr
   const basePrice =
     priceRaw == null || priceRaw === ''
@@ -98,20 +46,29 @@ function catalogRowToValveProduct(row: CatalogRow, valveType: string): ValveProd
         ? priceRaw
         : Number(priceRaw)
   const priceOk = basePrice != null && Number.isFinite(basePrice)
+  const g = (k: string): string | null => {
+    const v = row[k]
+    if (v == null) return null
+    const s = String(v).trim()
+    return s || null
+  }
   return {
-    id: String(row.id ?? ''),
-    type: valveType,
-    construction: row.construction != null ? String(row.construction) : null,
-    valve_size: row.valve_size != null ? String(row.valve_size) : null,
-    bore_type: row.bore_type != null ? String(row.bore_type) : null,
-    end_connection: row.end_connection != null ? String(row.end_connection) : null,
-    pressure: row.pressure != null ? String(row.pressure) : null,
-    body: row.body != null ? String(row.body) : null,
-    ball_disc: row.ball_disc != null ? String(row.ball_disc) : undefined,
-    ball: row.ball != null ? String(row.ball) : undefined,
-    stem: row.stem != null ? String(row.stem) : null,
-    seat: row.seat != null ? String(row.seat) : null,
-    fasteners: row.fasteners != null ? String(row.fasteners) : null,
+    id: String(row.id ?? row.row_id ?? ''),
+    type: displayType,
+    catalog_category: catalogCategory,
+    variant_type: g('variant_type'),
+    construction: g('construction'),
+    valve_size: g('valve_size'),
+    bore_type: g('bore_type'),
+    end_connection: g('end_connection'),
+    pressure: g('pressure'),
+    body: g('body'),
+    ball_disc: g('ball_disc') ?? undefined,
+    ball: g('ball') ?? undefined,
+    stem: g('stem'),
+    seat: g('seat'),
+    fasteners: g('fasteners'),
+    product_sheet: g('product_sheet') ?? undefined,
     base_price: priceOk ? basePrice : null,
     has_price: priceOk,
   }
@@ -128,42 +85,40 @@ type Props = {
 }
 
 function emptySpecs(): ValveSpecSelections {
-  return {
-    valve_type: null,
-    construction: null,
-    valve_size: null,
-    bore_type: null,
-    end_connection: null,
-    pressure: null,
-    body: null,
-    ball_disc: null,
-    ball: null,
-    stem: null,
-    seat: null,
-    fasteners: null,
+  return { catalog_category: null, field_values: {} }
+}
+
+function inferCatalogCategoryFromValve(v: ValveProduct): string | null {
+  if (v.catalog_category) return v.catalog_category
+  const t = (v.type || '').toLowerCase()
+  if (t.includes('butterfly')) return 'butterfly_valve'
+  if (t.includes('ball')) return 'ball_valve'
+  return null
+}
+
+/** Rehydrate step-1 state from a saved valve row (legacy rows may omit ``catalog_category``). */
+function valveProductToSpecs(v: ValveProduct): ValveSpecSelections {
+  const catalog_category = inferCatalogCategoryFromValve(v)
+  const field_values: Record<string, string> = {}
+  const pairs: [string, string | null | undefined][] = [
+    ['variant_type', v.variant_type],
+    ['product_sheet', v.product_sheet ?? null],
+    ['construction', v.construction],
+    ['valve_size', v.valve_size],
+    ['bore_type', v.bore_type],
+    ['end_connection', v.end_connection],
+    ['pressure', v.pressure],
+    ['body', v.body],
+    ['ball_disc', v.ball_disc ?? null],
+    ['ball', v.ball ?? null],
+    ['stem', v.stem],
+    ['seat', v.seat],
+    ['fasteners', v.fasteners],
+  ]
+  for (const [k, val] of pairs) {
+    if (val != null && String(val).trim() !== '') field_values[k] = String(val).trim()
   }
-}
-
-function specsToRecord(specs: ValveSpecSelections): Record<string, string> {
-  const out: Record<string, string> = {}
-  const skip: (keyof ValveSpecSelections)[] = ['valve_type']
-  for (const [k, v] of Object.entries(specs)) {
-    if (skip.includes(k as keyof ValveSpecSelections)) continue
-    if (v) out[k] = v
-  }
-  return out
-}
-
-function getSpec(specs: ValveSpecSelections, key: SpecKey): string | null {
-  return specs[key] ?? null
-}
-
-function setSpec(
-  specs: ValveSpecSelections,
-  key: SpecKey,
-  value: string | null,
-): ValveSpecSelections {
-  return { ...specs, [key]: value }
+  return { catalog_category, field_values }
 }
 
 function priceText(v: number | null | undefined): string {
@@ -310,22 +265,11 @@ export function ValveConfigurator({
   const [stage, setStage] = useState<Stage>('valve_specs')
   const [specs, setSpecs] = useState<ValveSpecSelections>(() => {
     if (!initialProduct?.valve) return emptySpecs()
-    const v = initialProduct.valve
-    return {
-      valve_type: v.type,
-      construction: v.construction,
-      valve_size: v.valve_size,
-      bore_type: v.bore_type,
-      end_connection: v.end_connection,
-      pressure: v.pressure,
-      body: v.body,
-      ball_disc: v.ball_disc ?? null,
-      ball: v.ball ?? null,
-      stem: v.stem,
-      seat: v.seat,
-      fasteners: v.fasteners,
-    }
+    return valveProductToSpecs(initialProduct.valve)
   })
+  const [cascadeSteps, setCascadeSteps] = useState<CascadeStep[]>([])
+
+  const { data: valveCategories = [], isPending: valveCategoriesPending } = useConfiguratorValveTypes()
   const [operatorOptions, setOperatorOptions] = useState<OperatorOption[]>([])
   const [daOps, setDaOps] = useState<OperatorModel[]>([])
   const [saOps, setSaOps] = useState<OperatorModel[]>([])
@@ -370,6 +314,13 @@ export function ValveConfigurator({
     setSupplierId(pref?.id ?? active[0].id)
   }, [supplierId, suppliers])
 
+  const categoryDisplayLabel = useMemo(() => {
+    if (!specs.catalog_category) return ''
+    return (
+      valveCategories.find((c) => c.key === specs.catalog_category)?.label ?? specs.catalog_category
+    )
+  }, [specs.catalog_category, valveCategories])
+
   const {
     catalog,
     isLoading: catalogLoading,
@@ -378,80 +329,102 @@ export function ValveConfigurator({
     getOptions,
     resolve,
     rowCount,
-  } = useValveCatalog(specs.valve_type)
+  } = useValveCatalog(specs.catalog_category)
 
   useEffect(() => {
-    if (!specs.valve_type) return
-    void loadCatalog(specs.valve_type)
-  }, [specs.valve_type, loadCatalog])
+    let cancelled = false
+    const cat = specs.catalog_category
+    if (!cat) {
+      setCascadeSteps([])
+      return
+    }
+    mastersApi
+      .getCascadeSchema<CascadeStep[]>(cat)
+      .then((s) => {
+        if (!cancelled) setCascadeSteps(Array.isArray(s) ? s : [])
+      })
+      .catch(() => {
+        if (!cancelled) setCascadeSteps([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [specs.catalog_category])
+
+  useEffect(() => {
+    if (!specs.catalog_category) return
+    void loadCatalog(specs.catalog_category)
+  }, [specs.catalog_category, loadCatalog])
 
   const stepOptions = useMemo(() => {
-    if (!specs.valve_type || catalog.length === 0) return {} as Record<SpecKey, string[]>
-    const cols = SPEC_COLUMNS[specs.valve_type as ValveType]
-    const o = {} as Record<SpecKey, string[]>
-    for (const field of cols) {
+    if (!specs.catalog_category || catalog.length === 0 || cascadeSteps.length === 0)
+      return {} as Record<string, string[]>
+    const o: Record<string, string[]> = {}
+    for (const step of cascadeSteps) {
+      const field = step.key
       const prior: Record<string, string> = {}
-      for (const priorCol of cols) {
-        if (priorCol === field) break
-        const v = getSpec(specs, priorCol)
-        if (v) prior[priorCol] = v
+      for (const pc of cascadeSteps) {
+        if (pc.key === field) break
+        const v = specs.field_values[pc.key]
+        if (v) prior[pc.key] = v
       }
-      o[field] = getOptions(field, prior) as string[]
+      o[field] = getOptions(field, prior)
     }
     return o
-  }, [specs, catalog, getOptions])
+  }, [specs, catalog, getOptions, cascadeSteps])
 
   const resolvedValve = useMemo((): ValveProduct | null => {
-    if (!specs.valve_type || catalog.length === 0) return null
-    const cols = SPEC_COLUMNS[specs.valve_type as ValveType]
+    if (!specs.catalog_category || catalog.length === 0 || cascadeSteps.length === 0) return null
     const filters: Record<string, string> = {}
-    for (const c of cols) {
-      const v = getSpec(specs, c)
+    for (const step of cascadeSteps) {
+      const v = specs.field_values[step.key]
       if (!v) return null
-      filters[c] = v
+      filters[step.key] = v
     }
     const row = resolve(filters)
     if (!row) return null
-    return catalogRowToValveProduct(row, specs.valve_type)
-  }, [specs, catalog, resolve])
+    return catalogRowToValveProduct(row, categoryDisplayLabel || specs.catalog_category, specs.catalog_category)
+  }, [specs, catalog, resolve, cascadeSteps, categoryDisplayLabel])
 
   useEffect(() => {
-    if (catalogLoading || !specs.valve_type || catalog.length === 0) return
+    if (catalogLoading || !specs.catalog_category || catalog.length === 0 || cascadeSteps.length === 0) return
     setSpecs((prev) => {
-      if (!prev.valve_type) return prev
-      const cols = SPEC_COLUMNS[prev.valve_type as ValveType]
-      let next = { ...prev }
+      if (!prev.catalog_category) return prev
+      let nextFv = { ...prev.field_values }
       let changed = false
-      for (const field of cols) {
-        if (getSpec(next, field)) continue
+      for (const step of cascadeSteps) {
+        const field = step.key
+        if (nextFv[field]) continue
         const prior: Record<string, string> = {}
-        for (const pc of cols) {
-          if (pc === field) break
-          const v = getSpec(next, pc)
-          if (v) prior[pc] = v
+        for (const pc of cascadeSteps) {
+          if (pc.key === field) break
+          const v = nextFv[pc.key]
+          if (v) prior[pc.key] = v
         }
         const opts = computeDistinctOptions(catalog, field, prior)
         if (opts.length === 1) {
-          next = setSpec(next, field, opts[0])
+          nextFv[field] = opts[0]
           changed = true
         } else {
           break
         }
       }
-      return changed ? next : prev
+      return changed ? { ...prev, field_values: nextFv } : prev
     })
-  }, [specs, catalog, catalogLoading])
+  }, [specs.catalog_category, specs.field_values, catalog, catalogLoading, cascadeSteps])
 
   // ── Fetch operators once the valve is resolved (and we're past specs) ─
   useEffect(() => {
     if (stage === 'valve_specs' || stage === 'complete') return
-    if (!resolvedValve || !resolvedValve.construction || !resolvedValve.valve_size) return
+    if (!resolvedValve) return
+    if (!resolvedValve.construction && !resolvedValve.valve_size) return
     ;(async () => {
       try {
         const res = await configuratorApi.getOperators<OperatorsResponsePayload>(
           resolvedValve.type,
-          resolvedValve.construction!,
-          resolvedValve.valve_size!,
+          resolvedValve.construction ?? '',
+          resolvedValve.valve_size ?? '',
+          resolvedValve.catalog_category ?? null,
         )
         setOperatorOptions(res.operator_options ?? [])
         setDaOps(res.da_operators ?? [])
@@ -526,21 +499,20 @@ export function ValveConfigurator({
     operatorKey === 'da' ? daOps : operatorKey === 'sa' ? saOps : []
 
   // ── Handlers ──────────────────────────────────────────────────────────
-  const pickValveType = (t: ValveType) => {
-    setSpecs({ ...emptySpecs(), valve_type: t })
-    void loadCatalog(t)
+  const pickCatalogCategory = (key: string) => {
+    setCascadeSteps([])
+    setSpecs({ catalog_category: key, field_values: {} })
+    void loadCatalog(key, true)
   }
 
-  const pickSpec = (field: SpecKey, value: string) => {
-    const vt = specs.valve_type as ValveType | null
-    if (!vt) return
-    const cols = SPEC_COLUMNS[vt]
-    const ix = cols.indexOf(field)
-    let next: ValveSpecSelections = setSpec(specs, field, value || null)
-    for (const after of cols.slice(ix + 1)) {
-      next = setSpec(next, after, null)
+  const pickSpec = (field: string, value: string) => {
+    const ix = cascadeSteps.findIndex((s) => s.key === field)
+    if (ix < 0) return
+    const nextFv = { ...specs.field_values, [field]: value || '' }
+    for (const after of cascadeSteps.slice(ix + 1)) {
+      delete nextFv[after.key]
     }
-    setSpecs(next)
+    setSpecs({ ...specs, field_values: nextFv })
   }
 
   const buildAssembled = (): AssembledProduct => ({
@@ -646,68 +618,71 @@ export function ValveConfigurator({
       {/* ── STAGE 1 ─────────────────────────────────────────────────── */}
       {stage === 'valve_specs' && (
         <div className="mt-4 space-y-4">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            {VALVE_TYPES.map((t) => {
-              const active = specs.valve_type === t
+          {valveCategoriesPending && (
+            <div className="flex items-center gap-2 text-[12px] text-surface-muted">
+              <Loader2 className="size-4 animate-spin" />
+              Loading valve categories…
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3 max-h-[280px] overflow-y-auto pr-1">
+            {valveCategories.map((c) => {
+              const active = specs.catalog_category === c.key
               return (
                 <button
-                  key={t}
+                  key={c.key}
                   type="button"
-                  onClick={() => pickValveType(t)}
+                  onClick={() => pickCatalogCategory(c.key)}
                   className={cn(
-                    'rounded-xl border p-4 text-left transition',
+                    'rounded-xl border p-3 text-left transition',
                     active
                       ? 'border-2 border-brand-green-500 bg-brand-green-50'
                       : 'border-surface-border bg-white hover:bg-surface-page',
                   )}
                 >
-                  <p className="text-[14px] font-semibold text-gray-900">{t}</p>
-                  <p className="mt-1 text-[12px] text-surface-muted">
-                    {t === 'Butterfly Valve' ? 'Wafer / lug / flanged' : '1-piece, 2-piece, 3-piece, L-port'}
-                  </p>
+                  <p className="text-[13px] font-semibold text-gray-900 leading-snug">{c.label}</p>
                 </button>
               )
             })}
           </div>
 
-          {specs.valve_type && catalogError && (
+          {specs.catalog_category && catalogError && (
             <p className="text-[12px] text-red-600">{catalogError}</p>
           )}
 
-          {specs.valve_type && catalogLoading && (
+          {specs.catalog_category && catalogLoading && (
             <div className="flex items-center gap-2 text-[12px] text-surface-muted">
               <Loader2 className="size-4 animate-spin" />
-              Loading {specs.valve_type} catalog
+              Loading {categoryDisplayLabel || specs.catalog_category} catalog
               {rowCount > 0 ? ` (${rowCount} rows)` : '…'}
             </div>
           )}
 
-          {specs.valve_type && !catalogLoading && (
+          {specs.catalog_category && !catalogLoading && cascadeSteps.length > 0 && (
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              {SPEC_COLUMNS[specs.valve_type as ValveType].map((field, idx) => {
+              {cascadeSteps.map((step, idx) => {
+                const field = step.key
                 const opts = stepOptions[field] ?? []
                 const priorOk =
                   idx === 0 ||
-                  SPEC_COLUMNS[specs.valve_type as ValveType]
-                    .slice(0, idx)
-                    .every((p) => {
-                      const pOpts = stepOptions[p] ?? []
-                      if (pOpts.length <= 1) return true
-                      return !!getSpec(specs, p)
-                    })
+                  cascadeSteps.slice(0, idx).every((p) => {
+                    const pOpts = stepOptions[p.key] ?? []
+                    if (pOpts.length <= 1) return true
+                    return !!(specs.field_values[p.key] && String(specs.field_values[p.key]).trim())
+                  })
                 return (
                   <div key={field} className="space-y-1.5">
                     <div className="text-[10px] font-medium uppercase tracking-wide text-[#8A9488]">
-                      {SPEC_LABEL[field]}
+                      {step.label}
                     </div>
                     <Select
-                      value={toSelectValue(getSpec(specs, field) ?? '')}
+                      value={toSelectValue(specs.field_values[field] ?? '')}
                       onValueChange={(raw) => pickSpec(field, fromSelectValue(raw ?? ''))}
                       disabled={!priorOk}
                     >
                       <SelectTrigger className="h-10 w-full min-w-0">
                         <SelectValue
-                          placeholder={!priorOk ? 'Complete fields above' : `Select ${SPEC_LABEL[field]}`}
+                          placeholder={!priorOk ? 'Complete fields above' : `Select ${step.label}`}
                         />
                       </SelectTrigger>
                       <SelectContent>
@@ -731,13 +706,15 @@ export function ValveConfigurator({
             <div className="rounded-xl border border-brand-green-200 bg-brand-green-50 p-4">
               <p className="text-[13px] font-semibold text-brand-green-700">
                 <Check className="mr-1 inline size-4" />
-                {resolvedValve.type} — {resolvedValve.construction}
+                {resolvedValve.type}
+                {resolvedValve.construction ? ` — ${resolvedValve.construction}` : ''}
               </p>
               <p className="mt-1 text-[12px] text-gray-800">
-                Size: {resolvedValve.valve_size} | Body: {resolvedValve.body}
+                {resolvedValve.valve_size ? <>Size: {resolvedValve.valve_size}</> : null}
+                {resolvedValve.body ? <> | Body: {resolvedValve.body}</> : null}
               </p>
               <p className="text-[12px] text-gray-800">
-                Connection: {resolvedValve.end_connection} | {resolvedValve.pressure}
+                {[resolvedValve.end_connection, resolvedValve.pressure].filter(Boolean).join(' | ') || '—'}
               </p>
               <p className="mt-2 font-mono text-[13px] text-brand-green-700">
                 Base Price: {priceText(resolvedValve.base_price)}
@@ -747,7 +724,9 @@ export function ValveConfigurator({
 
           <div className="flex items-center justify-between">
             <span className="text-[12px] text-surface-muted">
-              {specs.valve_type ? 'Pick each spec to narrow down.' : 'Pick a valve type to begin.'}
+              {specs.catalog_category
+                ? 'Pick each spec to narrow down.'
+                : 'Pick a valve category to begin.'}
             </span>
             <Button
               type="button"

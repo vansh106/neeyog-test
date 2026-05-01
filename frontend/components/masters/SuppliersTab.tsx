@@ -22,6 +22,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { suppliersApi } from '@/lib/api'
+import { SIDEBAR_MASTER_CATEGORIES } from '@/lib/masterCatalogCategories'
 import type { SupplierResponse } from '@/types'
 
 export default function SuppliersTab() {
@@ -258,13 +259,11 @@ export default function SuppliersTab() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All</SelectItem>
-                  <SelectItem value="butterfly_valve">Butterfly valve</SelectItem>
-                  <SelectItem value="ball_valve">Ball valve</SelectItem>
-                  <SelectItem value="operator">Operator</SelectItem>
-                  <SelectItem value="sov">SOV</SelectItem>
-                  <SelectItem value="limit_switch_box">Limit switch box</SelectItem>
-                  <SelectItem value="positioner">Positioner</SelectItem>
-                  <SelectItem value="brackets_coupler">Brackets / coupler</SelectItem>
+                  {SIDEBAR_MASTER_CATEGORIES.map(({ key, label }) => (
+                    <SelectItem key={key} value={key}>
+                      {label}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>

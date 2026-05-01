@@ -1,4 +1,4 @@
-"""Import `docs/Butterfly_Valve_All_Combinations.xlsx` into `catalog_butterfly_valve`.
+"""Import `docs/Butterfly_Valve_All_Combinations.xlsx` into ``catalog_fp_butterfly_all_products``.
 
 This workbook uses a single sheet with headers:
   Sr No, Variant Type, Construction, Valve Size, End Connection, Pressure, Body, Disc, Stem, Seat

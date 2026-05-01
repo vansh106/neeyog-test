@@ -124,9 +124,9 @@ export function useConfiguratorAccessories() {
 }
 
 export function useConfiguratorValveTypes() {
-  return useQuery<string[]>({
+  return useQuery<{ key: string; label: string }[]>({
     queryKey: ['configurator', 'valve-types'],
-    queryFn: () => configuratorApi.getValveTypes<string[]>(),
+    queryFn: () => configuratorApi.getValveTypes<{ key: string; label: string }[]>(),
     staleTime: Infinity,
   })
 }

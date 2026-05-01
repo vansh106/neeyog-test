@@ -68,18 +68,23 @@ function operatorLabel(k: OperatorKey | null): string {
 
 type CatalogPart = { label: string; catalog_table: string; catalog_row_id: string }
 
-function valveTypeToCatalogTable(valveType: string | null | undefined): 'butterfly_valve' | 'ball_valve' | null {
+function valveTypeToLegacyCatalogTable(valveType: string | null | undefined): 'butterfly_valve' | 'ball_valve' | null {
   const t = (valveType || '').toLowerCase()
   if (t.includes('butterfly')) return 'butterfly_valve'
   if (t.includes('ball')) return 'ball_valve'
   return null
 }
 
+function valveCatalogTable(v: import('@/types').ValveProduct | null | undefined): string | null {
+  if (v?.catalog_category) return v.catalog_category
+  return valveTypeToLegacyCatalogTable(v?.type)
+}
+
 function catalogPartsForAssembly(p: AssembledProduct): CatalogPart[] {
   const parts: CatalogPart[] = []
   const v = p.valve
   if (v?.id) {
-    const ct = valveTypeToCatalogTable(v.type)
+    const ct = valveCatalogTable(v)
     if (ct) parts.push({ label: 'Valve', catalog_table: ct, catalog_row_id: v.id })
   }
   if ((p.operator_key === 'da' || p.operator_key === 'sa') && p.operator_model?.id) {
@@ -160,7 +165,7 @@ function assembledToLineItem(p: AssembledProduct, unitPriceOverride: number | nu
         .join(' — ')
     : 'Valve Assembly'
 
-  const catalogTable = valveTypeToCatalogTable(v?.type)
+  const catalogTable = v ? valveCatalogTable(v) : null
   const rawCatalogId = v?.id ?? uuidv4()
   const catalogId =
     typeof rawCatalogId === 'string' && rawCatalogId.includes(':')
@@ -183,6 +188,8 @@ function assembledToLineItem(p: AssembledProduct, unitPriceOverride: number | nu
 
   const cascade: Record<string, string> = {}
   if (v) {
+    if (v.variant_type) cascade.variant_type = v.variant_type
+    if (v.product_sheet) cascade.product_sheet = v.product_sheet
     if (v.construction) cascade.construction = v.construction
     if (v.valve_size) cascade.valve_size = v.valve_size
     if (v.bore_type) cascade.bore_type = v.bore_type

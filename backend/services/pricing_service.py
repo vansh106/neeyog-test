@@ -20,7 +20,7 @@ from sqlalchemy.orm import selectinload
 
 from core.config import get_settings
 from db.models import Supplier, SupplierCategoryPricing, SupplierProductPrice
-from db.sheet_models import EXCEL_SHEET_TO_MODEL
+from services.masters_service import SHEET_MODEL_BY_KEY
 
 
 @dataclass
@@ -419,15 +419,21 @@ async def get_supplier_or_none(supplier_id: uuid.UUID, client_id: str, db: Async
 
 
 _SKIP_DESC = frozenset(
-    {"row_id", "client_id", "created_at", "updated_at", "source_file", "price_inr", "sr_no"}
+    {
+        "row_id",
+        "client_id",
+        "created_at",
+        "updated_at",
+        "source_file",
+        "price_inr",
+        "sr_no",
+        "product_sheet",
+    }
 )
 
 
 def catalog_model_for_table(catalog_table: str) -> type | None:
-    for _sheet, (key, mdl) in EXCEL_SHEET_TO_MODEL.items():
-        if key == catalog_table:
-            return mdl
-    return None
+    return SHEET_MODEL_BY_KEY.get(catalog_table)
 
 
 def parse_supplier_xlsx_to_rows(content: bytes, column_map: dict[str, str]) -> list[dict[str, str]]:

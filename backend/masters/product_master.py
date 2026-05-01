@@ -10,6 +10,11 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database import async_session_factory
+from db.final_product_models import (
+    FINAL_PRODUCT_LABEL_BY_KEY,
+    FINAL_PRODUCT_SHEET_MODELS,
+    FinalProductSheetMarker,
+)
 from db.sheet_models import (
     CatalogBallValveRow,
     CatalogBracketsCouplerRow,
@@ -45,6 +50,7 @@ INCH_TO_MM: dict[float, float] = {
 SHEET_TABLES: list[tuple[str, type]] = [
     ("butterfly_valve", CatalogButterflyValveRow),
     ("ball_valve", CatalogBallValveRow),
+    *FINAL_PRODUCT_SHEET_MODELS,
     ("operator", CatalogOperatorRow),
     ("brackets_coupler", CatalogBracketsCouplerRow),
     ("sov", CatalogSovRow),
@@ -87,6 +93,14 @@ _KEYWORD_COLUMNS: dict[str, list[str]] = {
     "limit_switch_box": ["variant_type"],
     "positioner": ["variant_type"],
 }
+
+for _fp_key, _fp_model in FINAL_PRODUCT_SHEET_MODELS:
+    _KEYWORD_COLUMNS[_fp_key] = [
+        c.key
+        for c in _fp_model.__table__.columns
+        if c.key
+        not in ("row_id", "client_id", "created_at", "updated_at", "sr_no")
+    ]
 
 
 def _parse_size_to_mm_inch(size_raw: object | None) -> tuple[float | None, float | None]:
@@ -144,10 +158,39 @@ def _row_to_catalog_item(table_key: str, row: object) -> dict:
         sub_category = row.variant_type
     elif isinstance(row, CatalogBallValveRow):
         name = _join_parts(row.variant_type, row.construction, row.valve_size) or "Ball valve"
+        if getattr(row, "product_sheet", None):
+            name = f"{name} ({row.product_sheet})".strip()
         size_mm, size_inch = _parse_size_to_mm_inch(row.valve_size)
         material = _join_parts(row.body, row.ball, row.stem, row.seat, row.fasteners) or None
         pressure_rating = row.pressure
         sub_category = row.variant_type
+    elif isinstance(row, FinalProductSheetMarker):
+        name = _join_parts(
+            getattr(row, "variant_type", None),
+            getattr(row, "construction", None),
+            getattr(row, "valve_size", None),
+        ) or FINAL_PRODUCT_LABEL_BY_KEY.get(table_key, table_key.replace("_", " ").title())
+        size_mm, size_inch = _parse_size_to_mm_inch(getattr(row, "valve_size", None))
+        material = _join_parts(
+            getattr(row, "body", None),
+            getattr(row, "bonnet", None),
+            getattr(row, "stem", None),
+            getattr(row, "seat", None),
+            getattr(row, "ball", None),
+            getattr(row, "ball_disc", None),
+            getattr(row, "diaphragm", None),
+            getattr(row, "wheel_moc", None),
+            getattr(row, "actuator_moc", None),
+            getattr(row, "tc_od", None),
+            getattr(row, "pipe_od", None),
+        )
+        pressure_rating = (
+            getattr(row, "pressure", None)
+            or getattr(row, "set_pressure", None)
+            or getattr(row, "inlet_pressure", None)
+            or getattr(row, "set_pressure_range", None)
+        )
+        sub_category = getattr(row, "variant_type", None)
     elif isinstance(row, CatalogOperatorRow):
         name = (row.model_name or "").strip() or (row.operator_for or "").strip() or "Operator"
         size_mm, size_inch = _parse_size_to_mm_inch(row.size_text)
