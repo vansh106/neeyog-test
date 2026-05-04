@@ -1,7 +1,8 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { Suspense, useState, useCallback, useEffect } from 'react'
 import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
 import { motion } from 'framer-motion'
 import {
   AlertCircle,
@@ -12,6 +13,7 @@ import {
   PackageX,
 } from 'lucide-react'
 
+import { PermissionGate } from '@/components/auth/PermissionGate'
 import PageShell from '@/components/layout/PageShell'
 import AIReasoningPanel from '@/components/ui/AIReasoningPanel'
 import EmptyState from '@/components/ui/EmptyState'
@@ -23,7 +25,8 @@ import ManualEntryForm from '@/components/upload/ManualEntryForm'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
-import { processManualDropdown, quotationsApi, uploadEmailStream } from '@/lib/api'
+import { enquiriesApi, processManualDropdown, quotationsApi, uploadEmailStream } from '@/lib/api'
+import { Permissions } from '@/lib/permissions'
 import { useEmailSyncStatus, useTriggerEmailSync } from '@/lib/queries'
 import { cn, formatCurrency } from '@/lib/utils'
 import type { EnquiryResponse, AgentEvent, HITLContext, HITLHistoryEntry, ClientVerificationContext, ClientVerificationResponse, ManualEnquiryForm } from '@/types'
@@ -99,7 +102,11 @@ function TotalsBlock({ result }: { result: EnquiryResponseWithTotals }) {
   )
 }
 
-export default function UploadPage() {
+function UploadPageInner() {
+  const searchParams = useSearchParams()
+  const refEnquiryId = searchParams.get('ref')
+  const tabParam = searchParams.get('tab')
+
   const { data: syncStatus } = useEmailSyncStatus()
   const triggerSync = useTriggerEmailSync()
 
@@ -121,6 +128,37 @@ export default function UploadPage() {
   // Client verification HITL
   const [clientContext, setClientContext] = useState<ClientVerificationContext | null>(null)
   const [clientVerified, setClientVerified] = useState<ClientVerificationResponse | null>(null)
+
+  const [prefillManualNotes, setPrefillManualNotes] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (tabParam === 'manual') setActiveTab('manual')
+  }, [tabParam])
+
+  useEffect(() => {
+    if (!refEnquiryId) {
+      setPrefillManualNotes(null)
+      return
+    }
+    let cancelled = false
+    enquiriesApi
+      .getEnquiry<{ raw_input?: string | null }>(refEnquiryId)
+      .then((d) => {
+        if (cancelled || !d?.raw_input?.trim()) return
+        setPrefillManualNotes(
+          `--- Reference email (enquiry ${refEnquiryId}) — use while configuring line items ---\n\n${d.raw_input.trim()}`.slice(
+            0,
+            12000,
+          ),
+        )
+      })
+      .catch(() => {
+        if (!cancelled) setPrefillManualNotes(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [refEnquiryId])
 
   const clearRightPanel = useCallback(() => {
     setAgentEvents([])
@@ -544,28 +582,40 @@ export default function UploadPage() {
                 ))}
               </div>
 
-              <Button
-                type="button"
-                onClick={handleSubmit}
-                disabled={!text.trim() || isStreaming}
-                className="mt-6 h-12 w-full bg-brand-green-500 text-white hover:bg-brand-green-600"
+              <PermissionGate
+                permission={Permissions.UPLOAD_EMAIL}
+                fallback={<p className="mt-6 text-[13px] text-surface-muted">You do not have permission to run AI email processing.</p>}
               >
-                {isStreaming ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    AI is thinking...
-                  </>
-                ) : (
-                  <>Process with AI →</>
-                )}
-              </Button>
+                <Button
+                  type="button"
+                  onClick={handleSubmit}
+                  disabled={!text.trim() || isStreaming}
+                  className="mt-6 h-12 w-full bg-brand-green-500 text-white hover:bg-brand-green-600"
+                >
+                  {isStreaming ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      AI is thinking...
+                    </>
+                  ) : (
+                    <>Process with AI →</>
+                  )}
+                </Button>
+              </PermissionGate>
             </TabsContent>
 
             <TabsContent value="manual">
-              <ManualEntryForm
-                isProcessing={isStreaming}
-                onSubmitManual={handleManualSubmit}
-              />
+              <PermissionGate
+                permission={Permissions.VIEW_QUOTATIONS}
+                fallback={<p className="text-[13px] text-surface-muted">You do not have permission to submit manual enquiries.</p>}
+              >
+                <ManualEntryForm
+                  key={refEnquiryId || 'no-email-ref'}
+                  isProcessing={isStreaming}
+                  onSubmitManual={handleManualSubmit}
+                  prefillNotesFromEnquiry={prefillManualNotes}
+                />
+              </PermissionGate>
             </TabsContent>
           </Tabs>
         </div>
@@ -573,5 +623,19 @@ export default function UploadPage() {
         <div className="min-w-0">{renderResultBody()}</div>
       </div>
     </PageShell>
+  )
+}
+
+export default function UploadPage() {
+  return (
+    <Suspense
+      fallback={
+        <PageShell title="AI Upload" subtitle="Paste customer enquiry text and generate a quotation with AI">
+          <div className="flex justify-center py-16 text-[14px] text-surface-muted">Loading…</div>
+        </PageShell>
+      }
+    >
+      <UploadPageInner />
+    </Suspense>
   )
 }

@@ -27,6 +27,11 @@ function statusDot(status: string) {
   return 'bg-[#5a7a5e]'
 }
 
+function pipelineStatusDot(inboxProcessed: boolean, status: string) {
+  if (!inboxProcessed) return 'bg-slate-400'
+  return statusDot(status)
+}
+
 function asAgentEvents(events: unknown[]): AgentEvent[] {
   return (events || [])
     .filter((e) => typeof e === 'object' && e !== null)
@@ -64,6 +69,7 @@ export default function EmailsPage() {
           sender_name: x.sender_name,
           sender_email: x.sender_email,
           company: x.company,
+          display_name: (x.display_name as string) || x.company || x.sender_name || 'Unknown',
           subject: x.subject,
           preview: x.preview,
           category: x.category ?? null,
@@ -72,6 +78,7 @@ export default function EmailsPage() {
           created_at: x.created_at,
           awaiting_human: !!x.awaiting_human,
           has_quotation: !!x.has_quotation,
+          inbox_processed: !!x.inbox_processed,
         })),
       )
     } catch (e: unknown) {
@@ -158,7 +165,8 @@ export default function EmailsPage() {
               <div>
                 {items.map((it) => {
                   const active = selected === it.enquiry_id
-                  const initials = (it.company || it.sender_name || 'U').slice(0, 1).toUpperCase()
+                  const listTitle = it.display_name || it.company || it.sender_name || 'Unknown'
+                  const initials = listTitle.slice(0, 1).toUpperCase()
                   return (
                     <Link
                       key={it.enquiry_id}
@@ -170,14 +178,19 @@ export default function EmailsPage() {
                     >
                       <div className="relative w-12 shrink-0">
                         {it.is_new && <span className="absolute left-0 top-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-brand-green-500" />}
-                        <div className={cn('ml-3 w-9 h-9 rounded-full flex items-center justify-center text-white text-[14px] font-semibold', hashColor(it.company || it.sender_name))}>
+                        <div
+                          className={cn(
+                            'ml-3 w-9 h-9 rounded-full flex items-center justify-center text-white text-[14px] font-semibold',
+                            hashColor(listTitle),
+                          )}
+                        >
                           {initials}
                         </div>
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center justify-between gap-2">
                           <div className={cn('text-[13px] truncate', it.is_new ? 'font-semibold text-gray-900' : 'font-medium text-gray-900')}>
-                            {it.company || it.sender_name}
+                            {listTitle}
                           </div>
                           <div className="text-[10px] font-mono text-surface-muted whitespace-nowrap">
                             {formatRelativeTime(it.created_at)}
@@ -188,12 +201,26 @@ export default function EmailsPage() {
                             {it.subject || it.preview || '(no subject)'}
                           </div>
                           <div className="flex items-center gap-2 shrink-0">
+                            <span
+                              className={cn(
+                                'text-[10px] rounded-full px-2 py-0.5 border',
+                                it.inbox_processed
+                                  ? 'bg-brand-green-50 text-brand-green-800 border-brand-green-200'
+                                  : 'bg-slate-50 text-slate-600 border-slate-200',
+                              )}
+                              title={it.inbox_processed ? 'Pipeline or quote completed' : 'Not processed yet'}
+                            >
+                              {it.inbox_processed ? 'Processed' : 'Unprocessed'}
+                            </span>
                             {it.category && (
                               <span className="text-[10px] rounded-full px-2 py-0.5 bg-brand-navy-50 text-brand-navy-600">
                                 {it.category}
                               </span>
                             )}
-                            <span className={cn('w-2 h-2 rounded-full', statusDot(it.status))} />
+                            <span
+                              className={cn('w-2 h-2 rounded-full shrink-0', pipelineStatusDot(it.inbox_processed, it.status))}
+                              title={it.inbox_processed ? 'Workflow status' : 'Awaiting processing'}
+                            />
                           </div>
                         </div>
                         {it.live_events?.length > 0 && (
@@ -230,10 +257,26 @@ export default function EmailsPage() {
               <div className="px-5 py-4 border-b border-surface-border">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <p className="text-[14px] font-semibold text-gray-900 truncate">{selectedItem?.company || selectedItem?.sender_name || 'Email'}</p>
+                    <p className="text-[14px] font-semibold text-gray-900 truncate">
+                      {detail?.display_company ||
+                        selectedItem?.display_name ||
+                        selectedItem?.company ||
+                        selectedItem?.sender_name ||
+                        'Email'}
+                    </p>
                     <p className="text-[12px] text-surface-muted truncate">{selectedItem?.sender_email || ''}</p>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center justify-end gap-2">
+                    <span
+                      className={cn(
+                        'text-[11px] px-2 py-1 rounded-full border',
+                        selectedItem?.inbox_processed || detail?.inbox_processed
+                          ? 'bg-brand-green-50 text-brand-green-800 border-brand-green-200'
+                          : 'bg-slate-50 text-slate-600 border-slate-200',
+                      )}
+                    >
+                      {selectedItem?.inbox_processed || detail?.inbox_processed ? 'Processed' : 'Unprocessed'}
+                    </span>
                     {selectedItem?.awaiting_human && (
                       <span className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
                         <AlertTriangle className="w-3.5 h-3.5" />
@@ -264,7 +307,14 @@ export default function EmailsPage() {
 
                 <LiveAgentTimeline events={agentEvents} isStreaming={isStreaming} />
 
-                <div className="flex justify-end gap-2">
+                <div className="flex flex-wrap justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => router.push(`/upload?tab=manual&ref=${selected}`)}
+                    className="rounded-md bg-brand-green-500 px-3 py-2 text-[12px] font-medium text-white hover:bg-brand-green-600"
+                  >
+                    Process
+                  </button>
                   <button
                     type="button"
                     onClick={() => router.push(`/enquiries/${selected}`)}

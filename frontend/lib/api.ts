@@ -1,9 +1,80 @@
-import axios from 'axios'
+import axios, { type InternalAxiosRequestConfig } from 'axios'
 
-export function apiBaseURL(): string {
-  const raw = (process.env.NEXT_PUBLIC_API_URL || '').trim()
-  if (!raw) return ''
-  return raw.replace(/\/+$/, '')
+import { useAuthStore } from '@/stores/authStore'
+import { getRefreshToken, setRefreshToken } from '@/lib/refreshToken'
+
+import { bearerHeaders } from '@/lib/bearer'
+import { apiBaseURL } from '@/lib/apiBase'
+
+export { apiBaseURL } from '@/lib/apiBase'
+
+type RetryConfig = InternalAxiosRequestConfig & { _retry?: boolean }
+
+let refreshPromise: Promise<string | null> | null = null
+
+/** Shared by axios 401 retry and SSE `fetch` (EventSource cannot refresh). */
+export function refreshAccessToken(): Promise<string | null> {
+  if (refreshPromise) return refreshPromise
+  const rt = getRefreshToken()
+  if (!rt) return Promise.resolve(null)
+  const refreshUrl = apiBaseURL() ? `${apiBaseURL()}/api/auth/refresh` : '/api/auth/refresh'
+  refreshPromise = axios
+    .post<{ access_token?: string; refresh_token?: string }>(refreshUrl, { refresh_token: rt }, {
+      headers: { 'Content-Type': 'application/json' },
+    })
+    .then(async ({ data }) => {
+      if (data.access_token) {
+        useAuthStore.getState().updateToken(data.access_token)
+        if (data.refresh_token) setRefreshToken(data.refresh_token)
+        try {
+          const me = await get<{
+            id: string
+            email: string
+            full_name: string
+            tier: string
+            job_title: string | null
+            permissions: string[]
+          }>('/api/auth/me')
+          const prev = useAuthStore.getState().user
+          if (prev && me) {
+            useAuthStore.getState().setUser({
+              ...prev,
+              id: me.id,
+              email: me.email,
+              full_name: me.full_name,
+              tier: me.tier,
+              job_title: me.job_title,
+              permissions: me.permissions,
+            })
+          }
+        } catch {
+          /* ignore — token is still valid */
+        }
+        return data.access_token
+      }
+      return null
+    })
+    .catch(() => {
+      useAuthStore.getState().clearAuth()
+      if (typeof window !== 'undefined') window.location.href = '/login'
+      return null
+    })
+    .finally(() => {
+      refreshPromise = null
+    })
+  return refreshPromise
+}
+
+function formatHttpDetail(detail: unknown): string {
+  if (typeof detail === 'string') return detail
+  if (detail && typeof detail === 'object' && 'message' in detail) {
+    return String((detail as { message: string }).message)
+  }
+  try {
+    return JSON.stringify(detail)
+  } catch {
+    return 'Request failed'
+  }
 }
 
 const api = axios.create({
@@ -13,6 +84,13 @@ const api = axios.create({
 })
 
 api.interceptors.request.use((config) => {
+  const base = apiBaseURL()
+  if (base) config.baseURL = base
+  const token = useAuthStore.getState().access_token
+  if (token) {
+    config.headers = config.headers ?? {}
+    config.headers.Authorization = `Bearer ${token}`
+  }
   if (config.data instanceof FormData && config.headers && typeof config.headers.delete === 'function') {
     config.headers.delete('Content-Type')
   }
@@ -24,23 +102,38 @@ api.interceptors.request.use((config) => {
 
 api.interceptors.response.use(
   (response) => response.data,
-  (error) => {
-    if (error.response) {
+  async (error) => {
+    const original = error.config as RetryConfig | undefined
+    if (error.response && original) {
       const status = error.response.status
+      const url = String(original.url || '')
+
+      if (status === 401 && !original._retry && !url.includes('/api/auth/login') && !url.includes('/api/auth/refresh')) {
+        original._retry = true
+        const newTok = await refreshAccessToken()
+        if (newTok) {
+          original.headers = original.headers ?? {}
+          original.headers.Authorization = `Bearer ${newTok}`
+          return api.request(original)
+        }
+      }
+
       if (status === 422) {
         const detail = error.response.data?.detail
         const msg = Array.isArray(detail)
           ? detail.map((e: { msg: string }) => e.msg).join(', ')
-          : typeof detail === 'string' ? detail : 'Validation error'
+          : typeof detail === 'string'
+            ? detail
+            : 'Validation error'
         throw new Error(msg)
       }
       if (status >= 500) {
         throw new Error('Server error — check API logs')
       }
-      throw new Error(error.response.data?.detail || `Request failed (${status})`)
+      throw new Error(formatHttpDetail(error.response.data?.detail) || `Request failed (${status})`)
     }
     throw new Error('Cannot reach API on localhost:8000')
-  }
+  },
 )
 
 function get<T>(url: string, params?: Record<string, unknown>): Promise<T> {
@@ -354,6 +447,34 @@ export const syncApi = {
     get<T>('/api/sync/history', limit != null ? { limit } : undefined),
 }
 
+export const usersApi = {
+  permissionGroups: <T = Record<string, string[]>>() => get<T>('/api/users/permission-groups'),
+  permissionPresets: <T = Record<string, string[]>>() => get<T>('/api/users/permission-presets'),
+  list: <T = unknown[]>(includeInactive?: boolean) =>
+    get<T>('/api/users/', includeInactive ? ({ include_inactive: true } as Record<string, unknown>) : undefined),
+  getUser: <T = unknown>(id: string) => get<T>(`/api/users/${id}`),
+  create: <T = { user: unknown; temp_password: string }>(body: {
+    email: string
+    full_name: string
+    job_title?: string | null
+    tier: string
+    permissions: string[]
+  }) => post<T>('/api/users/', body),
+  updatePermissions: <T = unknown>(id: string, permissions: string[]) =>
+    patch<T>(`/api/users/${id}/permissions`, { permissions }),
+  deactivate: (id: string) => patch<unknown>(`/api/users/${id}/deactivate`, {}),
+  reactivate: (id: string) => patch<unknown>(`/api/users/${id}/reactivate`, {}),
+  resetPassword: <T = { message: string; temp_password: string }>(id: string) =>
+    post<T>(`/api/users/${id}/reset-password`, {}),
+}
+
+export async function changePasswordApi(
+  old_password: string,
+  new_password: string,
+): Promise<{ message?: string }> {
+  return post<{ message?: string }>('/api/auth/change-password', { old_password, new_password })
+}
+
 /**
  * URL for SSE upload. Next.js rewrites buffer the full response, so the browser
  * must call the API origin directly when NEXT_PUBLIC_API_URL is set (e.g. http://localhost:8000).
@@ -369,12 +490,19 @@ export async function uploadEmailStream(
   inputType: string = 'email',
   onEvent: (event: import('@/types').AgentEvent) => void,
 ): Promise<void> {
-  const response = await fetch(uploadEmailStreamUrl(), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email_text: emailText, input_type: inputType }),
-    cache: 'no-store',
-  })
+  const doFetch = () =>
+    fetch(uploadEmailStreamUrl(), {
+      method: 'POST',
+      headers: { ...bearerHeaders(true) },
+      body: JSON.stringify({ email_text: emailText, input_type: inputType }),
+      cache: 'no-store',
+    })
+
+  let response = await doFetch()
+  if (response.status === 401) {
+    await refreshAccessToken()
+    response = await doFetch()
+  }
 
   if (!response.ok || !response.body) {
     throw new Error(`API error: ${response.status}`)
@@ -412,7 +540,7 @@ export async function processManualDropdown(body: import('@/types').ManualEnquir
   const url = base ? `${base}/api/enquiries/manual/process` : '/api/enquiries/manual/process'
   const res = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { ...bearerHeaders(true) },
     body: JSON.stringify(body),
     cache: 'no-store',
   })
@@ -436,7 +564,7 @@ export async function submitReviewStream(
 
   const response = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { ...bearerHeaders(true) },
     body: JSON.stringify(body),
     cache: 'no-store',
   })
@@ -484,7 +612,7 @@ export async function clientVerifyStream(
 
   const response = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { ...bearerHeaders(true) },
     body: JSON.stringify(body),
     cache: 'no-store',
   })

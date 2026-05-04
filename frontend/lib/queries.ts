@@ -1,5 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { enquiriesApi, quotationsApi, mastersApi, systemApi, syncApi, configuratorApi } from './api'
+import { enquiriesApi, quotationsApi, mastersApi, systemApi, syncApi, configuratorApi, usersApi } from './api'
+import { Permissions } from '@/lib/permissions'
+import { useAuthStore } from '@/stores/authStore'
 import type {
   EnquiryListItem, EnquiryDetail, EnquiryResponse,
   QuotationListItem, Quotation, Product,
@@ -17,9 +19,11 @@ export function useHealth() {
 }
 
 export function useEmailSyncStatus() {
+  const canView = useAuthStore((s) => s.hasPermission(Permissions.EMAIL_SYNC_VIEW))
   return useQuery<EmailSyncStatus>({
     queryKey: ['emailSyncStatus'],
     queryFn: () => syncApi.getStatus<EmailSyncStatus>(),
+    enabled: canView,
     refetchInterval: 60000,
     staleTime: 30000,
     retry: 1,
@@ -128,5 +132,35 @@ export function useConfiguratorValveTypes() {
     queryKey: ['configurator', 'valve-types'],
     queryFn: () => configuratorApi.getValveTypes<{ key: string; label: string }[]>(),
     staleTime: Infinity,
+  })
+}
+
+export function useTeamUsers(includeInactive = false) {
+  const can = useAuthStore((s) => s.hasPermission(Permissions.USERS_VIEW))
+  return useQuery({
+    queryKey: ['admin-users', includeInactive],
+    queryFn: () => usersApi.list<Record<string, unknown>[]>(includeInactive),
+    enabled: can,
+    staleTime: 15000,
+  })
+}
+
+export function usePermissionGroups() {
+  const authed = useAuthStore((s) => Boolean(s.access_token))
+  return useQuery({
+    queryKey: ['permission-groups'],
+    queryFn: () => usersApi.permissionGroups<Record<string, string[]>>(),
+    enabled: authed,
+    staleTime: 300000,
+  })
+}
+
+export function usePermissionPresets() {
+  const authed = useAuthStore((s) => Boolean(s.access_token))
+  return useQuery({
+    queryKey: ['permission-presets'],
+    queryFn: () => usersApi.permissionPresets<Record<string, string[]>>(),
+    enabled: authed,
+    staleTime: 300000,
   })
 }

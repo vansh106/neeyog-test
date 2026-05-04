@@ -184,7 +184,10 @@ export default function MastersPage() {
               </Select>
 
               <span className="ml-2 text-[12px] text-[#8A9488]">Supplier</span>
-              <Select value={supplierId || '__none__'} onValueChange={(v) => setSupplierId(v === '__none__' ? '' : v)}>
+              <Select
+                value={supplierId || '__none__'}
+                onValueChange={(v) => setSupplierId(v === '__none__' || v == null ? '' : v)}
+              >
                 <SelectTrigger className="w-[240px]">
                   <SelectValue placeholder="No supplier">
                     {supplierLabel}

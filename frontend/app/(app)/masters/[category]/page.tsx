@@ -103,7 +103,7 @@ export default function MastersCategoryPage() {
           <span className="ml-2 text-[12px] text-[#8A9488]">Supplier</span>
           <Select
             value={supplierId || '__none__'}
-            onValueChange={(v) => setSupplierId(v === '__none__' ? '' : v)}
+            onValueChange={(v) => setSupplierId(v === '__none__' || v == null ? '' : v)}
           >
             <SelectTrigger className="h-9 w-[240px] bg-white">
               <SelectValue placeholder="No supplier">

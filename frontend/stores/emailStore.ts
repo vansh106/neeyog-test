@@ -6,6 +6,8 @@ export interface EmailInboxItem {
   sender_name: string
   sender_email: string
   company: string
+  /** Resolved list title (company or person). */
+  display_name: string
   subject: string
   preview: string
   category: string | null
@@ -14,6 +16,8 @@ export interface EmailInboxItem {
   created_at: string
   awaiting_human: boolean
   has_quotation: boolean
+  /** AI / manual pipeline has run or a quote exists. */
+  inbox_processed: boolean
   is_new: boolean
   live_events: GlobalEvent[]
 }
@@ -52,11 +56,13 @@ export const useEmailStore = create<EmailStore>((set, get) => ({
       const existing = state.items.find((i) => i.enquiry_id === enquiry_id)
       if (existing) return state
 
+      const dn = (event.sender_name || '').trim() || 'Unknown'
       const newItem: EmailInboxItem = {
         enquiry_id,
-        sender_name: event.sender_name || 'Unknown',
+        sender_name: dn,
         sender_email: event.sender_email || '',
-        company: event.sender_name || 'Unknown',
+        company: dn,
+        display_name: dn,
         subject: event.subject || '',
         preview: event.preview || '',
         category: null,
@@ -65,6 +71,7 @@ export const useEmailStore = create<EmailStore>((set, get) => ({
         created_at: event.timestamp || new Date().toISOString(),
         awaiting_human: false,
         has_quotation: false,
+        inbox_processed: false,
         is_new: true,
         live_events: [event],
       }
@@ -76,16 +83,22 @@ export const useEmailStore = create<EmailStore>((set, get) => ({
 
   updateStatus: (enquiry_id, status, flow_type) =>
     set((state) => ({
-      items: state.items.map((item) =>
-        item.enquiry_id === enquiry_id
-          ? {
-              ...item,
-              status,
-              flow_type: flow_type ?? item.flow_type,
-              awaiting_human: status === 'pending_approval' ? true : item.awaiting_human,
-            }
-          : item,
-      ),
+      items: state.items.map((item) => {
+        if (item.enquiry_id !== enquiry_id) return item
+        const nextStatus = status
+        const nextFlow = flow_type ?? item.flow_type
+        const processed =
+          item.inbox_processed ||
+          (nextStatus && nextStatus !== 'received') ||
+          !!item.has_quotation
+        return {
+          ...item,
+          status: nextStatus,
+          flow_type: nextFlow,
+          awaiting_human: nextStatus === 'pending_approval' ? true : item.awaiting_human,
+          inbox_processed: processed,
+        }
+      }),
     })),
 
   addLiveEvent: (enquiry_id, event) =>

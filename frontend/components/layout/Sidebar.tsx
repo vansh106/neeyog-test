@@ -3,36 +3,63 @@
 import React from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import {
+  LayoutDashboard,
+  Upload,
+  Inbox,
+  FileText,
+  BarChart2,
+  Database,
+  Shield,
+  PanelLeftClose,
+  PanelLeft,
+  ChevronDown,
+  ChevronRight,
+  Mail,
+} from 'lucide-react'
+
 import { cn } from '@/lib/utils'
 import { useUIStore } from '@/lib/store'
 import { useHealth } from '@/lib/queries'
 import { useEmailStore } from '@/stores/emailStore'
-import {
-  LayoutDashboard, Upload, Inbox, FileText,
-  BarChart2, Database, Shield, PanelLeftClose, PanelLeft, ChevronDown, ChevronRight,
-  Mail,
-} from 'lucide-react'
 import { SIDEBAR_MASTER_CATEGORIES } from '@/lib/masterCatalogCategories'
+import { Permissions } from '@/lib/permissions'
+import { useAuthStore } from '@/stores/authStore'
 
-const NAV_ITEMS = [
+type NavIcon = typeof LayoutDashboard
+
+type NavItem =
+  | { href: string; label: string; icon: NavIcon }
+  | { href: string; label: string; icon: NavIcon; permission: string }
+  | { href: string; label: string; icon: NavIcon; adminOnly: true }
+
+const NAV_ITEMS: NavItem[] = [
   { href: '/dashboard', label: 'Home', icon: LayoutDashboard },
-  { href: '/upload', label: 'AI Upload', icon: Upload },
-  { href: '/emails', label: 'Emails', icon: Mail },
-  { href: '/enquiries', label: 'Enquiries', icon: Inbox },
-  { href: '/quotations', label: 'Quotations', icon: FileText },
-  { href: '/reports', label: 'Reports', icon: BarChart2 },
-  { href: '/masters', label: 'Masters', icon: Database },
-  { href: '/admin', label: 'Admin', icon: Shield },
+  { href: '/upload', label: 'AI Upload', icon: Upload, permission: Permissions.UPLOAD_EMAIL },
+  { href: '/emails', label: 'Emails', icon: Mail, permission: Permissions.VIEW_ENQUIRIES },
+  { href: '/enquiries', label: 'Enquiries', icon: Inbox, permission: Permissions.VIEW_ENQUIRIES },
+  { href: '/quotations', label: 'Quotations', icon: FileText, permission: Permissions.VIEW_QUOTATIONS },
+  { href: '/reports', label: 'Reports', icon: BarChart2, permission: Permissions.REPORTS_VIEW },
+  { href: '/masters', label: 'Masters', icon: Database, permission: Permissions.MASTERS_VIEW },
+  { href: '/admin', label: 'Admin', icon: Shield, adminOnly: true },
 ]
 
 export default function Sidebar() {
   const pathname = usePathname()
+  const hasPermission = useAuthStore((s) => s.hasPermission)
+  const isAdminOrAbove = useAuthStore((s) => s.isAdminOrAbove())
   const { sidebarCollapsed, toggleSidebar } = useUIStore()
   const { data: health } = useHealth()
   const unreadCount = useEmailStore((s) => s.unread_count)
   const isConnected = useEmailStore((s) => s.isConnected)
   const mastersActive = pathname === '/masters' || pathname.startsWith('/masters/')
   const [mastersOpen, setMastersOpen] = React.useState<boolean>(mastersActive)
+
+  const visibleNav = NAV_ITEMS.filter((item) => {
+    if ('adminOnly' in item && item.adminOnly) return isAdminOrAbove
+    if ('permission' in item && item.permission) return hasPermission(item.permission)
+    return true
+  })
 
   return (
     <aside
@@ -59,7 +86,7 @@ export default function Sidebar() {
       </div>
 
       <nav className="min-h-0 flex-1 space-y-0.5 overflow-x-hidden overflow-y-auto overscroll-y-contain px-2 [-webkit-overflow-scrolling:touch]">
-        {NAV_ITEMS.map((item) => {
+        {visibleNav.map((item) => {
           if (item.href === '/masters') {
             return (
               <div key={item.href}>
@@ -71,7 +98,7 @@ export default function Sidebar() {
                     mastersActive
                       ? 'bg-brand-green-500 text-white'
                       : 'text-[#8AAF8E] hover:bg-surface-sidebar2 hover:text-white',
-                    sidebarCollapsed && 'justify-center px-2'
+                    sidebarCollapsed && 'justify-center px-2',
                   )}
                 >
                   <item.icon className="w-4 h-4 flex-shrink-0" />
@@ -89,7 +116,10 @@ export default function Sidebar() {
                       href="/masters?tab=edit"
                       className={cn(
                         'flex items-center gap-3 px-3 py-2 rounded-md text-[12px] transition-colors',
-                        pathname === '/masters' && (new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '')).get('tab') === 'edit'
+                        pathname === '/masters' &&
+                          (typeof window !== 'undefined'
+                            ? new URLSearchParams(window.location.search).get('tab') === 'edit'
+                            : false)
                           ? 'bg-surface-sidebar2 text-white'
                           : 'text-[#8AAF8E] hover:bg-surface-sidebar2 hover:text-white',
                       )}
@@ -127,10 +157,8 @@ export default function Sidebar() {
               href={item.href}
               className={cn(
                 'flex items-center gap-3 px-3 py-2 rounded-md text-[13px] transition-colors',
-                active
-                  ? 'bg-brand-green-500 text-white'
-                  : 'text-[#8AAF8E] hover:bg-surface-sidebar2 hover:text-white',
-                sidebarCollapsed && 'justify-center px-2'
+                active ? 'bg-brand-green-500 text-white' : 'text-[#8AAF8E] hover:bg-surface-sidebar2 hover:text-white',
+                sidebarCollapsed && 'justify-center px-2',
               )}
             >
               <item.icon className="w-4 h-4 flex-shrink-0" />
@@ -165,7 +193,11 @@ export default function Sidebar() {
             )}
           </>
         )}
-        <button onClick={toggleSidebar} className="w-full flex items-center justify-center py-1 text-[#5a7a5e] hover:text-white transition-colors">
+        <button
+          type="button"
+          onClick={toggleSidebar}
+          className="w-full flex items-center justify-center py-1 text-[#5a7a5e] hover:text-white transition-colors"
+        >
           {sidebarCollapsed ? <PanelLeft className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
         </button>
       </div>

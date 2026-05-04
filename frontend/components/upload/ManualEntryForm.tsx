@@ -26,6 +26,8 @@ import { CLIENT_INDUSTRY_OPTIONS } from '@/types'
 type Props = {
   onSubmitManual: (form: ManualEnquiryForm) => void
   isProcessing: boolean
+  /** When opening Manual Entry from Emails → Process, pre-fills Notes once. */
+  prefillNotesFromEnquiry?: string | null
 }
 
 const SELECT_EMPTY = '__none__'
@@ -420,7 +422,11 @@ function buildEmailText(
   return lines.join('\n')
 }
 
-export default function ManualEntryForm({ onSubmitManual, isProcessing }: Props) {
+export default function ManualEntryForm({
+  onSubmitManual,
+  isProcessing,
+  prefillNotesFromEnquiry,
+}: Props) {
   const [clientMode, setClientMode] = useState<'existing' | 'new'>('existing')
   const [newClient, setNewClient] = useState({
     company_name: '',
@@ -440,6 +446,12 @@ export default function ManualEntryForm({ onSubmitManual, isProcessing }: Props)
   })
   const [priority, setPriority] = useState<'Normal' | 'High' | 'Urgent'>('Normal')
   const [notes, setNotes] = useState('')
+
+  useEffect(() => {
+    const p = (prefillNotesFromEnquiry || '').trim()
+    if (!p) return
+    setNotes((prev) => (prev.trim() ? prev : p))
+  }, [prefillNotesFromEnquiry])
 
   const [companyQuery, setCompanyQuery] = useState('')
   const [debouncedCompanyQuery, setDebouncedCompanyQuery] = useState('')

@@ -43,6 +43,10 @@ export interface EnquiryDetail {
   ai_reasoning: string | null
   error_message: string | null
   created_at: string | null
+  display_company?: string | null
+  inbox_processed?: boolean
+  processing_started_at?: string | null
+  processing_completed_at?: string | null
 }
 
 export interface QuotationLineItem {
