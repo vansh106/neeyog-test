@@ -4,8 +4,10 @@ from fastapi import APIRouter, Depends, Query
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from config.permissions import Permission
 from controllers import quotation_controller
 from controllers.quotation_controller import QuotationHistoryResponse, QuotationListItem
+from core.auth_middleware import CurrentUser, require_permission
 from core.database import get_db
 
 router = APIRouter(prefix="/api/quotations", tags=["quotations"])
@@ -13,6 +15,7 @@ router = APIRouter(prefix="/api/quotations", tags=["quotations"])
 
 @router.get("/history", response_model=QuotationHistoryResponse)
 async def get_product_quote_history_route(
+    _user: CurrentUser = Depends(require_permission(Permission.VIEW_QUOTATIONS)),
     category: str = Query(..., description="Product category key, e.g. butterfly_valve"),
     catalog_table: str | None = Query(None, description="Exact match: catalog table key"),
     catalog_row_id: str | None = Query(None, description="Exact match: catalog row UUID"),
@@ -51,6 +54,7 @@ async def get_product_quote_history_route(
 @router.get("/{quotation_id}/pdf")
 async def get_quotation_pdf_route(
     quotation_id: str,
+    _user: CurrentUser = Depends(require_permission(Permission.DOWNLOAD_PDF)),
     db: AsyncSession = Depends(get_db),
 ):
     pdf_path = await quotation_controller.handle_get_quotation_pdf(quotation_id, db)
@@ -64,6 +68,7 @@ async def get_quotation_pdf_route(
 @router.get("/{quotation_id}")
 async def get_quotation_route(
     quotation_id: str,
+    _user: CurrentUser = Depends(require_permission(Permission.VIEW_QUOTATIONS)),
     db: AsyncSession = Depends(get_db),
 ):
     return await quotation_controller.handle_get_quotation(quotation_id, db)
@@ -71,6 +76,7 @@ async def get_quotation_route(
 
 @router.get("/", response_model=list[QuotationListItem])
 async def list_quotations_route(
+    _user: CurrentUser = Depends(require_permission(Permission.VIEW_QUOTATIONS)),
     limit: int = Query(50, le=100),
     offset: int = Query(0),
     db: AsyncSession = Depends(get_db),

@@ -1,9 +1,12 @@
 """Email sync status, manual trigger, and processed-email history."""
 
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from config.permissions import Permission
+from core.auth_middleware import CurrentUser, require_permission
 from core.database import async_session_factory, get_db
 from db.models import EmailSyncState, ProcessedEmail
 
@@ -11,7 +14,9 @@ router = APIRouter(prefix="/api/sync", tags=["email-sync"])
 
 
 @router.get("/status")
-async def get_sync_status() -> dict:
+async def get_sync_status(
+    _user: CurrentUser = Depends(require_permission(Permission.EMAIL_SYNC_VIEW)),
+) -> dict:
     from core.config import get_settings
     from services.scheduler_service import scheduler
 
@@ -37,18 +42,43 @@ async def get_sync_status() -> dict:
 
 
 @router.post("/trigger")
-async def trigger_sync_now() -> dict:
+async def trigger_sync_now(
+    _user: CurrentUser = Depends(require_permission(Permission.EMAIL_SYNC_TRIGGER)),
+) -> dict:
     from services.email_sync_service import email_sync_service
 
     summary = await email_sync_service.sync_once()
     return {"message": "Sync complete", "summary": summary}
 
 
+@router.post("/reset-baseline")
+async def reset_email_sync_baseline(
+    _user: CurrentUser = Depends(require_permission(Permission.EMAIL_SYNC_TRIGGER)),
+) -> dict:
+    """Set `email_sync_state.baseline_at` to now so only mail from this moment onward is ingested and listed."""
+    now = datetime.now(timezone.utc)
+    async with async_session_factory() as s:
+        r = await s.execute(select(EmailSyncState).where(EmailSyncState.id == 1))
+        row = r.scalar_one_or_none()
+        if row is None:
+            row = EmailSyncState(id=1, baseline_at=now)
+            s.add(row)
+        else:
+            row.baseline_at = now
+        await s.commit()
+    return {
+        "message": "baseline_at set to current UTC time — sync will treat older messages as before_baseline; inbox hides older email_sync rows.",
+        "baseline_at": now.isoformat(),
+    }
+
+
 @router.get("/history")
-async def get_sync_history(limit: int = 50, db: AsyncSession = Depends(get_db)) -> list[dict]:
-    result = await db.execute(
-        select(ProcessedEmail).order_by(desc(ProcessedEmail.created_at)).limit(limit)
-    )
+async def get_sync_history(
+    _user: CurrentUser = Depends(require_permission(Permission.EMAIL_SYNC_VIEW)),
+    limit: int = 50,
+    db: AsyncSession = Depends(get_db),
+) -> list[dict]:
+    result = await db.execute(select(ProcessedEmail).order_by(desc(ProcessedEmail.created_at)).limit(limit))
     emails = result.scalars().all()
     return [
         {

@@ -117,7 +117,10 @@ export default function EmailsPage() {
   }, [agentEvents])
 
   return (
-    <PageShell title="Emails" subtitle="Auto-synced inbox with live processing">
+    <PageShell
+      title="Emails"
+      subtitle="Quotation-style mail synced after the server baseline (Indiamart and direct buyers); processing is manual until enabled."
+    >
       <div className="h-[calc(100vh-120px)] grid grid-cols-1 lg:grid-cols-[380px_1fr] gap-4">
         {/* Left: inbox */}
         <div className="rounded-xl border border-surface-border bg-white shadow-sm overflow-hidden flex flex-col">

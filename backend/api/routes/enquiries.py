@@ -5,6 +5,7 @@ from fastapi.responses import FileResponse
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from config.permissions import Permission
 from controllers import enquiry_controller
 from controllers.enquiry_controller import (
     EmailInboxItem,
@@ -13,6 +14,7 @@ from controllers.enquiry_controller import (
     ManualDropdownProcessRequest,
     UploadEmailRequest,
 )
+from core.auth_middleware import CurrentUser, require_permission
 from core.database import get_db
 
 router = APIRouter(prefix="/api/enquiries", tags=["enquiries"])
@@ -21,6 +23,7 @@ router = APIRouter(prefix="/api/enquiries", tags=["enquiries"])
 @router.post("/upload-email", response_model=EnquiryResponse)
 async def upload_email_route(
     body: UploadEmailRequest,
+    _user: CurrentUser = Depends(require_permission(Permission.UPLOAD_EMAIL)),
     db: AsyncSession = Depends(get_db),
 ):
     return await enquiry_controller.handle_upload_email(body, db)
@@ -29,6 +32,7 @@ async def upload_email_route(
 @router.post("/upload-email-stream")
 async def upload_email_stream_route(
     body: UploadEmailRequest,
+    _user: CurrentUser = Depends(require_permission(Permission.UPLOAD_EMAIL)),
     db: AsyncSession = Depends(get_db),
 ):
     stream = await enquiry_controller.handle_upload_email_stream(body, db)
@@ -46,6 +50,7 @@ async def upload_email_stream_route(
 @router.post("/manual/process", response_model=EnquiryResponse)
 async def manual_dropdown_process_route(
     body: ManualDropdownProcessRequest,
+    _user: CurrentUser = Depends(require_permission(Permission.VIEW_QUOTATIONS)),
     db: AsyncSession = Depends(get_db),
 ):
     return await enquiry_controller.handle_process_manual_dropdown(body, db)
@@ -53,6 +58,7 @@ async def manual_dropdown_process_route(
 
 @router.get("/", response_model=list[EnquiryListItem])
 async def list_enquiries_route(
+    _user: CurrentUser = Depends(require_permission(Permission.VIEW_ENQUIRIES)),
     status: str | None = Query(None),
     flow_type: str | None = Query(None),
     company_id: str | None = Query(None),
@@ -67,6 +73,7 @@ async def list_enquiries_route(
 
 @router.get("/emails/inbox", response_model=list[EmailInboxItem])
 async def list_email_inbox_route(
+    _user: CurrentUser = Depends(require_permission(Permission.VIEW_ENQUIRIES)),
     status: str | None = Query(None),
     limit: int = Query(50, le=100),
     offset: int = Query(0),
@@ -77,6 +84,7 @@ async def list_email_inbox_route(
 
 @router.get("/clients/search")
 async def search_clients_route(
+    _user: CurrentUser = Depends(require_permission(Permission.VIEW_ENQUIRIES)),
     q: str | None = Query(None),
 ):
     return await enquiry_controller.handle_get_clients(q)
@@ -85,6 +93,7 @@ async def search_clients_route(
 @router.get("/{enquiry_id}")
 async def get_enquiry_route(
     enquiry_id: str,
+    _user: CurrentUser = Depends(require_permission(Permission.VIEW_ENQUIRIES)),
     db: AsyncSession = Depends(get_db),
 ):
     return await enquiry_controller.handle_get_enquiry(enquiry_id, db)
@@ -93,6 +102,7 @@ async def get_enquiry_route(
 @router.get("/{enquiry_id}/erp-export")
 async def get_enquiry_erp_export_route(
     enquiry_id: str,
+    _user: CurrentUser = Depends(require_permission(Permission.ERP_DOWNLOAD)),
     db: AsyncSession = Depends(get_db),
 ):
     path = await enquiry_controller.handle_get_erp_export(enquiry_id, db)

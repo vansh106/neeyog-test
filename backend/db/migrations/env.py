@@ -14,9 +14,11 @@ from db.models import (  # noqa: F401
     Enquiry,
     ProcessedEmail,
     Quotation,
+    RefreshToken,
     Supplier,
     SupplierProductPrice,
     User,
+    UserPermission,
 )
 from db.sheet_models import (  # noqa: F401
     CatalogBallValveRow,

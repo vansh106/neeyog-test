@@ -1,3 +1,15 @@
+class AuthenticationError(Exception):
+    """Invalid credentials or token."""
+
+
+class AuthorizationError(Exception):
+    """Authenticated but not allowed to perform the action."""
+
+
+class UserNotFoundError(Exception):
+    """User record missing."""
+
+
 class ProductNotFoundError(Exception):
     pass
 

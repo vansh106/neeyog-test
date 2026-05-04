@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.routes import clients, configurator, enquiries, masters, quotations, stream, suppliers, sync
+from api.routes import auth, clients, configurator, enquiries, masters, quotations, stream, suppliers, sync, users
 from core.config import get_settings
 from core.database import async_session_factory, get_db, init_db
 from masters.product_master import SHEET_TABLES
@@ -24,6 +24,29 @@ async def lifespan(app: FastAPI):
 
     await init_db()
     logger.info("Database initialised, pgvector enabled.")
+
+    from db.models import User, UserTier
+    from services.auth_service import hash_password
+
+    try:
+        async with async_session_factory() as db:
+            r = await db.execute(select(User).where(User.tier == UserTier.SUPERADMIN.value))
+            if r.scalar_one_or_none() is None:
+                db.add(
+                    User(
+                        email=settings.superadmin_email.lower().strip(),
+                        full_name=settings.superadmin_name,
+                        hashed_password=hash_password(settings.superadmin_password),
+                        tier=UserTier.SUPERADMIN.value,
+                        job_title="Super Administrator",
+                        is_active=True,
+                        is_first_login=False,
+                    )
+                )
+                await db.commit()
+                logger.info("SuperAdmin created: %s", settings.superadmin_email)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Superadmin seed skipped (migrations applied?): %s", exc)
 
     async with async_session_factory() as session:
         total = 0
@@ -76,6 +99,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth.router)
+app.include_router(users.router)
 app.include_router(enquiries.router)
 app.include_router(quotations.router)
 app.include_router(masters.router, prefix="/api")

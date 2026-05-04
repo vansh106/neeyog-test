@@ -1,4 +1,4 @@
-"""Gmail IMAP polling — qualifies enquiry emails and runs the agent pipeline."""
+"""Gmail IMAP polling — qualifies quotation-style enquiry mail and optionally runs the agent pipeline."""
 
 from __future__ import annotations
 
@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.config import get_settings
 from core.database import async_session_factory
 from db.models import EmailSyncState, ProcessedEmail
+from services.email_inbox_filters import is_quotation_work_related
 from services.enquiry_service import create_enquiry, process_enquiry
 
 logger = logging.getLogger(__name__)
@@ -27,14 +28,13 @@ settings = get_settings()
 
 
 class EmailSyncService:
-    """Polls Gmail via IMAP and triggers the agent pipeline for qualifying enquiry emails."""
+    """Polls Gmail via IMAP, ingests RFQ-style mail after sync baseline, optionally runs the agent pipeline."""
 
     def __init__(self) -> None:
         self.host = settings.email_imap_host
         self.port = settings.email_imap_port
         self.email = settings.email_address
         self.password = settings.email_app_password
-        self.keywords = settings.enquiry_keywords_list
 
     def _connect(self) -> imaplib.IMAP4_SSL:
         mail = imaplib.IMAP4_SSL(self.host, self.port)
@@ -137,11 +137,8 @@ class EmailSyncService:
             if "indiamart" not in sender_lower:
                 return False, "auto_sender"
 
-        combined = (subject + " " + body).lower()
-        matched_keywords = [kw for kw in self.keywords if kw in combined]
-
-        if not matched_keywords:
-            return False, "no_keywords"
+        if not is_quotation_work_related(subject, body, sender_email):
+            return False, "not_work_related"
 
         return True, ""
 
@@ -205,7 +202,7 @@ class EmailSyncService:
             subject=subject,
             received_at=received_at,
             enquiry_id=enquiry_id,
-            was_processed=enquiry_id is not None,
+            was_processed=bool(enquiry_id) and settings.email_sync_auto_process,
             filter_reason=filter_reason,
         )
         db.add(record)
@@ -239,70 +236,6 @@ class EmailSyncService:
         except Exception:
             logger.exception("Failed to parse message %s", msg_id_bytes)
             return None
-
-    async def _establish_baseline(
-        self, mail: imaplib.IMAP4_SSL, summary: dict
-    ) -> None:
-        """First activation: skip all current UNSEEN without parsing; mark read; set baseline."""
-        search_criteria = "UNSEEN" if settings.email_filter_unread_only else "ALL"
-        _, message_ids = mail.search(None, search_criteria)
-        id_list = message_ids[0].split()
-        skipped = 0
-
-        for msg_id_bytes in id_list:
-            async with async_session_factory() as db:
-                try:
-                    _, msg_data = mail.fetch(msg_id_bytes, "(RFC822)")
-                    if not msg_data or not msg_data[0] or len(msg_data[0]) < 2:
-                        continue
-                    raw_email = msg_data[0][1]
-                    parsed = self._parse_fetched_message(msg_id_bytes, raw_email)
-                    if not parsed:
-                        continue
-
-                    if await self._is_already_processed(parsed["message_id"], db):
-                        try:
-                            mail.store(msg_id_bytes, "+FLAGS", "\\Seen")
-                        except Exception:
-                            logger.debug("Could not mark seen for %s", msg_id_bytes, exc_info=True)
-                        continue
-
-                    await self._record_processed(
-                        message_id=parsed["message_id"],
-                        sender_email=parsed["sender_email_addr"] or "",
-                        sender_name=parsed["sender_name"],
-                        subject=parsed["subject"],
-                        received_at=parsed["received_at"],
-                        filter_reason="before_baseline",
-                        db=db,
-                    )
-                    try:
-                        mail.store(msg_id_bytes, "+FLAGS", "\\Seen")
-                    except Exception:
-                        logger.warning("Could not mark seen after before_baseline %s", msg_id_bytes)
-                    skipped += 1
-                except IntegrityError:
-                    await db.rollback()
-                    try:
-                        mail.store(msg_id_bytes, "+FLAGS", "\\Seen")
-                    except Exception:
-                        pass
-                except Exception as e:
-                    await db.rollback()
-                    logger.error("Baseline skip failed for %s: %s", msg_id_bytes, e, exc_info=True)
-
-        async with async_session_factory() as db:
-            st = await self._get_or_create_sync_state(db)
-            st.baseline_at = datetime.now(timezone.utc)
-            await db.commit()
-
-        summary["emails_checked"] = len(id_list)
-        summary["filtered_out"] += skipped
-        summary["baseline_established"] = True
-        summary["details"].append(
-            f"Sync baseline established — skipped {skipped} older unread message(s) without parsing."
-        )
-        logger.info("Email sync baseline established (%s backlog messages skipped)", skipped)
 
     async def _process_single_unseen(
         self,
@@ -423,16 +356,16 @@ class EmailSyncService:
                 except Exception:
                     logger.warning("Could not mark seen for enquiry email %s", msg_id_bytes)
 
-                # Trigger processing (stub for now)
-                asyncio.create_task(
-                    process_enquiry(
-                        enquiry_id=str(enquiry.id),
-                        raw_input=email_text,
-                        input_type="email_sync",
-                        db=db,
-                        emitter=None
+                if settings.email_sync_auto_process:
+                    asyncio.create_task(
+                        process_enquiry(
+                            enquiry_id=str(enquiry.id),
+                            raw_input=email_text,
+                            input_type="email_sync",
+                            db=db,
+                            emitter=None,
+                        )
                     )
-                )
 
                 summary["enquiries_created"] += 1
                 summary["details"].append(f"Created enquiry for: {sender_name} — {subject}")
@@ -472,12 +405,15 @@ class EmailSyncService:
 
             async with async_session_factory() as db:
                 st = await self._get_or_create_sync_state(db)
+                if st.baseline_at is None:
+                    st.baseline_at = datetime.now(timezone.utc)
+                    summary["baseline_established"] = True
+                    summary["details"].append(
+                        "Email sync baseline set to now — only messages dated after this run "
+                        "are ingested; older unread mail is skipped (before_baseline) until you reset the baseline."
+                    )
                 baseline_at = st.baseline_at
                 await db.commit()
-
-            if baseline_at is None:
-                await self._establish_baseline(mail, summary)
-                return summary
 
             search_criteria = "UNSEEN" if settings.email_filter_unread_only else "ALL"
             _, message_ids = mail.search(None, search_criteria)

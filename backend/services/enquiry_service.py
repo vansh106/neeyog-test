@@ -9,14 +9,16 @@ import uuid
 import json
 from datetime import date
 
-from sqlalchemy import desc, or_, select
+from sqlalchemy import and_, desc, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from core.config import get_settings
 from core.database import async_session_factory
 from core.exceptions import EnquiryParseError, ProductNotFoundError
-from db.models import AuditLog, ClientBranch, Enquiry, Quotation, QuotationProductHistory
+from db.models import AuditLog, ClientBranch, EmailSyncState, Enquiry, Quotation, QuotationProductHistory
+from services.email_display_infer import infer_company_from_email_raw
+from services.email_inbox_filters import raw_input_is_quotation_work_related
 
 logger = logging.getLogger(__name__)
 
@@ -589,6 +591,19 @@ async def get_enquiry(enquiry_id: str, db: AsyncSession) -> Enquiry:
     return enquiry
 
 
+def enquiry_inbox_pipeline_processed(e: Enquiry) -> bool:
+    """True once AI/manual pipeline has touched the enquiry or a quote exists."""
+    pd = e.parsed_data if isinstance(e.parsed_data, dict) else {}
+    has_quotation = bool(getattr(e, "branch_id", None)) or bool(pd.get("quotation_id"))
+    st = (e.status or "").strip().lower()
+    return bool(
+        e.processing_started_at is not None
+        or e.processing_completed_at is not None
+        or has_quotation
+        or (st and st != "received")
+    )
+
+
 async def list_enquiries(
     db: AsyncSession,
     status: str | None = None,
@@ -639,9 +654,14 @@ def _format_for_inbox(e: Enquiry) -> dict:
             else:
                 category = str(first_product.get("product_description", ""))[:30] or None
 
-    sender_name = str(parsed.get("client_name", "") or "")
-    sender_email = str(parsed.get("client_email", "") or "")
-    company = str(parsed.get("client_company", "Unknown") or "Unknown")
+    sender_name = str(parsed.get("client_name", "") or "").strip()
+    sender_email = str(parsed.get("client_email", "") or "").strip()
+    company = str(parsed.get("client_company", "") or "").strip()
+    if not company or company.lower() == "unknown":
+        company = infer_company_from_email_raw(e.raw_input) or "Unknown"
+
+    if (not sender_name or sender_name.lower() == "unknown") and company and company != "Unknown":
+        sender_name = company
 
     if (not sender_name or not sender_email) and e.raw_input:
         lines = e.raw_input.split("\n")
@@ -679,11 +699,19 @@ def _format_for_inbox(e: Enquiry) -> dict:
         getattr(e, "client_verification_status", None) == "pending" or e.status == "pending_approval"
     )
 
+    has_quotation = bool(getattr(e, "branch_id", None)) or bool(
+        (e.parsed_data or {}).get("quotation_id") if isinstance(e.parsed_data, dict) else False
+    )
+    inbox_processed = enquiry_inbox_pipeline_processed(e)
+
+    display_name = company if company and company != "Unknown" else (sender_name or "Unknown")
+
     return {
         "enquiry_id": str(e.id),
-        "sender_name": sender_name or company,
+        "sender_name": sender_name or display_name,
         "sender_email": sender_email,
         "company": company,
+        "display_name": display_name,
         "subject": subject,
         "preview": preview,
         "category": category,
@@ -692,7 +720,8 @@ def _format_for_inbox(e: Enquiry) -> dict:
         "confidence": e.confidence_score,
         "input_type": e.input_type,
         "created_at": e.created_at.isoformat() if e.created_at else "",
-        "has_quotation": bool(getattr(e, "branch_id", None)) or bool((e.parsed_data or {}).get("quotation_id") if isinstance(e.parsed_data, dict) else False),
+        "has_quotation": has_quotation,
+        "inbox_processed": inbox_processed,
         "awaiting_human": awaiting_human,
         "hitl_cycle": int(getattr(e, "hitl_cycle", 0) or 0),
     }
@@ -704,13 +733,32 @@ async def list_email_enquiries(
     offset: int = 0,
     status: str | None = None,
 ) -> list[dict]:
-    q = select(Enquiry).where(
-        or_(Enquiry.input_type == "email_sync", Enquiry.input_type == "email")
-    )
+    st_result = await db.execute(select(EmailSyncState).where(EmailSyncState.id == 1))
+    sync_state = st_result.scalar_one_or_none()
+    baseline_at = sync_state.baseline_at if sync_state else None
+
+    if baseline_at is None:
+        # Baseline is set on first IMAP sync; until then do not list legacy email_sync rows.
+        q = select(Enquiry).where(Enquiry.input_type == "email")
+    else:
+        q = select(Enquiry).where(
+            or_(
+                Enquiry.input_type == "email",
+                and_(Enquiry.input_type == "email_sync", Enquiry.created_at >= baseline_at),
+            )
+        )
     if status:
         q = q.where(Enquiry.status == status)
 
-    q = q.order_by(desc(Enquiry.created_at)).limit(limit).offset(offset)
+    fetch_cap = min(500, max(150, (offset + limit) * 5))
+    q = q.order_by(desc(Enquiry.created_at)).limit(fetch_cap)
     result = await db.execute(q)
     rows = result.scalars().all()
-    return [_format_for_inbox(e) for e in rows]
+
+    matches: list[dict] = []
+    for e in rows:
+        if not raw_input_is_quotation_work_related(e.raw_input):
+            continue
+        matches.append(_format_for_inbox(e))
+
+    return matches[offset : offset + limit]

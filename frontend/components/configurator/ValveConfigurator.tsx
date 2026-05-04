@@ -1110,7 +1110,9 @@ function AccessoryToggleRow({
             }}
           >
             <SelectTrigger className="h-10 w-full min-w-0">
-              <SelectValue placeholder={`Select ${label}`} />
+              <SelectValue placeholder={`Select ${label}`}>
+                {value?.type ?? null}
+              </SelectValue>
             </SelectTrigger>
             <SelectContent>
               <SelectItem value={SELECT_EMPTY}>

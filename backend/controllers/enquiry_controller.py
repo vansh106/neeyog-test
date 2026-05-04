@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.exceptions import EnquiryParseError, ProductNotFoundError
 from db.models import Enquiry
 from services import enquiry_service
+from services.email_display_infer import infer_company_from_email_raw
 
 logger = logging.getLogger(__name__)
 
@@ -129,6 +130,7 @@ class EmailInboxItem(BaseModel):
     sender_name: str
     sender_email: str
     company: str
+    display_name: str = ""
     subject: str
     preview: str
     category: str | None = None
@@ -138,6 +140,7 @@ class EmailInboxItem(BaseModel):
     input_type: str
     created_at: str
     has_quotation: bool = False
+    inbox_processed: bool = False
     awaiting_human: bool = False
     hitl_cycle: int = 0
 
@@ -200,6 +203,10 @@ async def handle_get_enquiry(
 ) -> dict:
     try:
         enquiry = await enquiry_service.get_enquiry(enquiry_id, db)
+        pd = enquiry.parsed_data if isinstance(enquiry.parsed_data, dict) else {}
+        co = str(pd.get("client_company", "") or "").strip()
+        if not co or co.lower() == "unknown":
+            co = infer_company_from_email_raw(enquiry.raw_input) or "Unknown"
         return {
             "enquiry_id": str(enquiry.id),
             "status": enquiry.status,
@@ -212,6 +219,14 @@ async def handle_get_enquiry(
             "ai_reasoning": enquiry.ai_reasoning,
             "error_message": enquiry.error_message,
             "created_at": enquiry.created_at.isoformat() if enquiry.created_at else None,
+            "display_company": co,
+            "inbox_processed": enquiry_service.enquiry_inbox_pipeline_processed(enquiry),
+            "processing_started_at": enquiry.processing_started_at.isoformat()
+            if enquiry.processing_started_at
+            else None,
+            "processing_completed_at": enquiry.processing_completed_at.isoformat()
+            if enquiry.processing_completed_at
+            else None,
         }
     except ProductNotFoundError:
         raise HTTPException(status_code=404, detail=f"Enquiry {enquiry_id} not found")
