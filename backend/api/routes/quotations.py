@@ -6,7 +6,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from config.permissions import Permission
 from controllers import quotation_controller
-from controllers.quotation_controller import QuotationHistoryResponse, QuotationListItem
+from controllers.quotation_controller import (
+    QuotationHistoryResponse,
+    QuotationListItem,
+    QuotationUpdateLineItemsBody,
+)
 from core.auth_middleware import CurrentUser, require_permission
 from core.database import get_db
 
@@ -49,6 +53,17 @@ async def get_product_quote_history_route(
         limit=limit,
         offset=offset,
     )
+
+
+@router.patch("/{quotation_id}")
+async def patch_quotation_line_items_route(
+    quotation_id: str,
+    body: QuotationUpdateLineItemsBody,
+    _user: CurrentUser = Depends(require_permission(Permission.APPROVE_QUOTATIONS)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Rebuild quote lines from manual configurator payloads (same shape as manual dropdown)."""
+    return await quotation_controller.handle_patch_quotation_line_items(quotation_id, body, db)
 
 
 @router.get("/{quotation_id}/pdf")

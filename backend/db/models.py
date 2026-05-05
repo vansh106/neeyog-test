@@ -127,6 +127,13 @@ class Enquiry(Base):
     )
     # Tracks when background processing started and finished
 
+    mailbox_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("mailboxes.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
     quotations: Mapped[list["Quotation"]] = relationship(back_populates="enquiry")
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
@@ -299,11 +306,79 @@ class EmailSyncState(Base):
     baseline_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class Mailbox(Base):
+    """IMAP mailbox credentials (superadmin-managed)."""
+
+    __tablename__ = "mailboxes"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    display_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    email_address: Mapped[str] = mapped_column(String(255), nullable=False, unique=True, index=True)
+    imap_host: Mapped[str] = mapped_column(String(255), nullable=False, default="imap.gmail.com")
+    imap_port: Mapped[int] = mapped_column(Integer, nullable=False, default=993)
+    imap_folder: Mapped[str] = mapped_column(String(255), nullable=False, default="INBOX")
+    unread_only: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    credential_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    sync_state: Mapped["MailboxSyncState | None"] = relationship(
+        "MailboxSyncState",
+        back_populates="mailbox",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
+
+
+class MailboxSyncState(Base):
+    """Per-mailbox IMAP sync baseline (replaces singleton semantics for multi-mailbox)."""
+
+    __tablename__ = "mailbox_sync_state"
+
+    mailbox_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("mailboxes.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    baseline_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    mailbox: Mapped["Mailbox"] = relationship("Mailbox", back_populates="sync_state")
+
+
+class UserMailboxAccess(Base):
+    """Which mailboxes a user may view / process / trigger sync for."""
+
+    __tablename__ = "user_mailbox_access"
+    __table_args__ = (UniqueConstraint("user_id", "mailbox_id", name="uq_user_mailbox_access"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    mailbox_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("mailboxes.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    can_view: Mapped[bool] = mapped_column(Boolean, default=True)
+    can_process: Mapped[bool] = mapped_column(Boolean, default=True)
+    can_trigger_sync: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class ProcessedEmail(Base):
     __tablename__ = "processed_emails"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    message_id: Mapped[str] = mapped_column(String, unique=True, nullable=False, index=True)
+    mailbox_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("mailboxes.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    message_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
     sender_email: Mapped[str] = mapped_column(String, nullable=False)
     sender_name: Mapped[str | None] = mapped_column(String, nullable=True)
     subject: Mapped[str | None] = mapped_column(String, nullable=True)

@@ -7,16 +7,25 @@ Raises only from core.exceptions.
 import logging
 import uuid
 import json
-from datetime import date
+from datetime import date, datetime, timezone
 
-from sqlalchemy import and_, desc, or_, select
+from sqlalchemy import and_, desc, false, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from core.config import get_settings
 from core.database import async_session_factory
 from core.exceptions import EnquiryParseError, ProductNotFoundError
-from db.models import AuditLog, ClientBranch, EmailSyncState, Enquiry, Quotation, QuotationProductHistory
+from db.models import (
+    AuditLog,
+    ClientBranch,
+    EmailSyncState,
+    Enquiry,
+    Mailbox,
+    MailboxSyncState,
+    Quotation,
+    QuotationProductHistory,
+)
 from services.email_display_infer import infer_company_from_email_raw
 from services.email_inbox_filters import raw_input_is_quotation_work_related
 
@@ -56,6 +65,108 @@ def _normalize_int(x: object, default: int = 1) -> int:
         return default
 
 
+def expand_manual_line_items_to_quote_parts(
+    line_items_in: list,
+) -> tuple[list[dict], list[dict], list[dict], list[dict]]:
+    """Convert frontend ``ManualLineItem`` payloads into quote + enquiry structures.
+
+    Returns ``(parsed_products, matched_products, quote_line_items, history_rows)``.
+    """
+    parsed_products: list[dict] = []
+    matched_products: list[dict] = []
+    quote_line_items: list[dict] = []
+    history_rows: list[dict] = []
+
+    for li in line_items_in:
+        if not isinstance(li, dict):
+            continue
+        qty = _normalize_int(li.get("quantity"), 1)
+        sp = li.get("selectedProduct") or {}
+        if not isinstance(sp, dict):
+            continue
+        name = str(sp.get("name") or "Product").strip()
+        unit = str(sp.get("unit") or "Nos").strip() or "Nos"
+        unit_price = _clean_float(sp.get("base_price"), 0.0)
+        size_inch = sp.get("size_inch")
+        size_mm = sp.get("size_mm")
+        material = sp.get("material")
+
+        desc_parts = [name]
+        if size_inch is not None or size_mm is not None:
+            inch_part = f'{size_inch}"' if size_inch is not None else ""
+            mm_part = f"({size_mm}mm)" if size_mm is not None else ""
+            sz = " ".join([p for p in [inch_part, mm_part] if p]).strip()
+            if sz:
+                desc_parts.append(sz)
+        if material:
+            desc_parts.append(str(material))
+        description = " — ".join([p for p in desc_parts if p])
+
+        parsed_products.append(
+            {
+                "product_description": description,
+                "quantity": qty,
+                "unit": unit,
+            }
+        )
+        matched_products.append(
+            {
+                "matched": True,
+                "product_id": sp.get("id"),
+                "product_name": name,
+                "material": material,
+                "size_inch": size_inch,
+                "size_mm": size_mm,
+                "base_price": unit_price,
+                "unit": unit,
+            }
+        )
+        cascade = li.get("cascadeSelections") or {}
+        if not isinstance(cascade, dict):
+            cascade = {}
+        cat = str(li.get("category") or "unknown").strip().lower()
+        catalog_table = None
+        catalog_row_id = None
+        raw_sp_id = sp.get("id")
+        if isinstance(raw_sp_id, str) and ":" in raw_sp_id:
+            parts = raw_sp_id.split(":", 1)
+            if len(parts) == 2 and parts[0] and parts[1]:
+                catalog_table = parts[0].strip().lower()
+                try:
+                    catalog_row_id = uuid.UUID(parts[1].strip())
+                except ValueError:
+                    catalog_row_id = None
+        quote_line_items.append(
+            {
+                "description": description,
+                "quantity": qty,
+                "unit_price": unit_price,
+                "unit": unit,
+                "category": cat,
+                "catalog_table": catalog_table,
+                "catalog_row_id": str(catalog_row_id) if catalog_row_id else None,
+            }
+        )
+        history_rows.append(
+            {
+                "category": cat,
+                "catalog_table": catalog_table,
+                "catalog_row_id": catalog_row_id,
+                "variant_type": str(cascade.get("variant_type") or "") or None,
+                "construction": str(cascade.get("construction") or "") or None,
+                "valve_size": str(cascade.get("valve_size") or "") or None,
+                "end_connection": str(cascade.get("end_connection") or "") or None,
+                "pressure": str(cascade.get("pressure") or "") or None,
+                "body": str(cascade.get("body") or "") or None,
+                "ball_disc": str(cascade.get("ball_disc") or cascade.get("ball") or "") or None,
+                "stem": str(cascade.get("stem") or "") or None,
+                "seat": str(cascade.get("seat") or "") or None,
+            }
+        )
+
+    return parsed_products, matched_products, quote_line_items, history_rows
+
+
 def _calc_totals(
     line_items: list[dict],
     gst_rate: float,
@@ -83,6 +194,7 @@ async def create_enquiry(
     email_text: str,
     input_type: str = "email",
     db: AsyncSession | None = None,
+    mailbox_id: uuid.UUID | None = None,
 ) -> Enquiry:
     """Create and persist an Enquiry DB record with status='received'."""
     if not email_text or not email_text.strip():
@@ -96,6 +208,7 @@ async def create_enquiry(
         raw_input=email_text.strip(),
         input_type=input_type,
         status="received",
+        mailbox_id=mailbox_id,
     )
 
     if db:
@@ -203,6 +316,224 @@ async def process_enquiry(
     }
 
 
+def _email_subject_from_raw(raw: str) -> str:
+    for line in (raw or "").split("\n")[:18]:
+        if line.lower().startswith("subject:"):
+            return line[8:].strip() or "Enquiry"
+    return "Enquiry"
+
+
+def _matcher_to_cascade_filters(matcher: dict, category: str) -> dict[str, str]:
+    from services.masters_service import CASCADE_STEPS
+
+    steps = CASCADE_STEPS.get(category, [])
+    filled = matcher.get("filled_cascade") or {}
+    if not isinstance(filled, dict):
+        filled = {}
+    consts: dict[str, str] = {}
+    for c in matcher.get("constant_columns") or []:
+        if isinstance(c, dict) and c.get("key"):
+            consts[str(c["key"])] = str(c.get("value") or "").strip()
+    derived_keys = {
+        str(d["key"])
+        for d in (matcher.get("derived_columns") or [])
+        if isinstance(d, dict) and d.get("key")
+    }
+    out: dict[str, str] = {}
+    for step in steps:
+        if step in derived_keys:
+            continue
+        v = filled.get(step) or consts.get(step)
+        if v and str(v).strip():
+            out[str(step)] = str(v).strip()
+    return out
+
+
+def _downgrade_matcher_to_incomplete(enquiry: Enquiry, reason: str) -> None:
+    pd = dict(enquiry.parsed_data or {})
+    m = dict(pd.get("matcher") or {}) if isinstance(pd.get("matcher"), dict) else {}
+    m["auto_quote_note"] = reason
+    m["product_completeness"] = "incomplete"
+    pd["matcher"] = m
+    enquiry.parsed_data = pd
+    enquiry.flow_type = "product_incomplete"
+    enquiry.status = "matcher_ready"
+
+
+async def try_automatic_quotation_from_matcher(enquiry: Enquiry, db: AsyncSession) -> dict | None:
+    """When matcher is complete, resolve a single catalog row and run manual quote on this enquiry."""
+    from services.masters_service import (
+        CASCADE_STEPS,
+        SHEET_MODEL_BY_KEY,
+        catalog_row_to_size_option,
+        get_cascade_matching_rows,
+    )
+
+    pd = enquiry.parsed_data if isinstance(enquiry.parsed_data, dict) else {}
+    m = pd.get("matcher")
+    if not isinstance(m, dict):
+        return None
+    cat = str(m.get("catalog_key") or "").strip()
+    if not cat:
+        _downgrade_matcher_to_incomplete(enquiry, "No catalog sheet detected")
+        await db.commit()
+        return None
+
+    filters = _matcher_to_cascade_filters(m, cat)
+    data = await get_cascade_matching_rows(cat, filters, db, limit=120)
+    items = data.get("items") or []
+    if len(items) == 0:
+        _downgrade_matcher_to_incomplete(enquiry, "No catalog row matched resolved cascade")
+        await db.commit()
+        return None
+
+    if len(items) > 1:
+        steps = CASCADE_STEPS.get(cat, [])
+        od_cols = [c for c in ("pipe_od", "tc_od") if c in steps]
+        for od_col in od_cols:
+            distinct_od = {str(r.get(od_col) or "").strip() for r in items}
+            distinct_od.discard("")
+            if len(distinct_od) != 1:
+                continue
+            only = next(iter(distinct_od))
+            filters2 = {**filters, od_col: only}
+            data2 = await get_cascade_matching_rows(cat, filters2, db, limit=120)
+            narrowed = data2.get("items") or []
+            if len(narrowed) == 1:
+                items = narrowed
+                filters = filters2
+                break
+        if len(items) != 1:
+            _downgrade_matcher_to_incomplete(
+                enquiry, f"{len(items)} catalog rows still match — complete manually"
+            )
+            await db.commit()
+            return None
+
+    row = items[0]
+    steps = CASCADE_STEPS.get(cat, [])
+    cascade_selections = {
+        k: str(row.get(k) or "").strip() for k in steps if str(row.get(k) or "").strip()
+    }
+
+    model_cls = SHEET_MODEL_BY_KEY.get(cat)
+    if model_cls is None:
+        _downgrade_matcher_to_incomplete(enquiry, "Unknown catalog model")
+        await db.commit()
+        return None
+    rid = row.get("row_id")
+    try:
+        rid_uuid = rid if isinstance(rid, uuid.UUID) else uuid.UUID(str(rid))
+    except (ValueError, TypeError):
+        _downgrade_matcher_to_incomplete(enquiry, "Invalid catalog row id")
+        await db.commit()
+        return None
+    orm_row = await db.get(model_cls, rid_uuid)
+    if orm_row is None:
+        _downgrade_matcher_to_incomplete(enquiry, "Catalog row not found")
+        await db.commit()
+        return None
+    selected = catalog_row_to_size_option(cat, orm_row)
+
+    client_block = m.get("client") if isinstance(m.get("client"), dict) else {}
+    mode = str(client_block.get("mode") or "").strip().lower()
+    body: dict = {
+        "lineItems": [
+            {
+                "category": cat,
+                "cascadeSelections": cascade_selections,
+                "selectedProduct": selected,
+                "quantity": 1,
+            }
+        ],
+        "notes": str(pd.get("notes") or "").strip(),
+        "priority": str(pd.get("priority") or "Normal").strip() or "Normal",
+        "targetEnquiryId": str(enquiry.id),
+    }
+    if mode == "existing" and client_block.get("selected_client_id"):
+        body["clientMode"] = "existing"
+        body["selectedClientId"] = str(client_block["selected_client_id"])
+    else:
+        nc = client_block.get("suggested_new_client") if isinstance(client_block.get("suggested_new_client"), dict) else {}
+        body["clientMode"] = "new"
+        body["newClient"] = {
+            "company_name": str(nc.get("company_name") or "New client").strip(),
+            "gst_number": nc.get("gst_number"),
+            "industry": nc.get("industry"),
+            "branch_name": str(nc.get("branch_name") or "Head Office").strip(),
+            "contact_name": str(nc.get("contact_name") or "").strip(),
+            "designation": nc.get("designation"),
+            "phone": str(nc.get("phone") or ""),
+            "email": str(nc.get("email") or ""),
+            "city": str(nc.get("city") or "Unknown").strip(),
+            "state": nc.get("state"),
+            "pincode": nc.get("pincode"),
+            "address_line1": nc.get("address_line1"),
+            "country": str(nc.get("country") or "India"),
+            "address": str(nc.get("address_line1") or ""),
+        }
+
+    return await process_manual_dropdown(body, db)
+
+
+async def process_email_matcher(enquiry_id: str, db: AsyncSession) -> dict:
+    """Run deterministic matcher; auto-quote when product is complete and uniquely resolved."""
+    from services.email_matcher_service import persist_matcher_on_enquiry
+
+    e = await get_enquiry(enquiry_id, db)
+    now = datetime.now(timezone.utc)
+    e.processing_started_at = now
+    await db.commit()
+
+    e = await persist_matcher_on_enquiry(enquiry_id, db)
+
+    quote_block: dict | None = None
+    if (e.flow_type or "") == "product_complete":
+        quote_block = await try_automatic_quotation_from_matcher(e, db)
+        await db.refresh(e)
+
+    e.processing_completed_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(e)
+
+    pd = e.parsed_data if isinstance(e.parsed_data, dict) else {}
+    m = pd.get("matcher") if isinstance(pd.get("matcher"), dict) else {}
+    conf = float(m.get("confidence") or e.confidence_score or 0)
+
+    msg = (
+        "Quotation generated from matcher"
+        if quote_block and quote_block.get("quotation_id")
+        else (
+            "Product specification is incomplete — complete on the enquiry page"
+            if (e.flow_type or "") == "product_incomplete"
+            else "Matcher finished"
+        )
+    )
+
+    out: dict = {
+        "enquiry_id": str(e.id),
+        "status": e.status,
+        "flow_type": e.flow_type,
+        "message": msg,
+        "matcher": m,
+        "product_completeness": m.get("product_completeness"),
+        "matcher_confidence": conf,
+        "quotation_id": None,
+        "pdf_available": False,
+        "pdf_path": None,
+        "clarification_questions": None,
+        "quote_number": None,
+        "subtotal": None,
+        "total_amount": None,
+        "line_items": [],
+        "ai_reasoning": [],
+        "requires_human_review": (e.flow_type or "") == "product_incomplete",
+    }
+    if quote_block:
+        out.update(quote_block)
+    return out
+
+
 async def process_manual_dropdown(body: dict, db: AsyncSession) -> dict:
     """Manual dropdown flow: no parser/matcher/HITL; create enquiry + quote directly."""
     from services.client_service import (
@@ -225,6 +556,25 @@ async def process_manual_dropdown(body: dict, db: AsyncSession) -> dict:
     line_items_in = body.get("lineItems") or []
     notes = str(body.get("notes") or "").strip()
     priority = str(body.get("priority") or "Normal").strip()
+    target_raw = str(body.get("targetEnquiryId") or body.get("target_enquiry_id") or "").strip()
+
+    existing_enquiry: Enquiry | None = None
+    enquiry_uuid: uuid.UUID
+    if target_raw:
+        try:
+            enquiry_uuid = uuid.UUID(target_raw)
+        except ValueError as exc:
+            raise EnquiryParseError("Invalid target enquiry id") from exc
+        existing_enquiry = await get_enquiry(target_raw, db)
+        qcnt = (
+            await db.execute(
+                select(func.count()).select_from(Quotation).where(Quotation.enquiry_id == enquiry_uuid)
+            )
+        ).scalar_one()
+        if int(qcnt or 0) > 0:
+            raise EnquiryParseError("This enquiry already has a quotation — open the quotation to edit it.")
+    else:
+        enquiry_uuid = uuid.uuid4()
 
     # Resolve client identity
     client_name = "Customer"
@@ -277,100 +627,11 @@ async def process_manual_dropdown(body: dict, db: AsyncSession) -> dict:
         client_email = (branch.email or "") if branch else ""
         client_phone = (branch.phone or "") if branch else ""
 
-    enquiry_id = uuid.uuid4()
+    enquiry_id = enquiry_uuid
 
-    parsed_products: list[dict] = []
-    matched_products: list[dict] = []
-    quote_line_items: list[dict] = []
-    history_rows: list[dict] = []
-
-    for li in line_items_in:
-        if not isinstance(li, dict):
-            continue
-        qty = _normalize_int(li.get("quantity"), 1)
-        sp = li.get("selectedProduct") or {}
-        if not isinstance(sp, dict):
-            continue
-        name = str(sp.get("name") or "Product").strip()
-        unit = str(sp.get("unit") or "Nos").strip() or "Nos"
-        unit_price = _clean_float(sp.get("base_price"), 0.0)
-        size_inch = sp.get("size_inch")
-        size_mm = sp.get("size_mm")
-        material = sp.get("material")
-
-        desc_parts = [name]
-        if size_inch is not None or size_mm is not None:
-            inch_part = f'{size_inch}"' if size_inch is not None else ""
-            mm_part = f"({size_mm}mm)" if size_mm is not None else ""
-            sz = " ".join([p for p in [inch_part, mm_part] if p]).strip()
-            if sz:
-                desc_parts.append(sz)
-        if material:
-            desc_parts.append(str(material))
-        description = " — ".join([p for p in desc_parts if p])
-
-        parsed_products.append(
-            {
-                "product_description": description,
-                "quantity": qty,
-                "unit": unit,
-            }
-        )
-        matched_products.append(
-            {
-                "matched": True,
-                "product_id": sp.get("id"),
-                "product_name": name,
-                "material": material,
-                "size_inch": size_inch,
-                "size_mm": size_mm,
-                "base_price": unit_price,
-                "unit": unit,
-            }
-        )
-        cascade = li.get("cascadeSelections") or {}
-        if not isinstance(cascade, dict):
-            cascade = {}
-        cat = str(li.get("category") or "unknown").strip().lower()
-        catalog_table = None
-        catalog_row_id = None
-        raw_sp_id = sp.get("id")
-        if isinstance(raw_sp_id, str) and ":" in raw_sp_id:
-            parts = raw_sp_id.split(":", 1)
-            if len(parts) == 2 and parts[0] and parts[1]:
-                catalog_table = parts[0].strip().lower()
-                try:
-                    catalog_row_id = uuid.UUID(parts[1].strip())
-                except ValueError:
-                    catalog_row_id = None
-        quote_line_items.append(
-            {
-                "description": description,
-                "quantity": qty,
-                "unit_price": unit_price,
-                "unit": unit,
-                # Preserve product identity for downstream features (history lookup, etc).
-                "category": cat,
-                "catalog_table": catalog_table,
-                "catalog_row_id": str(catalog_row_id) if catalog_row_id else None,
-            }
-        )
-        history_rows.append(
-            {
-                "category": cat,
-                "catalog_table": catalog_table,
-                "catalog_row_id": catalog_row_id,
-                "variant_type": str(cascade.get("variant_type") or "") or None,
-                "construction": str(cascade.get("construction") or "") or None,
-                "valve_size": str(cascade.get("valve_size") or "") or None,
-                "end_connection": str(cascade.get("end_connection") or "") or None,
-                "pressure": str(cascade.get("pressure") or "") or None,
-                "body": str(cascade.get("body") or "") or None,
-                "ball_disc": str(cascade.get("ball_disc") or cascade.get("ball") or "") or None,
-                "stem": str(cascade.get("stem") or "") or None,
-                "seat": str(cascade.get("seat") or "") or None,
-            }
-        )
+    parsed_products, matched_products, quote_line_items, history_rows = expand_manual_line_items_to_quote_parts(
+        line_items_in
+    )
 
     quote_line_items, subtotal, gst_amount, pf_amount, total_amount = _calc_totals(
         quote_line_items, gst_rate=gst_rate, pf_rate=pf_rate
@@ -387,38 +648,59 @@ async def process_manual_dropdown(body: dict, db: AsyncSession) -> dict:
             "phone": client_phone,
         },
         "line_items": quote_line_items,
+        # Full configurator payload for quotation edit / rehydrate UI.
+        "manual_line_items": line_items_in,
     }
     sp = body.get("supplierPricing")
     if isinstance(sp, dict):
         raw_payload["supplierPricing"] = sp
 
-    raw_input = json.dumps(raw_payload, ensure_ascii=False)
+    parsed_data_new: dict = {
+        "client_name": client_name,
+        "client_company": client_company,
+        "client_email": client_email,
+        "client_phone": client_phone,
+        "priority": priority,
+        "notes": notes,
+        "products_requested": parsed_products,
+        "manual_line_items": line_items_in,
+    }
 
-    enquiry = Enquiry(
-        id=enquiry_id,
-        client_config="parth_valves",
-        raw_input=raw_input,
-        input_type="manual_dropdown",
-        status="approved",
-        flow_type="complete",
-        parsed_data={
-            "client_name": client_name,
-            "client_company": client_company,
-            "client_email": client_email,
-            "client_phone": client_phone,
-            "priority": priority,
-            "notes": notes,
-            "products_requested": parsed_products,
-        },
-        matched_products=matched_products,
-    )
-    if company_id_uuid is not None:
+    if existing_enquiry is not None:
+        enquiry = existing_enquiry
+        prev_pd = dict(enquiry.parsed_data or {})
+        matcher_keep = prev_pd.get("matcher") if isinstance(prev_pd.get("matcher"), dict) else None
+        merged_pd = {**prev_pd, **parsed_data_new}
+        if matcher_keep is not None:
+            merged_pd["matcher"] = matcher_keep
+        enquiry.parsed_data = merged_pd
+        enquiry.matched_products = matched_products
+        enquiry.status = "approved"
+        enquiry.flow_type = "complete"
         enquiry.company_id = company_id_uuid
-    if branch_id_uuid is not None:
         enquiry.branch_id = branch_id_uuid
+        await db.commit()
+    else:
+        raw_input = json.dumps(raw_payload, ensure_ascii=False)
+        enquiry = Enquiry(
+            id=enquiry_id,
+            client_config="parth_valves",
+            raw_input=raw_input,
+            input_type="manual_dropdown",
+            status="approved",
+            flow_type="complete",
+            parsed_data={
+                **parsed_data_new,
+            },
+            matched_products=matched_products,
+        )
+        if company_id_uuid is not None:
+            enquiry.company_id = company_id_uuid
+        if branch_id_uuid is not None:
+            enquiry.branch_id = branch_id_uuid
 
-    db.add(enquiry)
-    await db.commit()
+        db.add(enquiry)
+        await db.commit()
 
     quote_number = _allocate_quote_number()
     quotation_id = uuid.uuid4()
@@ -459,6 +741,11 @@ async def process_manual_dropdown(body: dict, db: AsyncSession) -> dict:
         notes=notes or None,
     )
     db.add(quotation)
+    await db.commit()
+
+    pd_quote = dict(enquiry.parsed_data or {})
+    pd_quote["quotation_id"] = str(quotation_id)
+    enquiry.parsed_data = pd_quote
     await db.commit()
 
     for idx, qli in enumerate(quote_line_items):
@@ -506,6 +793,11 @@ async def process_manual_dropdown(body: dict, db: AsyncSession) -> dict:
         if client_obj is None and isinstance(selected_client_id, str):
             client_obj = await client_for_export(selected_client_id, db)
         if client_obj is not None:
+            erp_subject = (
+                _email_subject_from_raw(enquiry.raw_input or "")
+                if existing_enquiry is not None
+                else "Manual dropdown enquiry"
+            )
             erp_path = await generate_enquiry_list_excel(
                 enquiry_id=str(enquiry_id),
                 client=client_obj,
@@ -513,7 +805,7 @@ async def process_manual_dropdown(body: dict, db: AsyncSession) -> dict:
                 matched_products=matched_products,
                 quotation_data=quotation_data,
                 input_type=enquiry.input_type,
-                subject="Manual dropdown enquiry",
+                subject=erp_subject,
             )
             enquiry.erp_export_path = erp_path
             await db.commit()
@@ -729,24 +1021,64 @@ def _format_for_inbox(e: Enquiry) -> dict:
 
 async def list_email_enquiries(
     db: AsyncSession,
+    *,
+    viewable_mailbox_ids: list[uuid.UUID],
+    is_superadmin: bool,
+    mailbox_id_filter: uuid.UUID | None = None,
     limit: int = 50,
     offset: int = 0,
     status: str | None = None,
 ) -> list[dict]:
     st_result = await db.execute(select(EmailSyncState).where(EmailSyncState.id == 1))
-    sync_state = st_result.scalar_one_or_none()
-    baseline_at = sync_state.baseline_at if sync_state else None
+    legacy_sync_state = st_result.scalar_one_or_none()
+    legacy_baseline = legacy_sync_state.baseline_at if legacy_sync_state else None
 
-    if baseline_at is None:
-        # Baseline is set on first IMAP sync; until then do not list legacy email_sync rows.
-        q = select(Enquiry).where(Enquiry.input_type == "email")
-    else:
-        q = select(Enquiry).where(
-            or_(
-                Enquiry.input_type == "email",
-                and_(Enquiry.input_type == "email_sync", Enquiry.created_at >= baseline_at),
+    mids = list(viewable_mailbox_ids)
+    if is_superadmin:
+        mr = await db.execute(select(Mailbox.id).where(Mailbox.is_active.is_(True)))
+        mids = [row[0] for row in mr.all()]
+
+    baselines: dict[uuid.UUID, datetime | None] = {}
+    baseline_ids = set(mids)
+    if mailbox_id_filter is not None:
+        baseline_ids.add(mailbox_id_filter)
+    if baseline_ids:
+        br = await db.execute(select(MailboxSyncState).where(MailboxSyncState.mailbox_id.in_(baseline_ids)))
+        for st in br.scalars().all():
+            baselines[st.mailbox_id] = st.baseline_at
+
+    parts: list = []
+
+    if mailbox_id_filter is None:
+        parts.append(Enquiry.input_type == "email")
+
+    if (
+        mailbox_id_filter is None
+        and legacy_baseline is not None
+        and (is_superadmin or len(viewable_mailbox_ids) > 0)
+    ):
+        parts.append(
+            and_(
+                Enquiry.input_type == "email_sync",
+                Enquiry.mailbox_id.is_(None),
+                Enquiry.created_at >= legacy_baseline,
             )
         )
+
+    target_mids = [mailbox_id_filter] if mailbox_id_filter is not None else mids
+    for mid in target_mids:
+        bl = baselines.get(mid)
+        if bl is None:
+            continue
+        parts.append(
+            and_(Enquiry.input_type == "email_sync", Enquiry.mailbox_id == mid, Enquiry.created_at >= bl)
+        )
+
+    if not parts:
+        q = select(Enquiry).where(false())
+    else:
+        q = select(Enquiry).where(or_(*parts))
+
     if status:
         q = q.where(Enquiry.status == status)
 
@@ -759,6 +1091,15 @@ async def list_email_enquiries(
     for e in rows:
         if not raw_input_is_quotation_work_related(e.raw_input):
             continue
-        matches.append(_format_for_inbox(e))
+        if not is_superadmin and e.input_type == "email_sync" and e.mailbox_id is not None:
+            if e.mailbox_id not in viewable_mailbox_ids:
+                continue
+        if not is_superadmin and e.input_type == "email_sync" and e.mailbox_id is None:
+            if not viewable_mailbox_ids:
+                continue
+        row_dict = _format_for_inbox(e)
+        if e.mailbox_id:
+            row_dict["mailbox_id"] = str(e.mailbox_id)
+        matches.append(row_dict)
 
     return matches[offset : offset + limit]

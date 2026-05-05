@@ -6,7 +6,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from config.permissions import Permission
 from controllers import user_controller
-from controllers.user_controller import CreateUserRequest, UpdatePermissionsRequest
+from controllers.user_controller import (
+    CreateUserRequest,
+    UpdateMailboxAccessRequest,
+    UpdatePermissionsRequest,
+)
 from core.auth_middleware import CurrentUser, get_current_user, require_admin_permissions
 from core.database import get_db
 
@@ -63,6 +67,16 @@ async def patch_permissions_route(
     db: AsyncSession = Depends(get_db),
 ):
     return await user_controller.handle_update_permissions(user_id, body, actor, db)
+
+
+@router.patch("/{user_id}/mailbox-access")
+async def patch_mailbox_access_route(
+    user_id: str,
+    body: UpdateMailboxAccessRequest,
+    actor: CurrentUser = Depends(require_admin_permissions(Permission.USERS_EDIT)),
+    db: AsyncSession = Depends(get_db),
+):
+    return await user_controller.handle_update_mailbox_access(user_id, body, actor, db)
 
 
 @router.patch("/{user_id}/deactivate", status_code=204)

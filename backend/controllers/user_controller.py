@@ -16,12 +16,20 @@ from services import user_management_service
 logger = logging.getLogger(__name__)
 
 
+class MailboxAccessIn(BaseModel):
+    mailbox_id: str
+    can_view: bool = True
+    can_process: bool = True
+    can_trigger_sync: bool = False
+
+
 class CreateUserRequest(BaseModel):
     email: str
     full_name: str
     job_title: str | None = None
     tier: str = "member"
     permissions: list[str] = []
+    mailbox_access: list[MailboxAccessIn] = []
 
     @field_validator("tier")
     @classmethod
@@ -53,6 +61,10 @@ class UpdatePermissionsRequest(BaseModel):
         return v
 
 
+class UpdateMailboxAccessRequest(BaseModel):
+    access: list[MailboxAccessIn]
+
+
 def permission_groups_dict() -> dict[str, list[str]]:
     return {k: [p.value for p in v] for k, v in PERMISSION_GROUPS.items()}
 
@@ -74,12 +86,14 @@ async def handle_get_user(user_id: str, db: Any) -> dict:
 
 async def handle_create_user(body: CreateUserRequest, actor: CurrentUser, db: Any) -> dict:
     try:
+        mailbox_payload = [a.model_dump() for a in body.mailbox_access]
         user, temp = await user_management_service.create_user(
             full_name=body.full_name,
             email=body.email,
             job_title=body.job_title,
             tier=body.tier,
             permissions=body.permissions,
+            mailbox_access=mailbox_payload,
             created_by_id=actor.id,
             db=db,
         )
@@ -93,6 +107,30 @@ async def handle_create_user(body: CreateUserRequest, actor: CurrentUser, db: An
             },
             "temp_password": temp,
         }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+async def handle_update_mailbox_access(
+    user_id: str,
+    body: UpdateMailboxAccessRequest,
+    actor: CurrentUser,
+    db: Any,
+) -> dict:
+    if user_id == actor.id:
+        raise HTTPException(status_code=400, detail="Use another admin to change your mailbox access")
+    try:
+        await user_management_service.update_user_mailbox_access(
+            user_id,
+            [a.model_dump() for a in body.access],
+            actor.id,
+            db,
+        )
+        return await user_management_service.get_user(user_id, db)
+    except UserNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except AuthorizationError as e:
+        raise HTTPException(status_code=403, detail=str(e)) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 

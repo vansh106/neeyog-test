@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.routes import auth, clients, configurator, enquiries, masters, quotations, stream, suppliers, sync, users
+from api.routes import auth, clients, configurator, enquiries, mailboxes, masters, quotations, stream, suppliers, sync, users
 from core.config import get_settings
 from core.database import async_session_factory, get_db, init_db
 from masters.product_master import SHEET_TABLES
@@ -48,6 +48,14 @@ async def lifespan(app: FastAPI):
     except Exception as exc:  # noqa: BLE001
         logger.warning("Superadmin seed skipped (migrations applied?): %s", exc)
 
+    try:
+        from services.mailbox_service import seed_env_mailbox_if_empty
+
+        async with async_session_factory() as db:
+            await seed_env_mailbox_if_empty(db)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Mailbox env seed skipped: %s", exc)
+
     async with async_session_factory() as session:
         total = 0
         for key, model in SHEET_TABLES:
@@ -69,9 +77,9 @@ async def lifespan(app: FastAPI):
     os.makedirs(settings.PDF_OUTPUT_DIR, exist_ok=True)
     os.makedirs("./output", exist_ok=True)
 
-    from services.scheduler_service import start_scheduler, stop_scheduler
+    from services.scheduler_service import start_scheduler_async, stop_scheduler
 
-    start_scheduler()
+    await start_scheduler_async()
 
     logger.info(
         "Quotation System API ready — client: %s — model: %s",
@@ -107,6 +115,7 @@ app.include_router(masters.router, prefix="/api")
 app.include_router(clients.router, prefix="/api")
 app.include_router(suppliers.router, prefix="/api")
 app.include_router(sync.router)
+app.include_router(mailboxes.router)
 app.include_router(stream.router)
 app.include_router(configurator.router)
 

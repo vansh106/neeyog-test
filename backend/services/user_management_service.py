@@ -10,8 +10,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from config.permissions import Permission
 from core.exceptions import AuthorizationError, UserNotFoundError
-from db.models import AuditLog, User, UserPermission, UserTier
+from db.models import AuditLog, Mailbox, User, UserPermission, UserTier
 from services.auth_service import get_user_permissions, hash_password
+from services.mailbox_service import list_user_mailbox_access, replace_user_mailbox_access
 
 
 def _valid_permission_values() -> set[str]:
@@ -25,6 +26,7 @@ async def create_user(
     job_title: str | None,
     tier: str,
     permissions: list[str],
+    mailbox_access: list[dict] | None = None,
     created_by_id: str,
     db: AsyncSession,
 ) -> tuple[User, str]:
@@ -66,6 +68,8 @@ async def create_user(
         )
     await db.commit()
     await db.refresh(user)
+    if mailbox_access:
+        await replace_user_mailbox_access(db, user.id, mailbox_access)
     return user, temp_pass
 
 
@@ -101,6 +105,42 @@ async def update_user_permissions(
             action="permissions_updated",
             performed_by=updated_by_id,
             details={"new_permissions": new_permissions, "count": len(new_permissions)},
+        )
+    )
+    await db.commit()
+
+
+async def update_user_mailbox_access(
+    target_user_id: str,
+    access: list[dict],
+    actor_id: str,
+    db: AsyncSession,
+) -> None:
+    uid = uuid.UUID(target_user_id)
+    actor = uuid.UUID(actor_id)
+
+    urow = await db.execute(select(User).where(User.id == uid))
+    target = urow.scalar_one_or_none()
+    if not target:
+        raise UserNotFoundError("User not found")
+    if target.tier == UserTier.SUPERADMIN.value and str(actor) != str(target.id):
+        raise AuthorizationError("Cannot change another superadmin's mailbox access")
+
+    for row in access:
+        mid = uuid.UUID(str(row["mailbox_id"]))
+        mrow = await db.execute(select(Mailbox.id).where(Mailbox.id == mid))
+        if mrow.scalar_one_or_none() is None:
+            raise ValueError(f"Unknown mailbox: {mid}")
+
+    await replace_user_mailbox_access(db, uid, access, commit=False)
+
+    db.add(
+        AuditLog(
+            entity_type="user",
+            entity_id=uid,
+            action="mailbox_access_updated",
+            performed_by=actor_id,
+            details={"count": len(access)},
         )
     )
     await db.commit()
@@ -147,6 +187,7 @@ async def list_users(db: AsyncSession, *, include_inactive: bool = False) -> lis
     output: list[dict] = []
     for user in users:
         perms = await get_user_permissions(user, db)
+        mbx = await list_user_mailbox_access(db, user.id)
         output.append(
             {
                 "id": str(user.id),
@@ -157,6 +198,7 @@ async def list_users(db: AsyncSession, *, include_inactive: bool = False) -> lis
                 "is_active": user.is_active,
                 "is_first_login": user.is_first_login,
                 "permissions": perms,
+                "mailbox_access": mbx,
                 "created_at": user.created_at.isoformat() if user.created_at else None,
                 "last_login_at": user.last_login_at.isoformat() if user.last_login_at else None,
             }
@@ -170,6 +212,7 @@ async def get_user(user_id: str, db: AsyncSession) -> dict:
     if not user:
         raise UserNotFoundError("User not found")
     perms = await get_user_permissions(user, db)
+    mbx = await list_user_mailbox_access(db, user.id)
     return {
         "id": str(user.id),
         "email": user.email,
@@ -179,6 +222,7 @@ async def get_user(user_id: str, db: AsyncSession) -> dict:
         "is_active": user.is_active,
         "is_first_login": user.is_first_login,
         "permissions": perms,
+        "mailbox_access": mbx,
         "created_at": user.created_at.isoformat() if user.created_at else None,
         "last_login_at": user.last_login_at.isoformat() if user.last_login_at else None,
     }

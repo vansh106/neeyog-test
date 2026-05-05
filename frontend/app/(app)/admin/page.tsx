@@ -1,8 +1,8 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Copy, Loader2, Users } from 'lucide-react'
+import { Copy, Loader2, Mail, Users } from 'lucide-react'
 
 import PageShell from '@/components/layout/PageShell'
 import { PermissionGate } from '@/components/auth/PermissionGate'
@@ -19,9 +19,9 @@ import {
 import { Input } from '@/components/ui/input'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { usersApi } from '@/lib/api'
+import { mailboxesApi, usersApi } from '@/lib/api'
 import { Permissions } from '@/lib/permissions'
-import { usePermissionGroups, usePermissionPresets, useTeamUsers } from '@/lib/queries'
+import { useMailboxes, usePermissionGroups, usePermissionPresets, useTeamUsers } from '@/lib/queries'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/authStore'
 
@@ -69,6 +69,15 @@ function relTime(iso: string | null | undefined): string {
   return `${Math.floor(h / 24)}d ago`
 }
 
+type MailboxAccessRow = {
+  mailbox_id: string
+  display_name?: string
+  email_address?: string
+  can_view?: boolean
+  can_process?: boolean
+  can_trigger_sync?: boolean
+}
+
 type TeamUser = {
   id: string
   email: string
@@ -78,8 +87,11 @@ type TeamUser = {
   is_active: boolean
   is_first_login: boolean
   permissions: string[]
+  mailbox_access?: MailboxAccessRow[]
   last_login_at: string | null
 }
+
+type MbToggle = { can_view: boolean; can_process: boolean; can_trigger_sync: boolean }
 
 export default function AdminPage() {
   const qc = useQueryClient()
@@ -89,6 +101,7 @@ export default function AdminPage() {
   const { data: users = [], isLoading, isError, error } = useTeamUsers(true)
   const { data: groups = {} } = usePermissionGroups()
   const { data: presets = {} } = usePermissionPresets()
+  const { data: mailboxList = [], refetch: refetchMailboxes } = useMailboxes()
 
   const [sheetOpen, setSheetOpen] = useState(false)
   const [editUser, setEditUser] = useState<TeamUser | null>(null)
@@ -102,6 +115,11 @@ export default function AdminPage() {
 
   const [pwModal, setPwModal] = useState<{ title: string; email: string; name: string; temp: string } | null>(null)
 
+  const [mbAccess, setMbAccess] = useState<Record<string, MbToggle>>({})
+  const [mbDisplayName, setMbDisplayName] = useState('')
+  const [mbEmail, setMbEmail] = useState('')
+  const [mbAppPw, setMbAppPw] = useState('')
+
   const createMut = useMutation({
     mutationFn: () =>
       usersApi.create({
@@ -110,6 +128,14 @@ export default function AdminPage() {
         job_title: jobTitle.trim() || null,
         tier,
         permissions: [...selected],
+        mailbox_access: Object.entries(mbAccess)
+          .filter(([, v]) => v.can_view)
+          .map(([mailbox_id, v]) => ({
+            mailbox_id,
+            can_view: v.can_view,
+            can_process: v.can_process,
+            can_trigger_sync: v.can_trigger_sync,
+          })),
       }),
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ['admin-users'] })
@@ -136,6 +162,39 @@ export default function AdminPage() {
     },
   })
 
+  const saveMbAccessMut = useMutation({
+    mutationFn: () => {
+      if (!editUser) throw new Error('No user')
+      const access = Object.entries(mbAccess)
+        .filter(([, v]) => v.can_view)
+        .map(([mailbox_id, v]) => ({
+          mailbox_id,
+          can_view: v.can_view,
+          can_process: v.can_process,
+          can_trigger_sync: v.can_trigger_sync,
+        }))
+      return usersApi.updateMailboxAccess(editUser.id, access)
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin-users'] })
+    },
+  })
+
+  const createMailboxMut = useMutation({
+    mutationFn: () =>
+      mailboxesApi.create({
+        display_name: mbDisplayName.trim(),
+        email_address: mbEmail.trim(),
+        app_password: mbAppPw,
+      }),
+    onSuccess: () => {
+      setMbDisplayName('')
+      setMbEmail('')
+      setMbAppPw('')
+      void refetchMailboxes()
+    },
+  })
+
   const deactivateMut = useMutation({
     mutationFn: (id: string) => usersApi.deactivate(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['admin-users'] }),
@@ -159,6 +218,18 @@ export default function AdminPage() {
     },
   })
 
+  function initMbAccessFromDefaults(t: 'member' | 'admin') {
+    const next: Record<string, MbToggle> = {}
+    for (const m of mailboxList as Array<{ id: string }>) {
+      next[m.id] = {
+        can_view: true,
+        can_process: true,
+        can_trigger_sync: t === 'admin',
+      }
+    }
+    setMbAccess(next)
+  }
+
   function resetForm() {
     setFullName('')
     setEmail('')
@@ -166,6 +237,32 @@ export default function AdminPage() {
     setTier('member')
     setSelected(new Set())
   }
+
+  useEffect(() => {
+    if (!sheetOpen) return
+    if (mode === 'create') {
+      initMbAccessFromDefaults(tier)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- initMbAccessFromDefaults is stable helper
+  }, [sheetOpen, mode, tier, mailboxList])
+
+  useEffect(() => {
+    if (!sheetOpen || mode !== 'edit' || !editUser) return
+    const next: Record<string, MbToggle> = {}
+    const byId = new Map((editUser.mailbox_access || []).map((x) => [x.mailbox_id, x]))
+    for (const m of mailboxList as Array<{ id: string }>) {
+      const row = byId.get(m.id)
+      next[m.id] = row
+        ? {
+            can_view: !!row.can_view,
+            can_process: !!row.can_process,
+            can_trigger_sync: !!row.can_trigger_sync,
+          }
+        : { can_view: false, can_process: false, can_trigger_sync: false }
+    }
+    setMbAccess(next)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sheetOpen, mode, editUser, mailboxList])
 
   function openCreate() {
     setMode('create')
@@ -183,6 +280,13 @@ export default function AdminPage() {
     setTier(u.tier === 'admin' ? 'admin' : 'member')
     setSelected(new Set(u.permissions))
     setSheetOpen(true)
+  }
+
+  function setMbToggle(id: string, key: keyof MbToggle, value: boolean) {
+    setMbAccess((prev) => ({
+      ...prev,
+      [id]: { ...(prev[id] || { can_view: false, can_process: false, can_trigger_sync: false }), [key]: value },
+    }))
   }
 
   function togglePerm(p: string) {
@@ -212,11 +316,97 @@ export default function AdminPage() {
     })
   }
 
-  const busy = createMut.isPending || savePermsMut.isPending
+  const busy =
+    createMut.isPending ||
+    savePermsMut.isPending ||
+    saveMbAccessMut.isPending ||
+    createMailboxMut.isPending
 
   return (
     <PageShell title="Administration" subtitle="Team members and access permissions.">
       <div className="mx-auto max-w-6xl space-y-6">
+        {isSuper && (
+          <Card>
+            <CardHeader className="border-b border-surface-border">
+              <div className="flex items-start gap-3">
+                <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-brand-navy-50 text-brand-navy-700">
+                  <Mail className="size-5" />
+                </div>
+                <div>
+                  <CardTitle className="text-[17px]">Connected mailboxes</CardTitle>
+                  <CardDescription className="text-[13px]">
+                    Superadmin only — IMAP accounts that sync into the Emails tab. App passwords are stored encrypted.
+                  </CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4 pt-4">
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <Input placeholder="Display name" value={mbDisplayName} onChange={(e) => setMbDisplayName(e.target.value)} />
+                <Input type="email" placeholder="Email address" value={mbEmail} onChange={(e) => setMbEmail(e.target.value)} />
+                <Input type="password" placeholder="App password" value={mbAppPw} onChange={(e) => setMbAppPw(e.target.value)} />
+                <Button
+                  type="button"
+                  className="bg-brand-navy-600 text-white hover:bg-brand-navy-700"
+                  disabled={createMailboxMut.isPending || !mbDisplayName.trim() || !mbEmail.trim() || !mbAppPw}
+                  onClick={() => createMailboxMut.mutate()}
+                >
+                  {createMailboxMut.isPending ? <Loader2 className="size-4 animate-spin" /> : 'Add mailbox'}
+                </Button>
+              </div>
+              {createMailboxMut.isError && (
+                <p className="text-[12px] text-red-700">
+                  {createMailboxMut.error instanceof Error ? createMailboxMut.error.message : 'Failed'}
+                </p>
+              )}
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="pl-4">Name</TableHead>
+                    <TableHead>Email</TableHead>
+                    <TableHead>Active</TableHead>
+                    <TableHead className="text-right pr-4">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {(mailboxList as Array<{ id: string; display_name: string; email_address: string; is_active: boolean }>).map(
+                    (m) => (
+                      <TableRow key={m.id}>
+                        <TableCell className="pl-4 font-medium">{m.display_name}</TableCell>
+                        <TableCell className="font-mono text-[12px] text-surface-muted">{m.email_address}</TableCell>
+                        <TableCell>{m.is_active ? 'Yes' : 'No'}</TableCell>
+                        <TableCell className="text-right pr-4 space-x-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() =>
+                              mailboxesApi.testConnection(m.id).then(() => alert('IMAP OK')).catch((e: Error) => alert(e.message))
+                            }
+                          >
+                            Test
+                          </Button>
+                          {m.is_active && (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="text-red-600"
+                              onClick={() => mailboxesApi.deactivate(m.id).then(() => void refetchMailboxes())}
+                            >
+                              Deactivate
+                            </Button>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ),
+                  )}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        )}
+
         {!isAdmin && (
           <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-950">
             Admin navigation is limited to Admin or Super Admin accounts.
@@ -326,8 +516,11 @@ export default function AdminPage() {
       </div>
 
       <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
-        <SheetContent side="right" className="w-full sm:max-w-[600px] overflow-y-auto">
-          <SheetHeader>
+        <SheetContent
+          side="right"
+          className="w-full sm:max-w-[600px] overflow-y-auto pl-6 pr-14 pt-5 pb-8 sm:pl-8 sm:pr-16"
+        >
+          <SheetHeader className="p-0">
             <SheetTitle>{mode === 'create' ? 'Add team member' : `Edit permissions — ${editUser?.full_name}`}</SheetTitle>
           </SheetHeader>
 
@@ -427,6 +620,47 @@ export default function AdminPage() {
               })}
             </div>
 
+            {mailboxList.length > 0 && (
+              <div className="space-y-2 rounded-lg border border-surface-border p-3">
+                <p className="text-[13px] font-medium">Mailbox access</p>
+                <p className="text-[12px] text-surface-muted">
+                  Choose which connected inboxes this user can see in the Emails tab and whether they can process or trigger sync.
+                </p>
+                <div className="space-y-2 max-h-48 overflow-y-auto">
+                  {(mailboxList as Array<{ id: string; display_name: string; email_address: string }>).map((m) => {
+                    const row = mbAccess[m.id] || { can_view: false, can_process: false, can_trigger_sync: false }
+                    return (
+                      <div key={m.id} className="flex flex-wrap items-center gap-3 text-[12px] border-b border-surface-border/60 pb-2 last:border-0">
+                        <span className="font-medium text-gray-900 min-w-[120px]">{m.display_name}</span>
+                        <label className="flex items-center gap-1">
+                          <input type="checkbox" checked={row.can_view} onChange={(e) => setMbToggle(m.id, 'can_view', e.target.checked)} />
+                          View
+                        </label>
+                        <label className="flex items-center gap-1">
+                          <input
+                            type="checkbox"
+                            checked={row.can_process}
+                            disabled={!row.can_view}
+                            onChange={(e) => setMbToggle(m.id, 'can_process', e.target.checked)}
+                          />
+                          Process
+                        </label>
+                        <label className="flex items-center gap-1">
+                          <input
+                            type="checkbox"
+                            checked={row.can_trigger_sync}
+                            disabled={!row.can_view}
+                            onChange={(e) => setMbToggle(m.id, 'can_trigger_sync', e.target.checked)}
+                          />
+                          Sync
+                        </label>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+
             <p className="text-[12px] text-surface-muted">
               {selected.size} permission{selected.size === 1 ? '' : 's'} selected across {groupEntries.length} categories
             </p>
@@ -442,22 +676,34 @@ export default function AdminPage() {
                   </Button>
                 </PermissionGate>
               ) : (
-                <PermissionGate permission={Permissions.USERS_EDIT}>
-                  <Button
-                    type="button"
-                    className="bg-brand-green-500 text-white"
-                    disabled={busy || editUser?.id === self?.id || editUser?.tier === 'superadmin'}
-                    onClick={() => savePermsMut.mutate()}
-                  >
-                    {busy ? <Loader2 className="size-4 animate-spin" /> : 'Save permissions'}
-                  </Button>
-                </PermissionGate>
+                <div className="flex flex-wrap justify-end gap-2">
+                  <PermissionGate permission={Permissions.USERS_EDIT}>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={busy || editUser?.id === self?.id || editUser?.tier === 'superadmin'}
+                      onClick={() => saveMbAccessMut.mutate()}
+                    >
+                      {saveMbAccessMut.isPending ? <Loader2 className="size-4 animate-spin" /> : 'Save mailbox access'}
+                    </Button>
+                  </PermissionGate>
+                  <PermissionGate permission={Permissions.USERS_EDIT}>
+                    <Button
+                      type="button"
+                      className="bg-brand-green-500 text-white"
+                      disabled={busy || editUser?.id === self?.id || editUser?.tier === 'superadmin'}
+                      onClick={() => savePermsMut.mutate()}
+                    >
+                      {savePermsMut.isPending ? <Loader2 className="size-4 animate-spin" /> : 'Save permissions'}
+                    </Button>
+                  </PermissionGate>
+                </div>
               )}
             </div>
-            {(createMut.error || savePermsMut.error) && (
+            {(createMut.error || savePermsMut.error || saveMbAccessMut.error) && (
               <p className="text-[12px] text-red-700">
-                {(createMut.error || savePermsMut.error) instanceof Error
-                  ? (createMut.error || savePermsMut.error)!.message
+                {(createMut.error || savePermsMut.error || saveMbAccessMut.error) instanceof Error
+                  ? (createMut.error || savePermsMut.error || saveMbAccessMut.error)!.message
                   : 'Request failed'}
               </p>
             )}

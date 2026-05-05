@@ -66,19 +66,24 @@ async def broadcast_new_email(
     subject: str,
     raw_email: str,
     input_type: str = "email_sync",
+    mailbox_id: str | None = None,
+    mailbox_label: str | None = None,
 ) -> None:
-    await global_bus.publish(
-        {
-            "type": "new_email_received",
-            "enquiry_id": enquiry_id,
-            "sender_name": sender_name,
-            "sender_email": sender_email,
-            "subject": subject,
-            "preview": (raw_email or "")[:120] + "...",
-            "input_type": input_type,
-            "status": "received",
-        }
-    )
+    payload: dict = {
+        "type": "new_email_received",
+        "enquiry_id": enquiry_id,
+        "sender_name": sender_name,
+        "sender_email": sender_email,
+        "subject": subject,
+        "preview": (raw_email or "")[:120] + "...",
+        "input_type": input_type,
+        "status": "received",
+    }
+    if mailbox_id:
+        payload["mailbox_id"] = mailbox_id
+    if mailbox_label:
+        payload["mailbox_label"] = mailbox_label
+    await global_bus.publish(payload)
 
 
 async def broadcast_agent_event(enquiry_id: str, event: dict) -> None:

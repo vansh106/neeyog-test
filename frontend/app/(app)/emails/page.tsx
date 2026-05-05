@@ -1,12 +1,20 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { Mail, CheckCircle2, Clock, AlertTriangle, Loader2, RefreshCcw } from 'lucide-react'
 import PageShell from '@/components/layout/PageShell'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { cn, formatRelativeTime } from '@/lib/utils'
 import { enquiriesApi } from '@/lib/api'
+import { useMailboxes } from '@/lib/queries'
 import { useEmailStore } from '@/stores/emailStore'
 import LiveAgentTimeline from '@/components/upload/LiveAgentTimeline'
 import type { AgentEvent, EnquiryDetail } from '@/types'
@@ -51,47 +59,71 @@ export default function EmailsPage() {
 
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [mailboxFilter, setMailboxFilter] = useState<string>('')
+  const { data: mailboxes = [] } = useMailboxes()
+
+  const mailSelectLabel = useMemo(() => {
+    if (!mailboxFilter) return 'All mailboxes'
+    const m = mailboxes.find((b) => String(b.id) === mailboxFilter)
+    const nameStr = typeof m?.display_name === 'string' ? m.display_name : ''
+    const emailStr = typeof m?.email_address === 'string' ? m.email_address : ''
+    const label = (nameStr || emailStr).trim()
+    return label || 'Mailbox'
+  }, [mailboxFilter, mailboxes])
 
   useEffect(() => {
     // Mark all read when opening inbox
     markAllRead()
   }, [markAllRead])
 
-  async function loadInbox() {
+  const loadInbox = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
-      const data = await enquiriesApi.listEmailInbox<any[]>({ limit: 50, offset: 0 })
+      const data = await enquiriesApi.listEmailInbox<any[]>({
+        limit: 50,
+        offset: 0,
+        ...(mailboxFilter ? { mailbox_id: mailboxFilter } : {}),
+      })
       // backend already shapes the fields; store adds is_new/live_events
       setItems(
-        (data || []).map((x) => ({
-          enquiry_id: x.enquiry_id,
-          sender_name: x.sender_name,
-          sender_email: x.sender_email,
-          company: x.company,
-          display_name: (x.display_name as string) || x.company || x.sender_name || 'Unknown',
-          subject: x.subject,
-          preview: x.preview,
-          category: x.category ?? null,
-          status: x.status,
-          flow_type: x.flow_type ?? null,
-          created_at: x.created_at,
-          awaiting_human: !!x.awaiting_human,
-          has_quotation: !!x.has_quotation,
-          inbox_processed: !!x.inbox_processed,
-        })),
+        (data || []).map((x) => {
+          const mid =
+            x.mailbox_id != null && x.mailbox_id !== '' ? String(x.mailbox_id) : ''
+          const mb = mid ? mailboxes.find((b) => String(b.id) === mid) : null
+          const mbName = mb && typeof mb.display_name === 'string' ? mb.display_name : ''
+          const mbEmail = mb && typeof mb.email_address === 'string' ? mb.email_address : ''
+          const mailbox_label = mb ? (mbName || mbEmail).trim() || 'Mailbox' : undefined
+          return {
+            enquiry_id: x.enquiry_id,
+            sender_name: x.sender_name,
+            sender_email: x.sender_email,
+            company: x.company,
+            display_name: (x.display_name as string) || x.company || x.sender_name || 'Unknown',
+            subject: x.subject,
+            preview: x.preview,
+            category: x.category ?? null,
+            status: x.status,
+            flow_type: x.flow_type ?? null,
+            created_at: x.created_at,
+            awaiting_human: !!x.awaiting_human,
+            has_quotation: !!x.has_quotation,
+            inbox_processed: !!x.inbox_processed,
+            mailbox_id: mid || undefined,
+            mailbox_label,
+          }
+        }),
       )
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to load inbox')
     } finally {
       setLoading(false)
     }
-  }
+  }, [mailboxFilter, mailboxes, setItems])
 
   useEffect(() => {
     loadInbox()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [loadInbox])
 
   const selectedItem = useMemo(() => items.find((i) => i.enquiry_id === selected) || null, [items, selected])
 
@@ -128,23 +160,46 @@ export default function EmailsPage() {
       title="Emails"
       subtitle="Quotation-style mail synced after the server baseline (Indiamart and direct buyers); processing is manual until enabled."
     >
-      <div className="h-[calc(100vh-120px)] grid grid-cols-1 lg:grid-cols-[380px_1fr] gap-4">
+      <div className="h-[calc(100vh-120px)] grid grid-cols-1 lg:grid-cols-[minmax(440px,44vw)_minmax(0,1fr)] xl:grid-cols-[minmax(480px,40%)_minmax(0,1fr)] gap-4">
         {/* Left: inbox */}
-        <div className="rounded-xl border border-surface-border bg-white shadow-sm overflow-hidden flex flex-col">
-          <div className="px-4 py-3 border-b border-surface-border flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
+        <div className="rounded-xl border border-surface-border bg-white shadow-sm overflow-hidden flex flex-col min-w-0">
+          <div className="px-4 py-3 border-b border-surface-border flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between lg:gap-3">
+            <div className="flex items-center gap-2 shrink-0">
               <Mail className="w-4 h-4 text-brand-green-600" />
               <h2 className="text-[14px] font-semibold text-gray-900">Inbox</h2>
             </div>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={loadInbox}
-                className="inline-flex items-center gap-2 rounded-md border border-surface-border px-2.5 py-1.5 text-[12px] text-surface-muted hover:text-gray-900"
-              >
-                {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCcw className="w-3.5 h-3.5" />}
-                Refresh
-              </button>
+            <div className="flex flex-col gap-2 min-w-0 sm:flex-row sm:items-center sm:gap-3 sm:flex-1 lg:justify-end">
+              {mailboxes.length > 0 && (
+                <div className="flex items-center gap-2 min-w-0 flex-1 lg:max-w-[min(100%,380px)]">
+                  <span className="text-[11px] text-surface-muted shrink-0 hidden sm:inline">Mailbox</span>
+                  <Select
+                    value={mailboxFilter || '__all__'}
+                    onValueChange={(v) => setMailboxFilter(v === '__all__' || v == null ? '' : v)}
+                  >
+                    <SelectTrigger className="h-9 min-w-0 w-full text-[12px]">
+                      <SelectValue placeholder="All mailboxes">{mailSelectLabel}</SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__all__">All mailboxes</SelectItem>
+                      {mailboxes.map((m) => (
+                        <SelectItem key={String(m.id)} value={String(m.id)}>
+                          {(m.display_name as string) || (m.email_address as string)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+              <div className="flex items-center gap-2 shrink-0 sm:ml-auto lg:ml-0">
+                <button
+                  type="button"
+                  onClick={loadInbox}
+                  className="inline-flex items-center gap-2 rounded-md border border-surface-border px-2.5 py-1.5 text-[12px] text-surface-muted hover:text-gray-900"
+                >
+                  {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCcw className="w-3.5 h-3.5" />}
+                  Refresh
+                </button>
+              </div>
             </div>
           </div>
 
@@ -196,6 +251,9 @@ export default function EmailsPage() {
                             {formatRelativeTime(it.created_at)}
                           </div>
                         </div>
+                        {!mailboxFilter && mailboxes.length > 1 && it.mailbox_label && (
+                          <div className="text-[10px] text-surface-muted truncate mt-0.5">{it.mailbox_label}</div>
+                        )}
                         <div className="mt-0.5 flex items-center justify-between gap-2">
                           <div className={cn('text-[12px] truncate', it.is_new ? 'text-gray-900' : 'text-surface-muted')}>
                             {it.subject || it.preview || '(no subject)'}

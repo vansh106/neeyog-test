@@ -1,5 +1,14 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { enquiriesApi, quotationsApi, mastersApi, systemApi, syncApi, configuratorApi, usersApi } from './api'
+import {
+  enquiriesApi,
+  quotationsApi,
+  mastersApi,
+  systemApi,
+  syncApi,
+  configuratorApi,
+  usersApi,
+  mailboxesApi,
+} from './api'
 import { Permissions } from '@/lib/permissions'
 import { useAuthStore } from '@/stores/authStore'
 import type {
@@ -162,5 +171,15 @@ export function usePermissionPresets() {
     queryFn: () => usersApi.permissionPresets<Record<string, string[]>>(),
     enabled: authed,
     staleTime: 300000,
+  })
+}
+
+export function useMailboxes() {
+  const authed = useAuthStore((s) => Boolean(s.access_token))
+  return useQuery({
+    queryKey: ['mailboxes'],
+    queryFn: () => mailboxesApi.list<Record<string, unknown>[]>(),
+    enabled: authed,
+    staleTime: 60000,
   })
 }

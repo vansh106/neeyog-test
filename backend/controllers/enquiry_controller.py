@@ -6,12 +6,14 @@ No DB queries. No business logic. Calls services only.
 
 import asyncio
 import logging
+import uuid
 from typing import AsyncGenerator
 
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.auth_middleware import CurrentUser
 from core.exceptions import EnquiryParseError, ProductNotFoundError
 from db.models import Enquiry
 from services import enquiry_service
@@ -110,6 +112,7 @@ class ManualDropdownProcessRequest(BaseModel):
     priority: str = "Normal"
     notes: str = ""
     supplier_pricing: ManualSupplierPricingPayload | None = Field(None, alias="supplierPricing")
+    target_enquiry_id: str | None = Field(None, alias="targetEnquiryId")
 
     @model_validator(mode="after")
     def validate_fields(self):
@@ -123,6 +126,16 @@ class ManualDropdownProcessRequest(BaseModel):
         if not self.lineItems:
             raise ValueError("At least one line item is required")
         return self
+
+
+class MatcherProcessResponse(EnquiryResponse):
+    """Matcher run + optional auto-quote (same shape as EnquiryResponse with extras)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    matcher: dict = Field(default_factory=dict)
+    product_completeness: str | None = None
+    matcher_confidence: float | None = None
 
 
 class EmailInboxItem(BaseModel):
@@ -143,6 +156,7 @@ class EmailInboxItem(BaseModel):
     inbox_processed: bool = False
     awaiting_human: bool = False
     hitl_cycle: int = 0
+    mailbox_id: str | None = None
 
 # ── Controller functions ────────────────────────────────────
 
@@ -280,6 +294,52 @@ async def handle_list_enquiries(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+async def handle_process_email_matcher(
+    enquiry_id: str,
+    db: AsyncSession,
+) -> MatcherProcessResponse:
+    try:
+        result = await enquiry_service.process_email_matcher(enquiry_id, db)
+        return MatcherProcessResponse.model_validate(result)
+    except ProductNotFoundError:
+        raise HTTPException(status_code=404, detail=f"Enquiry {enquiry_id} not found")
+    except Exception as e:
+        logger.exception("process_email_matcher failed")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+async def handle_revert_request_email_draft(
+    enquiry_id: str,
+    db: AsyncSession,
+) -> dict:
+    try:
+        enquiry = await enquiry_service.get_enquiry(enquiry_id, db)
+        pd = enquiry.parsed_data if isinstance(enquiry.parsed_data, dict) else {}
+        company = str(pd.get("client_company") or "Customer").strip()
+        lines = [
+            f"Subject: RE: RFQ — additional information required",
+            "",
+            f"Dear {company},",
+            "",
+            "Thank you for your enquiry. To prepare an accurate quotation, we need a few more product details (sizes, materials, end connections, quantities, delivery location, etc.).",
+            "",
+            "Could you please reply with the missing specifications?",
+            "",
+            "Best regards,",
+            "Sales Team",
+        ]
+        return {
+            "subject": f"RE: Additional details for your enquiry",
+            "body": "\n".join(lines),
+            "mailto_hint": "Use your mail client to send this message to the customer address from the enquiry.",
+        }
+    except ProductNotFoundError:
+        raise HTTPException(status_code=404, detail=f"Enquiry {enquiry_id} not found")
+    except Exception as e:
+        logger.exception("revert draft email failed")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 async def handle_process_manual_dropdown(
     body: ManualDropdownProcessRequest,
     db: AsyncSession,
@@ -288,6 +348,8 @@ async def handle_process_manual_dropdown(
     try:
         result = await enquiry_service.process_manual_dropdown(body.model_dump(by_alias=True), db)
         return EnquiryResponse(**result)
+    except EnquiryParseError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         logger.exception("Manual dropdown processing failed")
         raise HTTPException(status_code=500, detail=str(e))
@@ -298,10 +360,32 @@ async def handle_list_email_enquiries(
     status: str | None,
     limit: int,
     offset: int,
+    mailbox_id: str | None,
+    user: CurrentUser,
 ) -> list[EmailInboxItem]:
+    from services.mailbox_service import actor_can_view_mailbox, list_viewable_mailbox_ids
+
     try:
-        items = await enquiry_service.list_email_enquiries(db, limit=limit, offset=offset, status=status)
+        mb_filter: uuid.UUID | None = None
+        if mailbox_id:
+            mb_filter = uuid.UUID(mailbox_id)
+            if not await actor_can_view_mailbox(user, mb_filter, db):
+                raise HTTPException(status_code=403, detail="No access to this mailbox")
+
+        viewable = await list_viewable_mailbox_ids(user, db)
+        is_sa = user.tier == "superadmin"
+        items = await enquiry_service.list_email_enquiries(
+            db,
+            viewable_mailbox_ids=viewable,
+            is_superadmin=is_sa,
+            mailbox_id_filter=mb_filter,
+            limit=limit,
+            offset=offset,
+            status=status,
+        )
         return [EmailInboxItem(**x) for x in items]
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

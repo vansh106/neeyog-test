@@ -18,6 +18,10 @@ export interface EmailInboxItem {
   has_quotation: boolean
   /** AI / manual pipeline has run or a quote exists. */
   inbox_processed: boolean
+  /** Source mailbox when using multi-mailbox inbox. */
+  mailbox_id?: string | null
+  /** Resolved label for list UI (display name or email). */
+  mailbox_label?: string | null
   is_new: boolean
   live_events: GlobalEvent[]
 }

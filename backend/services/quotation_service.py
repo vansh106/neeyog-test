@@ -4,14 +4,18 @@ Pure service — no FastAPI imports, no HTTPException.
 Raises only from core.exceptions.
 """
 
+import json
+import uuid
 from pathlib import Path
 
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import get_settings
 from core.exceptions import ProductNotFoundError, QuotationBuildError
 from db.models import Quotation, QuotationProductHistory
+from services import enquiry_service as enquiry_svc
+from services.pdf_service import generate_quotation_pdf
 
 
 async def get_quotation(quotation_id: str, db: AsyncSession) -> Quotation:
@@ -129,3 +133,119 @@ async def get_product_quote_history(
         )
     ).scalars().all()
     return int(total or 0), list(rows)
+
+
+async def update_quotation_from_manual_line_items(
+    quotation_id: str,
+    line_items_in: list,
+    db: AsyncSession,
+) -> Quotation:
+    """Rebuild quotation lines from manual configurator payloads; regenerate PDF and history.
+
+    Raises ``ValueError`` when ``line_items_in`` produces no valid rows.
+    """
+    if not isinstance(line_items_in, list) or not line_items_in:
+        raise ValueError("lineItems must be a non-empty array")
+
+    q = await get_quotation(quotation_id, db)
+    enquiry = await enquiry_svc.get_enquiry(str(q.enquiry_id), db)
+
+    parsed_products, matched_products, quote_line_items, history_rows = (
+        enquiry_svc.expand_manual_line_items_to_quote_parts(line_items_in)
+    )
+    if not quote_line_items:
+        raise ValueError("At least one valid line item is required")
+
+    gst_rate = float(q.gst_rate)
+    pf_rate = float(q.pf_rate)
+    quote_line_items, subtotal, gst_amount, pf_amount, total_amount = enquiry_svc._calc_totals(
+        quote_line_items, gst_rate=gst_rate, pf_rate=pf_rate
+    )
+
+    await db.execute(delete(QuotationProductHistory).where(QuotationProductHistory.quotation_id == q.id))
+    await db.flush()
+
+    settings = get_settings()
+    for idx, qli in enumerate(quote_line_items):
+        h = history_rows[idx] if idx < len(history_rows) else {}
+        unit_price = enquiry_svc._clean_float(qli.get("unit_price"), 0.0)
+        quantity = enquiry_svc._normalize_int(qli.get("quantity"), 1)
+        line_total = round(unit_price * quantity, 2)
+        db.add(
+            QuotationProductHistory(
+                id=uuid.uuid4(),
+                quotation_id=q.id,
+                enquiry_id=q.enquiry_id,
+                client_config=settings.ACTIVE_CLIENT,
+                quote_number=q.quote_number,
+                client_name=q.client_name or None,
+                client_company=q.client_company or None,
+                line_index=idx,
+                unit_price=unit_price,
+                quantity=quantity,
+                line_total=line_total,
+                currency="INR",
+                category=str(h.get("category") or "unknown"),
+                catalog_table=h.get("catalog_table"),
+                catalog_row_id=h.get("catalog_row_id"),
+                variant_type=h.get("variant_type"),
+                construction=h.get("construction"),
+                valve_size=h.get("valve_size"),
+                end_connection=h.get("end_connection"),
+                pressure=h.get("pressure"),
+                body=h.get("body"),
+                ball_disc=h.get("ball_disc"),
+                stem=h.get("stem"),
+                seat=h.get("seat"),
+            )
+        )
+
+    q.line_items = quote_line_items
+    q.subtotal = subtotal
+    q.gst_amount = gst_amount
+    q.pf_amount = pf_amount
+    q.total_amount = total_amount
+
+    enquiry.matched_products = matched_products
+    payload: dict = {}
+    try:
+        if enquiry.raw_input:
+            parsed = json.loads(enquiry.raw_input)
+            if isinstance(parsed, dict):
+                payload = parsed
+    except Exception:
+        payload = {}
+    payload["manual_line_items"] = line_items_in
+    payload["line_items"] = quote_line_items
+    payload.setdefault("source", "manual_dropdown")
+    enquiry.raw_input = json.dumps(payload, ensure_ascii=False)
+
+    pd = enquiry.parsed_data if isinstance(enquiry.parsed_data, dict) else {}
+    pd = {**pd, "products_requested": parsed_products}
+    enquiry.parsed_data = pd
+
+    client_json = settings.get_client_json()
+    quotation_data = {
+        "quote_number": q.quote_number,
+        "client_name": q.client_name,
+        "client_company": q.client_company,
+        "client_email": q.client_email,
+        "client_phone": q.client_phone,
+        "line_items": quote_line_items,
+        "subtotal": subtotal,
+        "gst_rate": gst_rate,
+        "gst_amount": gst_amount,
+        "pf_rate": pf_rate,
+        "pf_amount": pf_amount,
+        "freight_note": q.freight_note or "Extra at actual",
+        "total_amount": total_amount,
+        "professional_notes": q.notes or "",
+    }
+
+    pdf_path = await generate_quotation_pdf(quotation_data, client_json)
+    if pdf_path:
+        q.pdf_path = pdf_path
+
+    await db.commit()
+    await db.refresh(q)
+    return q

@@ -165,8 +165,12 @@ export const enquiriesApi = {
       offset?: number
     },
   ) => get<T>('/api/enquiries/', params as Record<string, unknown>),
-  listEmailInbox: <T = unknown>(params?: { status?: string; limit?: number; offset?: number }) =>
-    get<T>('/api/enquiries/emails/inbox', params as Record<string, unknown>),
+  listEmailInbox: <T = unknown>(params?: {
+    status?: string
+    limit?: number
+    offset?: number
+    mailbox_id?: string
+  }) => get<T>('/api/enquiries/emails/inbox', params as Record<string, unknown>),
   getHITLState: <T = unknown>(enquiryId: string) => get<T>(`/api/enquiries/${enquiryId}/hitl-state`),
   submitReview: <T = unknown>(enquiryId: string, body: { decision: string; edited_email?: string; human_prompt?: string }) =>
     post<T>(`/api/enquiries/${enquiryId}/review`, body),
@@ -442,9 +446,38 @@ export const configuratorApi = {
 
 export const syncApi = {
   getStatus: <T = unknown>() => get<T>('/api/sync/status'),
-  triggerNow: <T = unknown>() => post<T>('/api/sync/trigger'),
+  triggerNow: <T = unknown>(body?: { mailbox_id?: string | null }) =>
+    post<T>('/api/sync/trigger', body ?? {}),
   getHistory: <T = unknown>(limit?: number) =>
     get<T>('/api/sync/history', limit != null ? { limit } : undefined),
+}
+
+export const mailboxesApi = {
+  list: <T = unknown[]>() => get<T>('/api/mailboxes/'),
+  create: <T = unknown>(body: {
+    display_name: string
+    email_address: string
+    imap_host?: string
+    imap_port?: number
+    imap_folder?: string
+    unread_only?: boolean
+    app_password: string
+  }) => post<T>('/api/mailboxes/', body),
+  update: <T = unknown>(
+    id: string,
+    body: Partial<{
+      display_name: string
+      imap_host: string
+      imap_port: number
+      imap_folder: string
+      unread_only: boolean
+      is_active: boolean
+      app_password: string
+    }>,
+  ) => patch<T>(`/api/mailboxes/${id}`, body),
+  deactivate: (id: string) => post<unknown>(`/api/mailboxes/${id}/deactivate`, {}),
+  testConnection: <T = { ok: boolean; message?: string }>(id: string) =>
+    post<T>(`/api/mailboxes/${id}/test-connection`, {}),
 }
 
 export const usersApi = {
@@ -459,9 +492,19 @@ export const usersApi = {
     job_title?: string | null
     tier: string
     permissions: string[]
+    mailbox_access?: Array<{
+      mailbox_id: string
+      can_view?: boolean
+      can_process?: boolean
+      can_trigger_sync?: boolean
+    }>
   }) => post<T>('/api/users/', body),
   updatePermissions: <T = unknown>(id: string, permissions: string[]) =>
     patch<T>(`/api/users/${id}/permissions`, { permissions }),
+  updateMailboxAccess: <T = unknown>(
+    id: string,
+    access: Array<{ mailbox_id: string; can_view: boolean; can_process: boolean; can_trigger_sync: boolean }>,
+  ) => patch<T>(`/api/users/${id}/mailbox-access`, { access }),
   deactivate: (id: string) => patch<unknown>(`/api/users/${id}/deactivate`, {}),
   reactivate: (id: string) => patch<unknown>(`/api/users/${id}/reactivate`, {}),
   resetPassword: <T = { message: string; temp_password: string }>(id: string) =>

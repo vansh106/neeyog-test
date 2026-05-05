@@ -12,6 +12,7 @@ from controllers.enquiry_controller import (
     EnquiryListItem,
     EnquiryResponse,
     ManualDropdownProcessRequest,
+    MatcherProcessResponse,
     UploadEmailRequest,
 )
 from core.auth_middleware import CurrentUser, require_permission
@@ -73,13 +74,14 @@ async def list_enquiries_route(
 
 @router.get("/emails/inbox", response_model=list[EmailInboxItem])
 async def list_email_inbox_route(
-    _user: CurrentUser = Depends(require_permission(Permission.VIEW_ENQUIRIES)),
+    user: CurrentUser = Depends(require_permission(Permission.VIEW_ENQUIRIES)),
     status: str | None = Query(None),
     limit: int = Query(50, le=100),
     offset: int = Query(0),
+    mailbox_id: str | None = Query(None, description="Filter to one connected mailbox"),
     db: AsyncSession = Depends(get_db),
 ):
-    return await enquiry_controller.handle_list_email_enquiries(db, status, limit, offset)
+    return await enquiry_controller.handle_list_email_enquiries(db, status, limit, offset, mailbox_id, user)
 
 
 @router.get("/clients/search")
@@ -88,6 +90,24 @@ async def search_clients_route(
     q: str | None = Query(None),
 ):
     return await enquiry_controller.handle_get_clients(q)
+
+
+@router.post("/{enquiry_id}/process-matcher", response_model=MatcherProcessResponse)
+async def process_email_matcher_route(
+    enquiry_id: str,
+    _user: CurrentUser = Depends(require_permission(Permission.VIEW_ENQUIRIES)),
+    db: AsyncSession = Depends(get_db),
+):
+    return await enquiry_controller.handle_process_email_matcher(enquiry_id, db)
+
+
+@router.get("/{enquiry_id}/revert-request-draft")
+async def revert_request_draft_route(
+    enquiry_id: str,
+    _user: CurrentUser = Depends(require_permission(Permission.VIEW_ENQUIRIES)),
+    db: AsyncSession = Depends(get_db),
+):
+    return await enquiry_controller.handle_revert_request_email_draft(enquiry_id, db)
 
 
 @router.get("/{enquiry_id}")

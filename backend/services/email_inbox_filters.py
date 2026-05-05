@@ -26,6 +26,28 @@ def is_quotation_work_related(
     cfg = settings or get_settings()
     combined = f"{subject}\n{body}\n{sender_email}".lower()
 
+    # Common newsletter / marketing signals. If these are present and there is no strong
+    # technical product context, treat as NOT an enquiry to keep the inbox clean.
+    ignore_terms = [
+        "unsubscribe",
+        "view in browser",
+        "manage preferences",
+        "marketing",
+        "newsletter",
+        "webinar",
+        "course",
+        "bootcamp",
+        "discount",
+        "flash sale",
+        "sale:",
+        "promo",
+        "promotion",
+        "special offer",
+        "thank you for subscribing",
+        "reset your password",
+        "verify your email",
+    ]
+
     portal_terms = _csv_terms(cfg.email_portal_signal_terms)
     commerce_terms = _csv_terms(cfg.email_quotation_commerce_terms)
     product_terms = _csv_terms(cfg.email_quotation_product_terms)
@@ -34,6 +56,11 @@ def is_quotation_work_related(
     portal = _any_in(combined, portal_terms)
     commerce = _any_in(combined, commerce_terms)
     product = _any_in(combined, product_terms)
+    has_size_hint = bool(re.search(r"\b(dn\s*\d{1,4}|dn\d{1,4}|\d{1,3}\s*(mm|inch|\"|''))\b", combined))
+    is_marketing = _any_in(combined, ignore_terms)
+
+    if is_marketing and not (product and has_size_hint):
+        return False
 
     if portal:
         if commerce or product:
@@ -46,7 +73,7 @@ def is_quotation_work_related(
         return True
 
     # Short RFQs: price/quote language + sizing without the word "valve"
-    if commerce and re.search(r"\b(dn\d{1,4}|\d{1,3}\s*(mm|inch|\"|''))\b", combined):
+    if commerce and has_size_hint:
         return True
 
     return False

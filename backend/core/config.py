@@ -46,6 +46,9 @@ class Settings(BaseSettings):
     superadmin_password: str = "ChangeMe@123"
     superadmin_name: str = "Super Admin"
 
+    #: Optional Fernet key (44 chars) for mailbox IMAP secrets; if unset, derived from ``jwt_secret_key``.
+    mailbox_credentials_fernet_key: str = ""
+
     #: Per LLM HTTP call (parser / matcher / quote / missing-fields)
     LLM_REQUEST_TIMEOUT_SECONDS: float = 180.0
     #: Full LangGraph pipeline (all agents + PDF); Postman should use a longer client timeout than this
