@@ -324,36 +324,34 @@ async def get_operators_for_valve(
     da_operators: list[dict] = []
     sa_operators: list[dict] = []
 
+    stmt = select(CatalogOperatorRow).where(CatalogOperatorRow.client_id == _active_client_id())
+    # Prefer construct-way match when present, but butterfly/bulk catalogs often don't encode 2/3-way.
     if way:
-        stmt = (
-            select(CatalogOperatorRow)
-            .where(
-                CatalogOperatorRow.client_id == _active_client_id(),
-                CatalogOperatorRow.construct.ilike(way),
+        stmt = stmt.where(CatalogOperatorRow.construct.ilike(way))
+
+    # Include:
+    # - rows explicitly marked for the valve type (legacy), and/or
+    # - rows normalized to "All valves" (preferred), and/or
+    # - any NULL/empty operator_for (treat as global).
+    if op_pattern:
+        stmt = stmt.where(
+            sa.or_(
+                CatalogOperatorRow.operator_for.ilike(op_pattern),
+                CatalogOperatorRow.operator_for.ilike("all valves"),
+                CatalogOperatorRow.operator_for.is_(None),
+                CatalogOperatorRow.operator_for == "",
             )
-            .order_by(CatalogOperatorRow.size_text, CatalogOperatorRow.model_name)
         )
-        # Include:
-        # - rows explicitly marked for the valve type (legacy), and/or
-        # - rows normalized to "All valves" (preferred), and/or
-        # - any NULL/empty operator_for (treat as global).
-        if op_pattern:
-            stmt = stmt.where(
-                sa.or_(
-                    CatalogOperatorRow.operator_for.ilike(op_pattern),
-                    CatalogOperatorRow.operator_for.ilike("all valves"),
-                    CatalogOperatorRow.operator_for.is_(None),
-                    CatalogOperatorRow.operator_for == "",
-                )
-            )
-        for r in (await db.execute(stmt)).scalars().all():
-            item = _row_to_operator(r)
-            if item is None:
-                continue
-            if item["operator_type"] == "da":
-                da_operators.append(item)
-            else:
-                sa_operators.append(item)
+    stmt = stmt.order_by(CatalogOperatorRow.construct, CatalogOperatorRow.size_text, CatalogOperatorRow.model_name).limit(600)
+
+    for r in (await db.execute(stmt)).scalars().all():
+        item = _row_to_operator(r)
+        if item is None:
+            continue
+        if item["operator_type"] == "da":
+            da_operators.append(item)
+        else:
+            sa_operators.append(item)
 
     return {
         "da_operators": da_operators,

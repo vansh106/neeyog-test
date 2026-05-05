@@ -81,14 +81,11 @@ CASCADE_STEPS: dict[str, list[str]] = {
         "variant_type",
         "construction",
         "valve_size",
-        "bore_type",
         "end_connection",
         "pressure",
         "body",
         "ball_disc",
-        "stem",
         "seat",
-        "fasteners",
     ],
     "ball_valve": [
         "variant_type",
@@ -102,7 +99,6 @@ CASCADE_STEPS: dict[str, list[str]] = {
         "ball",
         "stem",
         "seat",
-        "fasteners",
     ],
     "operator": ["operator_for", "construct", "size_text", "model_name"],
     "brackets_coupler": ["bracket_operator", "construct", "size_text"],
@@ -274,7 +270,7 @@ def catalog_row_to_size_option(category: str, row: object) -> dict:
         size_mm, size_inch = _parse_size_to_mm_inch(row.valve_size)
         material = " / ".join(
             x
-            for x in [row.body, row.ball_disc, row.stem, row.seat, row.fasteners]
+            for x in [row.body, row.ball_disc, getattr(row, "stem", None), row.seat, getattr(row, "fasteners", None)]
             if x
         )
     elif isinstance(row, CatalogBallValveRow):
@@ -290,7 +286,11 @@ def catalog_row_to_size_option(category: str, row: object) -> dict:
         if getattr(row, "product_sheet", None):
             name = f"{name} ({row.product_sheet})".strip()
         size_mm, size_inch = _parse_size_to_mm_inch(row.valve_size)
-        material = " / ".join(x for x in [row.body, row.ball, row.stem, row.seat, row.fasteners] if x)
+        material = " / ".join(
+            x
+            for x in [row.body, row.ball, getattr(row, "stem", None), row.seat, getattr(row, "fasteners", None)]
+            if x
+        )
     elif isinstance(row, FinalProductSheetMarker):
         name = " ".join(
             x

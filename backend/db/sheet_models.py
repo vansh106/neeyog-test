@@ -35,14 +35,11 @@ class CatalogButterflyValveRow(_CatalogBase):
     variant_type: Mapped[str | None] = mapped_column(Text, nullable=True)
     construction: Mapped[str | None] = mapped_column(Text, nullable=True)
     valve_size: Mapped[str | None] = mapped_column(Text, nullable=True)
-    bore_type: Mapped[str | None] = mapped_column(Text, nullable=True)
     end_connection: Mapped[str | None] = mapped_column(Text, nullable=True)
     pressure: Mapped[str | None] = mapped_column(Text, nullable=True)
     body: Mapped[str | None] = mapped_column(Text, nullable=True)
     ball_disc: Mapped[str | None] = mapped_column(Text, nullable=True)
-    stem: Mapped[str | None] = mapped_column(Text, nullable=True)
     seat: Mapped[str | None] = mapped_column(Text, nullable=True)
-    fasteners: Mapped[str | None] = mapped_column(Text, nullable=True)
     source_file: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
@@ -60,7 +57,6 @@ class CatalogBallValveRow(_CatalogBase):
     ball: Mapped[str | None] = mapped_column(Text, nullable=True)
     stem: Mapped[str | None] = mapped_column(Text, nullable=True)
     seat: Mapped[str | None] = mapped_column(Text, nullable=True)
-    fasteners: Mapped[str | None] = mapped_column(Text, nullable=True)
     source_file: Mapped[str | None] = mapped_column(Text, nullable=True)
     product_sheet: Mapped[str | None] = mapped_column(Text, nullable=True)
 
