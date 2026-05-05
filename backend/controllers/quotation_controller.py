@@ -8,6 +8,7 @@ from fastapi import HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.auth_middleware import CurrentUser
 from core.exceptions import ProductNotFoundError, QuotationBuildError
 from services import quotation_service
 
@@ -49,18 +50,34 @@ class QuotationUpdateLineItemsBody(BaseModel):
     lineItems: list[dict] = Field(default_factory=list)
 
 
+class QuotationAuditItem(BaseModel):
+    at: str
+    user: str
+    user_name: str | None = None
+    action: str
+    summary: str
+    diff: dict | None = None
+
+
+class QuotationAuditResponse(BaseModel):
+    items: list[QuotationAuditItem]
+
+
 # ── Controller functions ────────────────────────────────────
 
 async def handle_patch_quotation_line_items(
     quotation_id: str,
     body: QuotationUpdateLineItemsBody,
     db: AsyncSession,
+    user: CurrentUser,
 ) -> dict:
     try:
         q = await quotation_service.update_quotation_from_manual_line_items(
             quotation_id,
             body.lineItems,
             db,
+            performed_by=user.email,
+            performed_by_name=user.full_name or None,
         )
         return {
             "quotation_id": str(q.id),
@@ -88,6 +105,47 @@ async def handle_patch_quotation_line_items(
         raise HTTPException(status_code=404, detail="Quotation not found")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+async def handle_get_quotation_audit(
+    quotation_id: str,
+    db: AsyncSession,
+    *,
+    limit: int = 25,
+) -> QuotationAuditResponse:
+    try:
+        rows = await quotation_service.list_quotation_audit(quotation_id, db, limit=limit)
+        items: list[QuotationAuditItem] = []
+        for r in rows:
+            details = r.details if isinstance(r.details, dict) else {}
+            diff = details.get("diff") if isinstance(details.get("diff"), dict) else None
+            counts = (diff or {}).get("counts") if isinstance((diff or {}).get("counts"), dict) else {}
+            ch = int(counts.get("changed") or 0)
+            ad = int(counts.get("added") or 0)
+            rm = int(counts.get("removed") or 0)
+            summary = "Edited quotation"
+            parts = []
+            if ch:
+                parts.append(f"{ch} line(s) changed")
+            if ad:
+                parts.append(f"{ad} added")
+            if rm:
+                parts.append(f"{rm} removed")
+            if parts:
+                summary = ", ".join(parts)
+            items.append(
+                QuotationAuditItem(
+                    at=r.created_at.isoformat() if r.created_at else "",
+                    user=str(r.performed_by or ""),
+                    user_name=str(details.get("performed_by_name") or "") or None,
+                    action=str(r.action or "quotation_edited"),
+                    summary=summary,
+                    diff=diff,
+                )
+            )
+        return QuotationAuditResponse(items=items)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

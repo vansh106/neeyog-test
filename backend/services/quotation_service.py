@@ -13,9 +13,68 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import get_settings
 from core.exceptions import ProductNotFoundError, QuotationBuildError
-from db.models import Quotation, QuotationProductHistory
+from db.models import AuditLog, Quotation, QuotationProductHistory
 from services import enquiry_service as enquiry_svc
 from services.pdf_service import generate_quotation_pdf
+
+
+def _safe_float(x: object, default: float = 0.0) -> float:
+    try:
+        return float(x) if x is not None else default
+    except Exception:
+        return default
+
+
+def _line_key(li: dict) -> str:
+    ct = str(li.get("catalog_table") or "").strip().lower()
+    cr = str(li.get("catalog_row_id") or "").strip().lower()
+    desc = str(li.get("description") or "").strip().lower()
+    if ct and cr:
+        return f"{ct}:{cr}"
+    return desc or "line"
+
+
+def _diff_quote_lines(before: list[dict], after: list[dict]) -> dict:
+    bmap: dict[str, dict] = {_line_key(x): x for x in (before or []) if isinstance(x, dict)}
+    amap: dict[str, dict] = {_line_key(x): x for x in (after or []) if isinstance(x, dict)}
+
+    added = [k for k in amap.keys() if k not in bmap]
+    removed = [k for k in bmap.keys() if k not in amap]
+    changed: list[dict] = []
+    fields = ("description", "quantity", "unit_price", "unit", "line_total")
+    for k in amap.keys():
+        if k not in bmap:
+            continue
+        b = bmap[k]
+        a = amap[k]
+        delta: dict[str, dict] = {}
+        for f in fields:
+            bv = b.get(f)
+            av = a.get(f)
+            if f in ("quantity",):
+                try:
+                    bv = int(bv) if bv is not None else None
+                except Exception:
+                    pass
+                try:
+                    av = int(av) if av is not None else None
+                except Exception:
+                    pass
+            if f in ("unit_price", "line_total"):
+                bv = round(_safe_float(bv, 0.0), 2)
+                av = round(_safe_float(av, 0.0), 2)
+            if (bv is None and av is None) or str(bv) == str(av):
+                continue
+            delta[f] = {"from": bv, "to": av}
+        if delta:
+            changed.append({"line": k, "changes": delta})
+
+    return {
+        "added": added[:10],
+        "removed": removed[:10],
+        "changed": changed[:10],
+        "counts": {"added": len(added), "removed": len(removed), "changed": len(changed)},
+    }
 
 
 async def get_quotation(quotation_id: str, db: AsyncSession) -> Quotation:
@@ -139,6 +198,9 @@ async def update_quotation_from_manual_line_items(
     quotation_id: str,
     line_items_in: list,
     db: AsyncSession,
+    *,
+    performed_by: str = "user",
+    performed_by_name: str | None = None,
 ) -> Quotation:
     """Rebuild quotation lines from manual configurator payloads; regenerate PDF and history.
 
@@ -149,6 +211,13 @@ async def update_quotation_from_manual_line_items(
 
     q = await get_quotation(quotation_id, db)
     enquiry = await enquiry_svc.get_enquiry(str(q.enquiry_id), db)
+    before_lines = list(q.line_items or []) if isinstance(q.line_items, list) else []
+    before_totals = {
+        "subtotal": float(q.subtotal or 0),
+        "gst_amount": float(q.gst_amount or 0),
+        "pf_amount": float(q.pf_amount or 0),
+        "total_amount": float(q.total_amount or 0),
+    }
 
     parsed_products, matched_products, quote_line_items, history_rows = (
         enquiry_svc.expand_manual_line_items_to_quote_parts(line_items_in)
@@ -246,6 +315,50 @@ async def update_quotation_from_manual_line_items(
     if pdf_path:
         q.pdf_path = pdf_path
 
+    # Audit log: quotation edited (short diff + totals delta)
+    after_lines = quote_line_items
+    diff = _diff_quote_lines(before_lines, after_lines)
+    after_totals = {
+        "subtotal": float(subtotal or 0),
+        "gst_amount": float(gst_amount or 0),
+        "pf_amount": float(pf_amount or 0),
+        "total_amount": float(total_amount or 0),
+    }
+    db.add(
+        AuditLog(
+            id=uuid.uuid4(),
+            entity_type="quotation",
+            entity_id=q.id,
+            action="quotation_edited",
+            performed_by=performed_by or "user",
+            details={
+                "performed_by_name": performed_by_name,
+                "quotation_id": str(q.id),
+                "quote_number": q.quote_number,
+                "enquiry_id": str(q.enquiry_id),
+                "diff": diff,
+                "totals_before": before_totals,
+                "totals_after": after_totals,
+            },
+        )
+    )
+
     await db.commit()
     await db.refresh(q)
     return q
+
+
+async def list_quotation_audit(quotation_id: str, db: AsyncSession, *, limit: int = 25) -> list[AuditLog]:
+    qid = uuid.UUID(str(quotation_id))
+    rows = (
+        await db.execute(
+            select(AuditLog)
+            .where(
+                AuditLog.entity_type == "quotation",
+                AuditLog.entity_id == qid,
+            )
+            .order_by(AuditLog.created_at.desc())
+            .limit(min(max(1, int(limit or 25)), 100)),
+        )
+    ).scalars().all()
+    return list(rows)
