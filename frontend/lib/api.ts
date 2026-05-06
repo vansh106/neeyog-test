@@ -155,6 +155,10 @@ function postFormData<T>(url: string, formData: FormData): Promise<T> {
 export const enquiriesApi = {
   uploadEmail: <T = unknown>(emailText: string, inputType: string = 'email') =>
     post<T>('/api/enquiries/upload-email', { email_text: emailText, input_type: inputType }),
+  processEmailMatcher: <T = unknown>(enquiryId: string) =>
+    post<T>(`/api/enquiries/${encodeURIComponent(enquiryId)}/process-matcher`, {}),
+  getRevertRequestDraft: <T = unknown>(enquiryId: string) =>
+    get<T>(`/api/enquiries/${encodeURIComponent(enquiryId)}/revert-request-draft`),
   getEnquiry: <T = unknown>(id: string) => get<T>(`/api/enquiries/${id}`),
   listEnquiries: <T = unknown>(
     params?: {
@@ -180,6 +184,10 @@ export const enquiriesApi = {
 
 export const quotationsApi = {
   getQuotation: <T = unknown>(id: string) => get<T>(`/api/quotations/${id}`),
+  updateLineItems: <T = unknown>(id: string, body: { lineItems: unknown[] }) =>
+    patch<T>(`/api/quotations/${id}`, body),
+  getAudit: <T = unknown>(id: string, limit: number = 25) =>
+    get<T>(`/api/quotations/${id}/audit`, { limit }),
   listQuotations: <T = unknown>(params?: { limit?: number; offset?: number }) =>
     get<T>('/api/quotations/', params as Record<string, unknown>),
   getQuoteHistory: <T = unknown>(

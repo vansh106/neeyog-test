@@ -76,11 +76,15 @@ function catalogRowToValveProduct(
 
 type Stage = 'valve_specs' | 'operator' | 'actuator' | 'accessories' | 'supplier' | 'complete'
 
+type SpecSeed = { catalog_category: string; field_values: Record<string, string> }
+
 type Props = {
   productIndex: number
   onProductComplete: (product: AssembledProduct) => void
   onProductRemove?: () => void
   initialProduct?: AssembledProduct
+  /** When set without ``initialProduct``, pre-selects catalog sheet and cascade picks (matcher / re-entry). */
+  initialSpecSeed?: SpecSeed | null
   suppliers?: SupplierResponse[]
 }
 
@@ -260,12 +264,19 @@ export function ValveConfigurator({
   onProductComplete,
   onProductRemove,
   initialProduct,
+  initialSpecSeed,
   suppliers = [],
 }: Props) {
   const [stage, setStage] = useState<Stage>('valve_specs')
   const [specs, setSpecs] = useState<ValveSpecSelections>(() => {
-    if (!initialProduct?.valve) return emptySpecs()
-    return valveProductToSpecs(initialProduct.valve)
+    if (initialProduct?.valve) return valveProductToSpecs(initialProduct.valve)
+    if (initialSpecSeed?.catalog_category) {
+      return {
+        catalog_category: initialSpecSeed.catalog_category,
+        field_values: { ...initialSpecSeed.field_values },
+      }
+    }
+    return emptySpecs()
   })
   const [cascadeSteps, setCascadeSteps] = useState<CascadeStep[]>([])
 

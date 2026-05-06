@@ -16,6 +16,7 @@ const STATUS_STYLES: Record<string, string> = {
   quoting:           'bg-[#FDFBEA] text-[#857600] border border-[#F5E57A]',
   awaiting_info:     'bg-amber-50 text-amber-700 border border-amber-200',
   quoted:            'bg-[#F0F7F2] text-[#235A32] border border-[#AEDAB5]',
+  matcher_ready:     'bg-violet-50 text-violet-800 border border-violet-200',
 }
 
 export default function StatusBadge({ status, className }: { status: string | null; className?: string }) {

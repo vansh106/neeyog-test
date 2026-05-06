@@ -8,37 +8,59 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { cn, formatCurrency } from '@/lib/utils'
-import { prefetchValveCatalogs } from '@/hooks/useValveCatalog'
+import { useWarmupMatcherCatalog } from '@/hooks/useValveCatalog'
 import { clientsApi, suppliersApi } from '@/lib/api'
 import { ValveConfigurator, CompletedProductCard } from '@/components/configurator/ValveConfigurator'
+import {
+  assemblyLabel,
+  assembledToLineItem,
+  catalogPartsForAssembly,
+  operatorLabel,
+  uuidv4,
+} from '@/lib/manualAssemblyLineItem'
 import type {
   AssembledProduct,
   BranchResponse,
   CompanyResponse,
   ManualEnquiryForm,
   ManualLineItem,
-  OperatorKey,
   PriceCalculationResult,
   SupplierResponse,
 } from '@/types'
 import { CLIENT_INDUSTRY_OPTIONS } from '@/types'
+
+type MatcherClientHint = {
+  mode: 'existing' | 'new'
+  selectedClientId?: string | null
+  newClient?: Partial<{
+    company_name: string
+    branch_name: string
+    contact_name: string
+    phone: string
+    email: string
+    city: string
+    address_line1: string
+  }>
+}
 
 type Props = {
   onSubmitManual: (form: ManualEnquiryForm) => void
   isProcessing: boolean
   /** When opening Manual Entry from Emails → Process, pre-fills Notes once. */
   prefillNotesFromEnquiry?: string | null
+  /** Completing an existing email enquiry — server merges quote onto this id. */
+  targetEnquiryId?: string | null
+  /** Pre-select catalog sheet + cascade (from matcher). */
+  matcherSeed?: { catalogKey: string; filledCascade: Record<string, string> } | null
+  matcherClientHint?: MatcherClientHint | null
+  /** Bump to remount valve configurator (e.g. clear matcher seed for full manual). */
+  matcherSeedVersion?: number
 }
 
 const SELECT_EMPTY = '__none__'
 const toSelectValue = (v: string | null | undefined) =>
   v != null && String(v).trim() !== '' ? String(v).trim() : SELECT_EMPTY
 const fromSelectValue = (v: string | null | undefined) => (!v || v === SELECT_EMPTY ? '' : v)
-
-function uuidv4(): string {
-  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID()
-  return Math.random().toString(16).slice(2) + '-' + Date.now().toString(16)
-}
 
 function isValidEmail(email: string): boolean {
   if (!email) return true
@@ -47,76 +69,6 @@ function isValidEmail(email: string): boolean {
 
 function cleanPhone(phone: string): string {
   return phone.replace(/[^\d]/g, '').slice(-10)
-}
-
-function operatorLabel(k: OperatorKey | null): string {
-  switch (k) {
-    case 'bare_shaft':
-      return 'Bare Shaft'
-    case 'manual':
-      return 'Manual'
-    case 'gear_box':
-      return 'Gear Box'
-    case 'da':
-      return 'Double Acting (DA)'
-    case 'sa':
-      return 'Single Acting (SA)'
-    case 'electric_actuator':
-      return 'Electric Actuator'
-    default:
-      return '—'
-  }
-}
-
-type CatalogPart = { label: string; catalog_table: string; catalog_row_id: string }
-
-function valveTypeToLegacyCatalogTable(valveType: string | null | undefined): 'butterfly_valve' | 'ball_valve' | null {
-  const t = (valveType || '').toLowerCase()
-  if (t.includes('butterfly')) return 'butterfly_valve'
-  if (t.includes('ball')) return 'ball_valve'
-  return null
-}
-
-function valveCatalogTable(v: import('@/types').ValveProduct | null | undefined): string | null {
-  if (v?.catalog_category) return v.catalog_category
-  return valveTypeToLegacyCatalogTable(v?.type)
-}
-
-function catalogPartsForAssembly(p: AssembledProduct): CatalogPart[] {
-  const parts: CatalogPart[] = []
-  const v = p.valve
-  if (v?.id) {
-    const ct = valveCatalogTable(v)
-    if (ct) parts.push({ label: 'Valve', catalog_table: ct, catalog_row_id: v.id })
-  }
-  if ((p.operator_key === 'da' || p.operator_key === 'sa') && p.operator_model?.id) {
-    parts.push({ label: 'Operator', catalog_table: 'operator', catalog_row_id: p.operator_model.id })
-  }
-  if (p.sov?.id) parts.push({ label: 'SOV', catalog_table: 'sov', catalog_row_id: p.sov.id })
-  if (p.limit_switch_box?.id) {
-    parts.push({
-      label: 'Limit switch',
-      catalog_table: 'limit_switch_box',
-      catalog_row_id: p.limit_switch_box.id,
-    })
-  }
-  if (p.positioner?.id) {
-    parts.push({ label: 'Positioner', catalog_table: 'positioner', catalog_row_id: p.positioner.id })
-  }
-  if (p.include_bracket && p.bracket?.id) {
-    parts.push({
-      label: 'Bracket / coupler',
-      catalog_table: 'brackets_coupler',
-      catalog_row_id: p.bracket.id,
-    })
-  }
-  return parts
-}
-
-function assemblyLabel(p: AssembledProduct): string {
-  const v = p.valve
-  if (!v) return 'Assembly'
-  return [v.type, v.construction, v.valve_size].filter(Boolean).join(' — ')
 }
 
 type ProductPricingCalc = {
@@ -128,101 +80,6 @@ type ProductPricingCalc = {
   rows: Array<{ component: string; calc: PriceCalculationResult }>
   assemblyUnit: number
   lineTotal: number
-}
-
-/** Parse leading inch size like `2"` or `1 1/2"` from valve_size text. */
-function parseSizeInch(valveSize: string | null | undefined): number | null {
-  if (!valveSize) return null
-  const m = valveSize.trim().match(/^(\d+)\s+(\d+)\/(\d+)\s*"?$/)
-  if (m) return Number(m[1]) + Number(m[2]) / Number(m[3])
-  const m2 = valveSize.trim().match(/^(\d+)\/(\d+)\s*"?$/)
-  if (m2) return Number(m2[1]) / Number(m2[2])
-  const m3 = valveSize.trim().match(/^(\d+(?:\.\d+)?)\s*"?$/)
-  if (m3) return Number(m3[1])
-  return null
-}
-function parseSizeMm(valveSize: string | null | undefined): number | null {
-  if (!valveSize) return null
-  const mDn = valveSize.match(/DN\s*(\d+)/i)
-  if (mDn) return Number(mDn[1])
-  const mMm = valveSize.match(/(\d+)\s*MM/i)
-  if (mMm) return Number(mMm[1])
-  return null
-}
-
-/** Adapt an AssembledProduct into the existing ManualLineItem request shape. */
-function assembledToLineItem(p: AssembledProduct, unitPriceOverride: number | null): ManualLineItem {
-  const v = p.valve
-  const materialParts = v
-    ? [v.body, v.ball_disc ?? v.ball, v.stem, v.seat, v.fasteners].filter(Boolean)
-    : []
-  const material = materialParts.join(' / ') || ''
-  const name = v
-    ? [
-        v.type,
-        v.construction,
-        v.valve_size,
-      ]
-        .filter(Boolean)
-        .join(' — ')
-    : 'Valve Assembly'
-
-  const catalogTable = v ? valveCatalogTable(v) : null
-  const rawCatalogId = v?.id ?? uuidv4()
-  const catalogId =
-    typeof rawCatalogId === 'string' && rawCatalogId.includes(':')
-      ? rawCatalogId
-      : catalogTable && rawCatalogId
-        ? `${catalogTable}:${rawCatalogId}`
-        : rawCatalogId
-
-  const sel = {
-    id: catalogId,
-    name,
-    size_inch: parseSizeInch(v?.valve_size ?? null),
-    size_mm: parseSizeMm(v?.valve_size ?? null),
-    material,
-    base_price:
-      unitPriceOverride != null && Number.isFinite(unitPriceOverride) ? unitPriceOverride : (p.unit_price ?? 0),
-    unit: 'Nos',
-    display_label: name,
-  }
-
-  const cascade: Record<string, string> = {}
-  if (v) {
-    if (v.variant_type) cascade.variant_type = v.variant_type
-    if (v.product_sheet) cascade.product_sheet = v.product_sheet
-    if (v.construction) cascade.construction = v.construction
-    if (v.valve_size) cascade.valve_size = v.valve_size
-    if (v.bore_type) cascade.bore_type = v.bore_type
-    if (v.end_connection) cascade.end_connection = v.end_connection
-    if (v.pressure) cascade.pressure = v.pressure
-    if (v.body) cascade.body = v.body
-    if (v.ball_disc) cascade.ball_disc = v.ball_disc
-    if (v.ball) cascade.ball = v.ball
-    if (v.stem) cascade.stem = v.stem
-    if (v.seat) cascade.seat = v.seat
-    if (v.fasteners) cascade.fasteners = v.fasteners
-  }
-  cascade.operator = operatorLabel(p.operator_key)
-  if (p.operator_model) {
-    cascade.operator_model = p.operator_model.model_name
-    if (p.operator_model.size) cascade.operator_size = p.operator_model.size
-  }
-  if (p.sov) cascade.sov = p.sov.type
-  if (p.limit_switch_box) cascade.limit_switch_box = p.limit_switch_box.type
-  if (p.positioner) cascade.positioner = p.positioner.type
-  if (p.include_bracket && p.bracket) cascade.bracket_coupler = `Included (${p.bracket.size})`
-  if (p.supplier_name) cascade.supplier = p.supplier_name
-  if (p.supplier_id) cascade.supplier_id = p.supplier_id
-
-  return {
-    id: p.id,
-    category: catalogTable ?? 'unknown',
-    cascadeSelections: cascade,
-    selectedProduct: sel,
-    quantity: p.quantity,
-  }
 }
 
 function dummyCompaniesForSearch(): CompanyResponse[] {
@@ -426,7 +283,13 @@ export default function ManualEntryForm({
   onSubmitManual,
   isProcessing,
   prefillNotesFromEnquiry,
+  targetEnquiryId,
+  matcherSeed,
+  matcherClientHint,
+  matcherSeedVersion = 0,
 }: Props) {
+  useWarmupMatcherCatalog(matcherSeed?.catalogKey ?? null)
+
   const [clientMode, setClientMode] = useState<'existing' | 'new'>('existing')
   const [newClient, setNewClient] = useState({
     company_name: '',
@@ -452,6 +315,38 @@ export default function ManualEntryForm({
     if (!p) return
     setNotes((prev) => (prev.trim() ? prev : p))
   }, [prefillNotesFromEnquiry])
+
+  useEffect(() => {
+    if (!matcherClientHint) return
+    if (matcherClientHint.mode === 'existing' && matcherClientHint.selectedClientId) {
+      setClientMode('existing')
+      for (const co of dummyCompaniesForSearch()) {
+        const br = (co.branches || []).find((b) => b.id === matcherClientHint.selectedClientId)
+        if (br) {
+          setSelectedCompany(co)
+          setSelectedBranchId(br.id)
+          setCompanyQuery(co.company_name)
+          break
+        }
+      }
+      return
+    }
+    if (matcherClientHint.mode === 'new' && matcherClientHint.newClient) {
+      setClientMode('new')
+      const nc = matcherClientHint.newClient
+      setNewClient((prev) => ({
+        ...prev,
+        company_name: nc.company_name ?? prev.company_name,
+        branch_name: nc.branch_name ?? prev.branch_name,
+        contact_name: nc.contact_name ?? prev.contact_name,
+        phone: nc.phone ?? prev.phone,
+        email: nc.email ?? prev.email,
+        city: nc.city ?? prev.city,
+        address_line1: nc.address_line1 ?? prev.address_line1,
+        address: nc.address_line1 ?? prev.address,
+      }))
+    }
+  }, [matcherClientHint])
 
   const [companyQuery, setCompanyQuery] = useState('')
   const [debouncedCompanyQuery, setDebouncedCompanyQuery] = useState('')
@@ -554,10 +449,6 @@ export default function ManualEntryForm({
     return () => {
       cancelled = true
     }
-  }, [])
-
-  useEffect(() => {
-    void prefetchValveCatalogs()
   }, [])
 
   const selectedBranch = useMemo((): BranchResponse | null => {
@@ -803,6 +694,7 @@ export default function ManualEntryForm({
       productCalcs.filter((c) => c.ok).map((c) => [c.productId, c.assemblyUnit]),
     )
     const form: ManualEnquiryForm = {
+      ...(targetEnquiryId ? { targetEnquiryId } : {}),
       clientMode,
       selectedClientId: selectedBranchId,
       newClient: {
@@ -1299,9 +1191,17 @@ export default function ManualEntryForm({
 
           {activeConfigIds.map((cid, idx) => (
             <ValveConfigurator
-              key={cid}
+              key={`${cid}-${matcherSeedVersion}`}
               productIndex={assembledProducts.length + idx}
               suppliers={suppliers}
+              initialSpecSeed={
+                idx === 0 && matcherSeed?.catalogKey
+                  ? {
+                      catalog_category: matcherSeed.catalogKey,
+                      field_values: matcherSeed.filledCascade || {},
+                    }
+                  : undefined
+              }
               onProductComplete={handleProductComplete(cid)}
               onProductRemove={
                 assembledProducts.length > 0 || activeConfigIds.length > 1

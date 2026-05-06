@@ -59,6 +59,7 @@ export default function EmailsPage() {
 
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [processBusy, setProcessBusy] = useState(false)
   const [mailboxFilter, setMailboxFilter] = useState<string>('')
   const { data: mailboxes = [] } = useMailboxes()
 
@@ -368,10 +369,30 @@ export default function EmailsPage() {
                 <div className="flex flex-wrap justify-end gap-2">
                   <button
                     type="button"
-                    onClick={() => router.push(`/upload?tab=manual&ref=${selected}`)}
-                    className="rounded-md bg-brand-green-500 px-3 py-2 text-[12px] font-medium text-white hover:bg-brand-green-600"
+                    disabled={processBusy || !selected}
+                    onClick={async () => {
+                      if (!selected) return
+                      setProcessBusy(true)
+                      setError(null)
+                      try {
+                        await enquiriesApi.processEmailMatcher(selected)
+                        router.push(`/enquiries/${selected}`)
+                      } catch (e) {
+                        setError(e instanceof Error ? e.message : 'Process failed')
+                      } finally {
+                        setProcessBusy(false)
+                      }
+                    }}
+                    className="rounded-md bg-brand-green-500 px-3 py-2 text-[12px] font-medium text-white hover:bg-brand-green-600 disabled:opacity-50 disabled:pointer-events-none inline-flex items-center gap-2"
                   >
-                    Process
+                    {processBusy ? (
+                      <>
+                        <Loader2 className="size-3.5 animate-spin" />
+                        Matching…
+                      </>
+                    ) : (
+                      'Process'
+                    )}
                   </button>
                   <button
                     type="button"
@@ -379,6 +400,13 @@ export default function EmailsPage() {
                     className="rounded-md border border-surface-border px-3 py-2 text-[12px] text-surface-muted hover:text-gray-900"
                   >
                     View full enquiry →
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => router.push(`/upload?tab=manual&ref=${selected}`)}
+                    className="rounded-md border border-dashed border-surface-border px-3 py-2 text-[12px] text-surface-muted hover:text-gray-900"
+                  >
+                    Classic manual upload
                   </button>
                 </div>
               </div>

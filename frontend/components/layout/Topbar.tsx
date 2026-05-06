@@ -21,7 +21,7 @@ import { useAuthStore } from '@/stores/authStore'
 
 const PAGE_TITLES: Record<string, string> = {
   '/dashboard': 'Dashboard',
-  '/upload': 'AI Upload',
+  '/upload': 'Upload',
   '/enquiries': 'Enquiries',
   '/quotations': 'Quotations',
   '/reports': 'Reports',

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
-import { ChevronRight, Download, FileText } from 'lucide-react'
+import { ChevronRight, Download, FileText, Loader2, Mail, Sparkles } from 'lucide-react'
 import PageShell from '@/components/layout/PageShell'
 import StatusBadge from '@/components/ui/StatusBadge'
 import EmptyState from '@/components/ui/EmptyState'
@@ -12,11 +12,18 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Progress } from '@/components/ui/progress'
 import { buttonVariants } from '@/components/ui/button'
 import { ClientVerificationPanel } from '@/components/upload/ClientVerificationPanel'
+import ManualEntryForm from '@/components/upload/ManualEntryForm'
 import { useEnquiry } from '@/lib/queries'
-import { enquiriesApi, erpExportUrl, quotationsApi } from '@/lib/api'
+import { enquiriesApi, erpExportUrl, processManualDropdown, quotationsApi } from '@/lib/api'
 import { useQueryClient } from '@tanstack/react-query'
 import { formatRelativeTime } from '@/lib/utils'
-import type { AgentEvent, ClientSummary, ClientVerificationContext, ClientVerificationResponse, EnquiryDetail } from '@/types'
+import type {
+  ClientSummary,
+  ClientVerificationContext,
+  ClientVerificationResponse,
+  EnquiryDetail,
+  ManualEnquiryForm,
+} from '@/types'
 
 type EnquiryDetailExt = EnquiryDetail & {
   raw_input?: string | null
@@ -107,9 +114,16 @@ export default function EnquiryDetailPage() {
   const reasoningSteps = useMemo(() => toReasoningSteps(ext?.ai_reasoning ?? null), [ext?.ai_reasoning])
 
   const [clientContext, setClientContext] = useState<ClientVerificationContext | null>(null)
-  const [clientEvents, setClientEvents] = useState<AgentEvent[]>([])
   const [exportBusy, setExportBusy] = useState(false)
   const [exportError, setExportError] = useState<string | null>(null)
+
+  const [showManualCompletion, setShowManualCompletion] = useState(false)
+  const [manualBusy, setManualBusy] = useState(false)
+  const [manualError, setManualError] = useState<string | null>(null)
+  const [matcherSeedVersion, setMatcherSeedVersion] = useState(0)
+  const [fullManualOverride, setFullManualOverride] = useState(false)
+  const [revertOpen, setRevertOpen] = useState(false)
+  const [revertDraft, setRevertDraft] = useState<{ subject: string; body: string } | null>(null)
 
   const downloadErpExport = useCallback(async () => {
     if (!id || exportBusy) return
@@ -176,8 +190,54 @@ export default function EnquiryDetailPage() {
 
   const gridEntries = useMemo(() => {
     if (!parsed) return []
-    return Object.entries(parsed).filter(([k]) => k !== 'products_requested')
+    const skip = new Set(['products_requested', 'matcher'])
+    return Object.entries(parsed).filter(([k]) => !skip.has(k))
   }, [parsed])
+
+  const matcher = useMemo(() => {
+    const m = parsed?.matcher
+    return m && typeof m === 'object' ? (m as Record<string, unknown>) : null
+  }, [parsed])
+
+  const matcherFilled = useMemo(() => {
+    const fc = matcher?.filled_cascade
+    if (!fc || typeof fc !== 'object') return {} as Record<string, string>
+    const out: Record<string, string> = {}
+    for (const [k, v] of Object.entries(fc as Record<string, unknown>)) {
+      if (v != null && String(v).trim()) out[k] = String(v).trim()
+    }
+    return out
+  }, [matcher])
+
+  const matcherCatalogKey =
+    matcher && typeof matcher.catalog_key === 'string' ? matcher.catalog_key : null
+
+  const matcherClientHint = useMemo(() => {
+    if (!matcher) return null
+    const c = matcher.client
+    if (!c || typeof c !== 'object') return null
+    const cl = c as Record<string, unknown>
+    if (cl.mode === 'existing' && typeof cl.selected_client_id === 'string') {
+      return { mode: 'existing' as const, selectedClientId: cl.selected_client_id }
+    }
+    const sn = cl.suggested_new_client
+    if ((cl.mode === 'suggested_new' || cl.mode === 'new') && sn && typeof sn === 'object') {
+      const n = sn as Record<string, unknown>
+      return {
+        mode: 'new' as const,
+        newClient: {
+          company_name: typeof n.company_name === 'string' ? n.company_name : '',
+          branch_name: typeof n.branch_name === 'string' ? n.branch_name : 'Head Office',
+          contact_name: typeof n.contact_name === 'string' ? n.contact_name : '',
+          phone: typeof n.phone === 'string' ? n.phone : '',
+          email: typeof n.email === 'string' ? n.email : '',
+          city: typeof n.city === 'string' ? n.city : '',
+          address_line1: typeof n.address_line1 === 'string' ? n.address_line1 : '',
+        },
+      }
+    }
+    return null
+  }, [matcher])
 
   const productsRequested = useMemo(() => {
     const pr = parsed?.products_requested
@@ -209,15 +269,66 @@ export default function EnquiryDetailPage() {
   const showMissingCard =
     !isResolved &&
     (ext?.flow_type === 'incomplete' ||
+      ext?.flow_type === 'product_incomplete' ||
       clarificationHint(ext?.error_message ?? null) ||
       missingList.length > 0)
 
-  const rawBlock = useMemo(() => {
-    const raw = ext?.raw_input
-    if (typeof raw === 'string' && raw.trim()) return raw
-    if (parsed) return stringifyValue(parsed)
+  const emailLikeSource = useMemo(() => {
+    const raw = (ext?.raw_input || '').trim()
+    if (!raw) return false
+    return raw.toLowerCase().includes('from:') || raw.toLowerCase().includes('subject:')
+  }, [ext?.raw_input])
+
+  const matcherCompleteness =
+    matcher && typeof matcher.product_completeness === 'string' ? matcher.product_completeness : null
+
+  const matcherConfidencePct = useMemo(() => {
+    const mc = matcher?.confidence
+    if (typeof mc === 'number' && Number.isFinite(mc)) {
+      return Math.round(mc <= 1 ? mc * 100 : mc)
+    }
     return null
-  }, [ext?.raw_input, parsed])
+  }, [matcher])
+
+  const showMatcherRail =
+    !!matcher &&
+    !quoteId &&
+    (ext?.status === 'matcher_ready' ||
+      ext?.flow_type === 'product_incomplete' ||
+      ext?.flow_type === 'product_complete')
+
+  const submitManualFromEnquiry = useCallback(
+    async (form: ManualEnquiryForm) => {
+      if (!id) return
+      setManualBusy(true)
+      setManualError(null)
+      try {
+        await processManualDropdown({ ...form, targetEnquiryId: id })
+        await qc.invalidateQueries({ queryKey: ['enquiry', id] })
+        setShowManualCompletion(false)
+      } catch (e) {
+        setManualError(e instanceof Error ? e.message : 'Could not save quotation')
+      } finally {
+        setManualBusy(false)
+      }
+    },
+    [id, qc],
+  )
+
+  const openRevertDraft = useCallback(async () => {
+    if (!id) return
+    try {
+      const d = await enquiriesApi.getRevertRequestDraft<{ subject: string; body: string }>(id)
+      setRevertDraft(d)
+      setRevertOpen(true)
+    } catch {
+      setRevertDraft({
+        subject: 'RE: Additional details for your enquiry',
+        body: 'We need a few more details to complete your quotation. Please reply with specifications.',
+      })
+      setRevertOpen(true)
+    }
+  }, [id])
 
   if (!id) {
     return (
@@ -252,12 +363,12 @@ export default function EnquiryDetailPage() {
           <Skeleton className="h-4 w-32" />
         </div>
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
-          <div className="space-y-4 lg:col-span-3">
+          <div className="space-y-4 lg:col-span-2">
             <Skeleton className="h-48 w-full rounded-xl border border-[#E2E6DC]" />
             <Skeleton className="h-64 w-full rounded-xl border border-[#E2E6DC]" />
             <Skeleton className="h-32 w-full rounded-xl border border-[#E2E6DC]" />
           </div>
-          <div className="space-y-4 lg:col-span-2">
+          <div className="space-y-4 lg:col-span-3">
             <Skeleton className="h-40 w-full rounded-xl border border-[#E2E6DC]" />
             <Skeleton className="h-36 w-full rounded-xl border border-[#E2E6DC]" />
           </div>
@@ -267,11 +378,15 @@ export default function EnquiryDetailPage() {
   }
 
   const confidencePct =
-    ext.confidence_score != null
-      ? Math.round(
-          ext.confidence_score <= 1 ? ext.confidence_score * 100 : ext.confidence_score,
-        )
-      : null
+    matcherConfidencePct ??
+    (ext.confidence_score != null
+      ? Math.round(ext.confidence_score <= 1 ? ext.confidence_score * 100 : ext.confidence_score)
+      : null)
+
+  const clientEmailForMailto =
+    typeof parsed?.client_email === 'string' && parsed.client_email.includes('@')
+      ? parsed.client_email.trim()
+      : ''
 
   return (
     <PageShell title={`Enquiry ${id.slice(0, 8)}…`}>
@@ -284,28 +399,29 @@ export default function EnquiryDetailPage() {
       </nav>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
-        <div className="space-y-6 lg:col-span-3">
+        <div className="space-y-6 lg:col-span-2">
           {clientContext && (
             <ClientVerificationPanel />
           )}
 
-          <section className="rounded-xl border border-surface-border bg-white p-5 shadow-sm">
-            <h2 className="text-[15px] font-semibold text-gray-900">Original Input</h2>
-            <pre
-              className="mt-3 max-h-[200px] overflow-y-auto rounded-xl bg-[#0E1912] p-4 font-mono text-[12px] text-[#7DC088] whitespace-pre-wrap break-words"
-              tabIndex={0}
-            >
-              {rawBlock ?? 'No raw input available'}
-            </pre>
-          </section>
+          {emailLikeSource && (
+            <section className="rounded-xl border border-surface-border bg-white p-5 shadow-sm">
+              <h2 className="text-[15px] font-semibold text-gray-900">Source message</h2>
+              <pre
+                className="mt-3 max-h-[280px] overflow-y-auto rounded-lg border border-surface-border bg-[#FAFAF8] p-4 font-sans text-[13px] text-gray-800 whitespace-pre-wrap break-words"
+                tabIndex={0}
+              >
+                {(ext.raw_input || '').trim() || '—'}
+              </pre>
+            </section>
+          )}
 
           <section className="rounded-xl border border-surface-border bg-white p-5 shadow-sm">
-            <h2 className="text-[15px] font-semibold text-gray-900">What is Extracted</h2>
             {!parsed ? (
-              <p className="mt-3 text-[14px] text-surface-muted">No structured data was extracted.</p>
+              <p className="text-[14px] text-surface-muted">No structured fields yet.</p>
             ) : (
               <>
-                <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   {gridEntries.map(([key, value]) => (
                     <div key={key} className="min-w-0">
                       <div className="text-[10px] font-medium uppercase tracking-wide text-[#8A9488]">
@@ -356,10 +472,24 @@ export default function EnquiryDetailPage() {
           {reasoningSteps.length > 0 && <AIReasoningPanel reasoning={reasoningSteps} />}
         </div>
 
-        <div className="space-y-6 lg:col-span-2">
+        <div className="space-y-6 lg:col-span-3">
           <section className="rounded-xl border border-surface-border bg-white p-5 shadow-sm">
             <div className="flex flex-col items-center gap-4">
               <StatusBadge status={ext.status} className="scale-110 px-4 py-1 text-[12px]" />
+              {matcherCompleteness && (
+                <p className="text-center text-[12px] text-surface-muted">
+                  Product:{' '}
+                  <span className="font-medium text-gray-800">
+                    {matcherCompleteness === 'complete' ? 'Complete' : 'Incomplete'}
+                  </span>
+                  {typeof matcher?.product_label === 'string' && matcher.product_label ? (
+                    <>
+                      {' · '}
+                      <span className="text-gray-700">{matcher.product_label as string}</span>
+                    </>
+                  ) : null}
+                </p>
+              )}
               {confidencePct != null && (
                 <div className="flex w-full max-w-[200px] flex-col items-center gap-2">
                   <div className="relative flex h-24 w-24 items-center justify-center">
@@ -392,6 +522,100 @@ export default function EnquiryDetailPage() {
               )}
             </div>
           </section>
+
+          {showMatcherRail && (
+            <section className="rounded-xl border border-violet-200 bg-gradient-to-b from-violet-50/80 to-white p-5 shadow-sm">
+              <div className="flex items-start gap-2">
+                <Sparkles className="mt-0.5 size-4 text-violet-600 shrink-0" />
+                <div className="min-w-0 flex-1">
+                  <h2 className="text-[14px] font-semibold text-gray-900">Matcher & next steps</h2>
+                  <p className="mt-1 text-[12px] leading-relaxed text-surface-muted">
+                    Review the match confidence, then complete the specification or ask the customer for
+                    details. You can always switch to full manual entry if the base product is wrong.
+                  </p>
+                  {Array.isArray(matcher?.missing_cascade_keys) && matcher.missing_cascade_keys.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {(matcher.missing_cascade_keys as string[]).map((k) => (
+                        <span
+                          key={k}
+                          className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] text-amber-900 border border-amber-200"
+                        >
+                          Missing: {formatLabelKey(k)}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  {Array.isArray(matcher?.ambiguous_groups) && matcher.ambiguous_groups.length > 0 && (
+                    <ul className="mt-2 list-disc space-y-1 pl-4 text-[12px] text-amber-900/90">
+                      {(matcher.ambiguous_groups as { column?: string }[]).map((g, i) => (
+                        <li key={i}>
+                          {g.column ? `${formatLabelKey(g.column)} — choose from catalog` : 'Ambiguous match'}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  <div className="mt-4 flex flex-col gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFullManualOverride(false)
+                        setShowManualCompletion((v) => !v)
+                      }}
+                      className={buttonVariants({
+                        variant: 'default',
+                        size: 'sm',
+                        className: 'w-full justify-center bg-brand-green-600 hover:bg-brand-green-700',
+                      })}
+                    >
+                      {showManualCompletion ? 'Hide completion form' : 'Complete the product'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFullManualOverride(true)
+                        setMatcherSeedVersion((n) => n + 1)
+                        setShowManualCompletion(true)
+                      }}
+                      className={buttonVariants({ variant: 'outline', size: 'sm', className: 'w-full' })}
+                    >
+                      Wrong product — full manual entry
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void openRevertDraft()}
+                      className={buttonVariants({ variant: 'secondary', size: 'sm', className: 'w-full gap-1.5' })}
+                    >
+                      <Mail className="size-3.5" />
+                      Revert to client for more details
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </section>
+          )}
+
+          {showMatcherRail && showManualCompletion && (
+            <section className="rounded-xl border border-surface-border bg-white p-4 shadow-sm max-h-[min(78vh,920px)] overflow-y-auto">
+              {manualError && <p className="mb-3 text-[12px] text-red-600">{manualError}</p>}
+              <ManualEntryForm
+                onSubmitManual={submitManualFromEnquiry}
+                isProcessing={manualBusy}
+                prefillNotesFromEnquiry={
+                  (ext.raw_input || '').trim()
+                    ? `--- Original enquiry ---\n\n${(ext.raw_input || '').trim().slice(0, 10000)}`
+                    : null
+                }
+                targetEnquiryId={id}
+                matcherSeed={
+                  fullManualOverride || !matcherCatalogKey
+                    ? null
+                    : { catalogKey: matcherCatalogKey, filledCascade: matcherFilled }
+                }
+                matcherClientHint={matcherClientHint}
+                matcherSeedVersion={matcherSeedVersion}
+              />
+            </section>
+          )}
 
           <section className="rounded-xl border border-surface-border bg-white p-5 shadow-sm">
             <h2 className="text-[14px] font-semibold text-gray-900">Exports</h2>
@@ -465,6 +689,66 @@ export default function EnquiryDetailPage() {
           )}
         </div>
       </div>
+
+      {revertOpen && revertDraft && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="revert-draft-title"
+        >
+          <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl border border-surface-border bg-white p-5 shadow-xl">
+            <h2 id="revert-draft-title" className="text-[15px] font-semibold text-gray-900">
+              Email draft for client
+            </h2>
+            <p className="mt-2 text-[12px] text-surface-muted">
+              Copy the text below into your mail client. You can still use &quot;Complete the product&quot; on
+              this page anytime.
+            </p>
+            <div className="mt-3 space-y-2">
+              <div className="text-[10px] font-medium uppercase tracking-wide text-[#8A9488]">Subject</div>
+              <p className="rounded-lg border border-surface-border bg-surface-page px-3 py-2 text-[13px]">
+                {revertDraft.subject}
+              </p>
+            </div>
+            <div className="mt-4 space-y-2">
+              <div className="text-[10px] font-medium uppercase tracking-wide text-[#8A9488]">Body</div>
+              <textarea
+                readOnly
+                className="h-44 w-full rounded-lg border border-surface-border bg-surface-page p-3 font-sans text-[13px]"
+                value={revertDraft.body}
+              />
+            </div>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button
+                type="button"
+                className={buttonVariants({ variant: 'secondary', size: 'sm' })}
+                onClick={() => {
+                  void navigator.clipboard.writeText(`${revertDraft.subject}\n\n${revertDraft.body}`)
+                }}
+              >
+                Copy all
+              </button>
+              {clientEmailForMailto ? (
+                <a
+                  href={`mailto:${clientEmailForMailto}?subject=${encodeURIComponent(revertDraft.subject)}&body=${encodeURIComponent(revertDraft.body)}`}
+                  className={buttonVariants({ variant: 'default', size: 'sm', className: 'gap-1.5' })}
+                >
+                  <Mail className="size-3.5" />
+                  Open in mail
+                </a>
+              ) : null}
+              <button
+                type="button"
+                className={buttonVariants({ variant: 'outline', size: 'sm', className: 'ml-auto' })}
+                onClick={() => setRevertOpen(false)}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </PageShell>
   )
 }

@@ -2,13 +2,15 @@
 
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
-import { FileText, Info } from 'lucide-react'
+import { FileText, Info, Pencil } from 'lucide-react'
 import { useMemo, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import PageShell from '@/components/layout/PageShell'
 import StatusBadge from '@/components/ui/StatusBadge'
 import EmptyState from '@/components/ui/EmptyState'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Button, buttonVariants } from '@/components/ui/button'
+import QuotationLineItemsEditor from '@/components/quotations/QuotationLineItemsEditor'
 import {
   Dialog,
   DialogContent,
@@ -19,8 +21,15 @@ import {
 } from '@/components/ui/dialog'
 import { useQuotation, useClientConfig, useEnquiry } from '@/lib/queries'
 import { quotationsApi } from '@/lib/api'
+import {
+  manualLineItemsToAssembledProducts,
+  parseManualLineItemsFromEnquiryRaw,
+  quotationLinesToFallbackManualItems,
+} from '@/lib/quotationPrefillAssembly'
+import { Permissions } from '@/lib/permissions'
+import { useAuthStore } from '@/stores/authStore'
 import { cn, formatCurrency } from '@/lib/utils'
-import type { QuotationHistoryResponse, QuotationLineItem } from '@/types'
+import type { AssembledProduct, QuotationAuditResponse, QuotationHistoryResponse, QuotationLineItem } from '@/types'
 
 function formatQuoteDate(iso: string | null): string {
   if (!iso) return '—'
@@ -47,13 +56,21 @@ function QuotationDetailSkeleton() {
 export default function QuotationDetailPage() {
   const params = useParams()
   const id = typeof params?.id === 'string' ? params.id : Array.isArray(params?.id) ? params.id[0] : ''
+  const queryClient = useQueryClient()
+  const canEditQuoteLines = useAuthStore((s) => s.hasPermission(Permissions.APPROVE_QUOTATIONS))
 
   // Hooks MUST be declared before any conditional returns.
   const [historyOpen, setHistoryOpen] = useState(false)
+  const [editLinesOpen, setEditLinesOpen] = useState(false)
+  /** Increment on each "Edit" open so the line-items editor remounts with fresh cascade/pricing state. */
+  const [editSession, setEditSession] = useState(0)
   const [historyLoading, setHistoryLoading] = useState(false)
   const [historyError, setHistoryError] = useState<string | null>(null)
   const [historyData, setHistoryData] = useState<QuotationHistoryResponse | null>(null)
   const [activeLine, setActiveLine] = useState<QuotationLineItem | null>(null)
+  const [auditLoading, setAuditLoading] = useState(false)
+  const [auditError, setAuditError] = useState<string | null>(null)
+  const [auditData, setAuditData] = useState<QuotationAuditResponse | null>(null)
 
   const activeLineLabel = useMemo(() => {
     if (!activeLine) return ''
@@ -91,9 +108,29 @@ export default function QuotationDetailPage() {
     }
   }
 
-  const { data: quotation, isPending, isError } = useQuotation(id)
+  const quotationQuery = useQuotation(id)
+  const { data: quotation, isPending, isError } = quotationQuery
   const { data: clientConfig } = useClientConfig()
-  const { data: linkedEnquiry } = useEnquiry(quotation?.enquiry_id ?? '')
+  const enquiryQuery = useEnquiry(quotation?.enquiry_id ?? '')
+  const { data: linkedEnquiry } = enquiryQuery
+
+  const prefillAssembledProducts = useMemo(() => {
+    if (!quotation?.line_items) return []
+    const manual = parseManualLineItemsFromEnquiryRaw(linkedEnquiry?.raw_input ?? null)
+    const built = manual?.length
+      ? manualLineItemsToAssembledProducts(manual)
+      : manualLineItemsToAssembledProducts(quotationLinesToFallbackManualItems(quotation.line_items))
+    // Deep clone so React Query cache objects are never mutated by the configurator, and each open gets a fresh graph.
+    return built.map((p) => JSON.parse(JSON.stringify(p)) as AssembledProduct)
+  }, [
+    quotation?.line_items,
+    linkedEnquiry?.raw_input,
+    quotation?.total_amount,
+    quotation?.subtotal,
+    editSession,
+    quotationQuery.dataUpdatedAt,
+    enquiryQuery.dataUpdatedAt,
+  ])
 
   if (!id) {
     return (
@@ -135,6 +172,22 @@ export default function QuotationDetailPage() {
 
   const pdfHref = quotationsApi.getPdfUrl(id)
   const lineItems = quotation.line_items ?? []
+  const auditItems = auditData?.items ?? []
+
+  const loadAudit = async () => {
+    if (!id) return
+    setAuditLoading(true)
+    setAuditError(null)
+    try {
+      const res = await quotationsApi.getAudit<QuotationAuditResponse>(id, 25)
+      setAuditData(res)
+    } catch (e: unknown) {
+      setAuditError(e instanceof Error ? e.message : 'Failed to load edit history')
+      setAuditData(null)
+    } finally {
+      setAuditLoading(false)
+    }
+  }
 
   return (
     <PageShell title={`Quote ${quotation.quote_number}`}>
@@ -338,67 +391,153 @@ export default function QuotationDetailPage() {
         </Dialog>
 
         <aside className="lg:col-span-2">
-          <div className="sticky top-6 space-y-4">
-            <div className="rounded-xl border border-[#E2E6DC] bg-white p-5 shadow-sm">
-              <p className="text-[11px] font-medium uppercase tracking-wide text-[#8A9488]">Total</p>
-              <p className="mt-1 text-[28px] font-bold font-mono text-brand-green-600">
-                {formatCurrency(quotation.total_amount)}
-              </p>
-              <div className="mt-3 flex flex-wrap items-center gap-2">
-                <StatusBadge status={quotation.status} />
-              </div>
-              <p className="mt-3 text-[13px] text-surface-muted">
-                Created {formatQuoteDate(quotation.created_at)}
-              </p>
-              <p className="mt-1 text-[13px] text-surface-muted">
-                Valid for {quotation.validity_days} day{quotation.validity_days === 1 ? '' : 's'} from issue
-              </p>
-            </div>
+          <div className="sticky top-6 space-y-4 max-h-[calc(100vh-100px)] overflow-y-auto pr-1">
+            {editLinesOpen ? (
+              <QuotationLineItemsEditor
+                key={`${id}-edit-${editSession}`}
+                quotationId={id}
+                prefillRevision={editSession}
+                initialAssembledProducts={prefillAssembledProducts}
+                onCancel={() => setEditLinesOpen(false)}
+                onSaved={async () => {
+                  await Promise.all([
+                    queryClient.refetchQueries({ queryKey: ['quotation', id] }),
+                    queryClient.refetchQueries({ queryKey: ['enquiry', quotation.enquiry_id] }),
+                  ])
+                  setEditLinesOpen(false)
+                }}
+              />
+            ) : (
+              <>
+                <div className="rounded-xl border border-[#E2E6DC] bg-white p-5 shadow-sm">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[11px] font-medium uppercase tracking-wide text-[#8A9488]">Total</p>
+                      <p className="mt-1 text-[28px] font-bold font-mono text-brand-green-600">
+                        {formatCurrency(quotation.total_amount)}
+                      </p>
+                      <div className="mt-3 flex flex-wrap items-center gap-2">
+                        <StatusBadge status={quotation.status} />
+                      </div>
+                      <p className="mt-3 text-[13px] text-surface-muted">
+                        Created {formatQuoteDate(quotation.created_at)}
+                      </p>
+                      <p className="mt-1 text-[13px] text-surface-muted">
+                        Valid for {quotation.validity_days} day{quotation.validity_days === 1 ? '' : 's'} from issue
+                      </p>
+                    </div>
+                    {canEditQuoteLines && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="shrink-0 border-[#E2E6DC] text-[12px]"
+                        onClick={() => {
+                          setEditSession((n) => n + 1)
+                          setEditLinesOpen(true)
+                        }}
+                      >
+                        <Pencil className="mr-1.5 size-3.5" />
+                        Edit
+                      </Button>
+                    )}
+                  </div>
+                </div>
 
-            <div className="flex flex-col gap-2">
-              <a
-                href={pdfHref}
-                target="_blank"
-                rel="noopener noreferrer"
-                className={cn(
-                  buttonVariants({ variant: 'default', size: 'default' }),
-                  'w-full border-transparent bg-brand-green-500 text-white hover:bg-brand-green-600',
-                )}
-              >
-                Download PDF
-              </a>
-              <a
-                href={pdfHref}
-                target="_blank"
-                rel="noopener noreferrer"
-                className={cn(
-                  buttonVariants({ variant: 'outline', size: 'default' }),
-                  'w-full border-[#E2E6DC]',
-                )}
-              >
-                Open PDF in New Tab
-              </a>
-            </div>
+                <div className="flex flex-col gap-2">
+                  <a
+                    href={pdfHref}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={cn(
+                      buttonVariants({ variant: 'default', size: 'default' }),
+                      'w-full border-transparent bg-brand-green-500 text-white hover:bg-brand-green-600',
+                    )}
+                  >
+                    Download PDF
+                  </a>
+                  <a
+                    href={pdfHref}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={cn(
+                      buttonVariants({ variant: 'outline', size: 'default' }),
+                      'w-full border-[#E2E6DC]',
+                    )}
+                  >
+                    Open PDF in New Tab
+                  </a>
+                </div>
 
-            <div className="rounded-xl border border-[#E2E6DC] bg-white p-5 shadow-sm">
-              <p className="text-[11px] font-medium uppercase tracking-wide text-[#8A9488]">
-                Linked Enquiry
-              </p>
-              <Link
-                href={`/enquiries/${quotation.enquiry_id}`}
-                className="mt-2 inline-block font-mono text-[13px] text-brand-green-600 hover:underline"
-              >
-                {quotation.enquiry_id}
-              </Link>
-              {linkedEnquiry?.flow_type != null && linkedEnquiry.flow_type !== '' && (
-                <p className="mt-2 text-[12px] text-surface-muted">
-                  Flow:{' '}
-                  <span className="font-medium text-gray-800">
-                    {linkedEnquiry.flow_type.replace(/_/g, ' ')}
-                  </span>
-                </p>
-              )}
-            </div>
+                <div className="rounded-xl border border-[#E2E6DC] bg-white p-5 shadow-sm">
+                  <p className="text-[11px] font-medium uppercase tracking-wide text-[#8A9488]">
+                    Linked Enquiry
+                  </p>
+                  <Link
+                    href={`/enquiries/${quotation.enquiry_id}`}
+                    className="mt-2 inline-block font-mono text-[13px] text-brand-green-600 hover:underline"
+                  >
+                    {quotation.enquiry_id}
+                  </Link>
+                  {linkedEnquiry?.flow_type != null && linkedEnquiry.flow_type !== '' && (
+                    <p className="mt-2 text-[12px] text-surface-muted">
+                      Flow:{' '}
+                      <span className="font-medium text-gray-800">
+                        {linkedEnquiry.flow_type.replace(/_/g, ' ')}
+                      </span>
+                    </p>
+                  )}
+                </div>
+
+                <div className="rounded-xl border border-[#E2E6DC] bg-white p-5 shadow-sm">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-[11px] font-medium uppercase tracking-wide text-[#8A9488]">
+                        Edit history
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="shrink-0 border-[#E2E6DC] text-[12px]"
+                      onClick={() => void loadAudit()}
+                    >
+                      Refresh
+                    </Button>
+                  </div>
+
+                  {auditLoading ? (
+                    <p className="mt-3 text-[13px] text-surface-muted">Loading…</p>
+                  ) : auditError ? (
+                    <p className="mt-3 text-[13px] text-red-600">{auditError}</p>
+                  ) : auditItems.length === 0 ? (
+                    <p className="mt-3 text-[13px] text-surface-muted">No edits recorded yet.</p>
+                  ) : (
+                    <ul className="mt-4 space-y-2">
+                      {auditItems.slice(0, 8).map((it, idx) => (
+                        <li
+                          key={idx}
+                          className="rounded-lg border border-[#E2E6DC] bg-[#F9FAF7] p-3"
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="text-[13px] font-medium text-gray-900">{it.summary}</p>
+                              <p className="mt-1 text-[12px] text-surface-muted truncate">
+                                {(it.user_name || it.user || 'User').toString()}
+                              </p>
+                            </div>
+                            <span className="shrink-0 text-[11px] font-mono text-surface-muted">
+                              {it.at ? new Date(it.at).toLocaleString('en-IN') : '—'}
+                            </span>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </>
+            )}
           </div>
         </aside>
       </div>

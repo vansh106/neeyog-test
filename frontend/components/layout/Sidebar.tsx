@@ -35,7 +35,7 @@ type NavItem =
 
 const NAV_ITEMS: NavItem[] = [
   { href: '/dashboard', label: 'Home', icon: LayoutDashboard },
-  { href: '/upload', label: 'AI Upload', icon: Upload, permission: Permissions.UPLOAD_EMAIL },
+  { href: '/upload', label: 'Upload', icon: Upload, permission: Permissions.UPLOAD_EMAIL },
   { href: '/emails', label: 'Emails', icon: Mail, permission: Permissions.VIEW_ENQUIRIES },
   { href: '/enquiries', label: 'Enquiries', icon: Inbox, permission: Permissions.VIEW_ENQUIRIES },
   { href: '/quotations', label: 'Quotations', icon: FileText, permission: Permissions.VIEW_QUOTATIONS },

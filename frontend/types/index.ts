@@ -118,6 +118,24 @@ export interface QuotationHistoryResponse {
   items: QuotationHistoryItem[]
 }
 
+export interface QuotationAuditItem {
+  at: string
+  user: string
+  user_name?: string | null
+  action: string
+  summary: string
+  diff?: {
+    counts?: { added?: number; removed?: number; changed?: number }
+    added?: string[]
+    removed?: string[]
+    changed?: Array<{ line: string; changes: Record<string, { from: unknown; to: unknown }> }>
+  } | null
+}
+
+export interface QuotationAuditResponse {
+  items: QuotationAuditItem[]
+}
+
 export interface QuotationListItem {
   quotation_id: string
   quote_number: string
@@ -310,6 +328,8 @@ export interface ManualLineItem {
 }
 
 export interface ManualEnquiryForm {
+  /** When set, updates this enquiry in place (email / matcher flows) instead of creating a new enquiry. */
+  targetEnquiryId?: string | null
   clientMode: 'existing' | 'new'
   /** Selected branch id (UUID) for DB clients; dummy-* for demo clients. */
   selectedClientId: string | null

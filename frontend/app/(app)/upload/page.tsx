@@ -476,7 +476,7 @@ function UploadPageInner() {
 
   return (
     <PageShell
-      title="AI Upload"
+      title="Upload"
       subtitle="Paste customer enquiry text and generate a quotation with AI"
     >
       {syncStatus && (
@@ -630,7 +630,7 @@ export default function UploadPage() {
   return (
     <Suspense
       fallback={
-        <PageShell title="AI Upload" subtitle="Paste customer enquiry text and generate a quotation with AI">
+        <PageShell title="Upload" subtitle="Paste customer enquiry text and generate a quotation with AI">
           <div className="flex justify-center py-16 text-[14px] text-surface-muted">Loading…</div>
         </PageShell>
       }
