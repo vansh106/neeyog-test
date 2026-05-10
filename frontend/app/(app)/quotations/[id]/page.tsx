@@ -2,14 +2,16 @@
 
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
-import { FileText, Info, Pencil } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { FilePenLine, FileText, Info, Pencil } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import PageShell from '@/components/layout/PageShell'
 import StatusBadge from '@/components/ui/StatusBadge'
 import EmptyState from '@/components/ui/EmptyState'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Button, buttonVariants } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import QuotationLineItemsEditor from '@/components/quotations/QuotationLineItemsEditor'
 import {
   Dialog,
@@ -20,7 +22,12 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { useQuotation, useClientConfig, useEnquiry } from '@/lib/queries'
-import { quotationsApi } from '@/lib/api'
+import {
+  downloadQuotationPdf,
+  fetchQuotationPdfBlob,
+  openQuotationPdfInNewTab,
+  quotationsApi,
+} from '@/lib/api'
 import {
   manualLineItemsToAssembledProducts,
   parseManualLineItemsFromEnquiryRaw,
@@ -29,7 +36,47 @@ import {
 import { Permissions } from '@/lib/permissions'
 import { useAuthStore } from '@/stores/authStore'
 import { cn, formatCurrency } from '@/lib/utils'
-import type { AssembledProduct, QuotationAuditResponse, QuotationHistoryResponse, QuotationLineItem } from '@/types'
+import type {
+  AssembledProduct,
+  QuotationAuditResponse,
+  QuotationHistoryResponse,
+  QuotationLineItem,
+  QuotationPdfDisplayOverrides,
+} from '@/types'
+
+function buildPdfLineOverridesPayload(
+  lineItems: QuotationLineItem[],
+  edits: Array<{ description: string; size: string }>,
+): Array<{ description?: string; size?: string }> {
+  return edits.map((edit, idx) => {
+    const line = lineItems[idx]
+    if (!line) return {}
+    const baseDesc = (line.product_name || line.description || '').trim()
+    const baseSize = (line.size || '').trim()
+    const o: { description?: string; size?: string } = {}
+    if (edit.description.trim() !== baseDesc) o.description = edit.description.trim()
+    if (edit.size.trim() !== baseSize) o.size = edit.size.trim()
+    return o
+  })
+}
+
+function effectiveLinePdfDisplay(
+  line: QuotationLineItem,
+  idx: number,
+  overrides: QuotationPdfDisplayOverrides | null | undefined,
+): { description: string; size: string } {
+  const row = overrides?.lines?.[idx]
+  const desc =
+    (typeof row?.description === 'string' && row.description !== ''
+      ? row.description
+      : typeof row?.product_name === 'string' && row.product_name !== ''
+        ? row.product_name
+        : null) ??
+    (line.product_name || line.description || '')
+  const size =
+    (typeof row?.size === 'string' && row.size !== '' ? row.size : null) ?? (line.size || '')
+  return { description: desc, size: size || '—' }
+}
 
 function formatQuoteDate(iso: string | null): string {
   if (!iso) return '—'
@@ -71,6 +118,19 @@ export default function QuotationDetailPage() {
   const [auditLoading, setAuditLoading] = useState(false)
   const [auditError, setAuditError] = useState<string | null>(null)
   const [auditData, setAuditData] = useState<QuotationAuditResponse | null>(null)
+
+  const [pdfEditOpen, setPdfEditOpen] = useState(false)
+  const [pdfEditBusy, setPdfEditBusy] = useState(false)
+  const [pdfEditError, setPdfEditError] = useState<string | null>(null)
+  const [pdfLineEdits, setPdfLineEdits] = useState<Array<{ description: string; size: string }>>([])
+  const [pdfNotesCustom, setPdfNotesCustom] = useState(false)
+  const [pdfNotesText, setPdfNotesText] = useState('')
+  const [pdfPreviewNonce, setPdfPreviewNonce] = useState(0)
+  const [pdfPreviewObjectUrl, setPdfPreviewObjectUrl] = useState<string | null>(null)
+  const [pdfPreviewLoading, setPdfPreviewLoading] = useState(false)
+  const [pdfPreviewFetchError, setPdfPreviewFetchError] = useState<string | null>(null)
+  const [pdfDownloadBusy, setPdfDownloadBusy] = useState(false)
+  const [pdfOpenBusy, setPdfOpenBusy] = useState(false)
 
   const activeLineLabel = useMemo(() => {
     if (!activeLine) return ''
@@ -132,6 +192,114 @@ export default function QuotationDetailPage() {
     enquiryQuery.dataUpdatedAt,
   ])
 
+  const openPdfEditor = useCallback(() => {
+    const q = quotationQuery.data
+    if (!q) return
+    const items = q.line_items ?? []
+    const ov = q.pdf_display_overrides
+    setPdfLineEdits(
+      items.map((line, idx) => {
+        const row = ov?.lines?.[idx]
+        const descFromOv =
+          typeof row?.description === 'string' && row.description !== ''
+            ? row.description
+            : typeof row?.product_name === 'string'
+              ? row.product_name
+              : ''
+        return {
+          description: descFromOv || (line.product_name || line.description || ''),
+          size: (typeof row?.size === 'string' ? row.size : '') || (line.size || ''),
+        }
+      }),
+    )
+    const hasNotesKey = !!(ov && typeof ov === 'object' && ov !== null && 'notes' in ov)
+    setPdfNotesCustom(hasNotesKey)
+    setPdfNotesText(hasNotesKey ? String((ov as QuotationPdfDisplayOverrides).notes ?? '') : '')
+    setPdfEditError(null)
+    setPdfEditOpen(true)
+  }, [quotationQuery.data])
+
+  const savePdfDisplay = useCallback(async () => {
+    const q = quotationQuery.data
+    if (!q || !id) return
+    setPdfEditBusy(true)
+    setPdfEditError(null)
+    try {
+      const items = q.line_items ?? []
+      const lines = buildPdfLineOverridesPayload(items, pdfLineEdits)
+      const hasLineOv = lines.some((o) => Object.keys(o).length > 0)
+      let pdf_display_overrides: Record<string, unknown> | null = null
+      if (pdfNotesCustom || hasLineOv) {
+        pdf_display_overrides = {
+          lines,
+          ...(pdfNotesCustom ? { notes: pdfNotesText } : {}),
+        }
+      }
+      await quotationsApi.updatePdfDisplay(id, { pdf_display_overrides })
+      setPdfPreviewNonce((n) => n + 1)
+      await queryClient.invalidateQueries({ queryKey: ['quotation', id] })
+      setPdfEditOpen(false)
+    } catch (e: unknown) {
+      setPdfEditError(e instanceof Error ? e.message : 'Save failed')
+    } finally {
+      setPdfEditBusy(false)
+    }
+  }, [id, pdfLineEdits, pdfNotesCustom, pdfNotesText, quotationQuery.data, queryClient])
+
+  const clearPdfOverrides = useCallback(async () => {
+    if (!id) return
+    setPdfEditBusy(true)
+    setPdfEditError(null)
+    try {
+      await quotationsApi.updatePdfDisplay(id, { pdf_display_overrides: null })
+      setPdfPreviewNonce((n) => n + 1)
+      await queryClient.invalidateQueries({ queryKey: ['quotation', id] })
+      setPdfEditOpen(false)
+    } catch (e: unknown) {
+      setPdfEditError(e instanceof Error ? e.message : 'Failed to clear')
+    } finally {
+      setPdfEditBusy(false)
+    }
+  }, [id, queryClient])
+
+  useEffect(() => {
+    if (!pdfEditOpen || !id) {
+      setPdfPreviewObjectUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev)
+        return null
+      })
+      setPdfPreviewFetchError(null)
+      setPdfPreviewLoading(false)
+      return
+    }
+
+    let cancelled = false
+    setPdfPreviewLoading(true)
+    setPdfPreviewFetchError(null)
+
+    fetchQuotationPdfBlob(id)
+      .then((blob: Blob) => {
+        if (cancelled) return
+        const url = URL.createObjectURL(blob)
+        setPdfPreviewObjectUrl((prev) => {
+          if (prev) URL.revokeObjectURL(prev)
+          return url
+        })
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) {
+          setPdfPreviewFetchError(e instanceof Error ? e.message : 'Preview failed')
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setPdfPreviewLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [pdfEditOpen, id, pdfPreviewNonce])
+
   if (!id) {
     return (
       <PageShell title="Quotation">
@@ -170,8 +338,12 @@ export default function QuotationDetailPage() {
   const phone = clientConfig?.phone || ''
   const email = clientConfig?.email || ''
 
-  const pdfHref = quotationsApi.getPdfUrl(id)
   const lineItems = quotation.line_items ?? []
+  const pdfOverrides = quotation.pdf_display_overrides
+  const notesPreviewText =
+    pdfOverrides && typeof pdfOverrides === 'object' && pdfOverrides !== null && 'notes' in pdfOverrides
+      ? String(pdfOverrides.notes ?? '')
+      : null
   const auditItems = auditData?.items ?? []
 
   const loadAudit = async () => {
@@ -190,7 +362,23 @@ export default function QuotationDetailPage() {
   }
 
   return (
-    <PageShell title={`Quote ${quotation.quote_number}`}>
+    <PageShell
+      title={`Quote ${quotation.quote_number}`}
+      actions={
+        canEditQuoteLines ? (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="gap-1.5 border-[#E2E6DC]"
+            onClick={() => openPdfEditor()}
+          >
+            <FilePenLine className="size-4" />
+            Edit PDF
+          </Button>
+        ) : undefined
+      }
+    >
       <nav className="mb-6 flex flex-wrap items-center gap-2 text-[13px] text-surface-muted">
         <Link href="/quotations" className="text-brand-green-600 hover:underline">
           Quotations
@@ -232,6 +420,14 @@ export default function QuotationDetailPage() {
                 <div className="mt-2 space-y-1 text-[14px] text-gray-900">
                   <p className="font-semibold">{quotation.client_name}</p>
                   {quotation.client_company && <p>{quotation.client_company}</p>}
+                  {quotation.client_employee && (
+                    <p className="text-[12px] text-[#8A9488]">
+                      Client contact on file · {quotation.client_employee.full_name}
+                      {quotation.client_employee.designation
+                        ? ` · ${quotation.client_employee.designation}`
+                        : ''}
+                    </p>
+                  )}
                   {quotation.client_email && (
                     <p className="text-surface-muted">{quotation.client_email}</p>
                   )}
@@ -255,7 +451,9 @@ export default function QuotationDetailPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {lineItems.map((line: QuotationLineItem, idx: number) => (
+                    {lineItems.map((line: QuotationLineItem, idx: number) => {
+                      const pdfDisp = effectiveLinePdfDisplay(line, idx, pdfOverrides)
+                      return (
                       <tr
                         key={idx}
                         className={cn(
@@ -279,9 +477,9 @@ export default function QuotationDetailPage() {
                           </div>
                         </td>
                         <td className="max-w-[260px] whitespace-pre-line px-2 py-2.5 text-gray-900">
-                          {line.product_name || line.description}
+                          {pdfDisp.description}
                         </td>
-                        <td className="px-2 py-2.5 text-surface-muted">{line.size || '—'}</td>
+                        <td className="px-2 py-2.5 text-surface-muted">{pdfDisp.size}</td>
                         <td className="px-2 py-2.5 text-right font-mono">{line.quantity}</td>
                         <td className="px-2 py-2.5 text-surface-muted">{line.unit}</td>
                         <td className="px-2 py-2.5 text-right font-mono text-gray-800">
@@ -296,7 +494,8 @@ export default function QuotationDetailPage() {
                           {formatCurrency(line.line_total ?? line.total ?? 0)}
                         </td>
                       </tr>
-                    ))}
+                      )
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -337,10 +536,19 @@ export default function QuotationDetailPage() {
                 <p>Material Test Certificate (MTC) can be provided on request where applicable.</p>
               </section>
 
-              {quotation.notes && (
+              {(notesPreviewText !== null ? notesPreviewText : quotation.notes) && (
                 <section className="mt-6 rounded-lg border border-[#E2E6DC] bg-[#F9FAF7] p-4">
-                  <p className="text-[11px] font-medium uppercase tracking-wide text-[#8A9488]">Notes</p>
-                  <p className="mt-2 whitespace-pre-wrap text-[13px] text-gray-800">{quotation.notes}</p>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-[11px] font-medium uppercase tracking-wide text-[#8A9488]">Notes</p>
+                    {notesPreviewText !== null && (
+                      <span className="rounded-full bg-brand-gold-100 px-2 py-0.5 text-[10px] font-medium text-brand-gold-800">
+                        PDF wording
+                      </span>
+                    )}
+                  </div>
+                  <p className="mt-2 whitespace-pre-wrap text-[13px] text-gray-800">
+                    {notesPreviewText !== null ? notesPreviewText : quotation.notes}
+                  </p>
                 </section>
               )}
             </div>
@@ -422,8 +630,14 @@ export default function QuotationDetailPage() {
                         {formatCurrency(quotation.total_amount)}
                       </p>
                       <div className="mt-3 flex flex-wrap items-center gap-2">
-                        <StatusBadge status={quotation.status} />
+                        <StatusBadge status={quotation.status} kind="quotation_crm" />
                       </div>
+                      {(quotation.status === 'lost' || quotation.status === 'hold') && quotation.status_remarks && (
+                        <p className="mt-2 text-[12px] leading-snug text-surface-muted">
+                          <span className="font-medium text-gray-700">Remarks: </span>
+                          {quotation.status_remarks}
+                        </p>
+                      )}
                       <p className="mt-3 text-[13px] text-surface-muted">
                         Created {formatQuoteDate(quotation.created_at)}
                       </p>
@@ -450,28 +664,33 @@ export default function QuotationDetailPage() {
                 </div>
 
                 <div className="flex flex-col gap-2">
-                  <a
-                    href={pdfHref}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className={cn(
-                      buttonVariants({ variant: 'default', size: 'default' }),
-                      'w-full border-transparent bg-brand-green-500 text-white hover:bg-brand-green-600',
-                    )}
+                  <Button
+                    type="button"
+                    disabled={pdfDownloadBusy || pdfOpenBusy}
+                    className="h-10 w-full border-transparent bg-brand-green-500 text-white hover:bg-brand-green-600"
+                    onClick={() => {
+                      setPdfDownloadBusy(true)
+                      downloadQuotationPdf(id, `${quotation.quote_number}.pdf`)
+                        .catch((e: unknown) => window.alert(e instanceof Error ? e.message : 'Download failed'))
+                        .finally(() => setPdfDownloadBusy(false))
+                    }}
                   >
-                    Download PDF
-                  </a>
-                  <a
-                    href={pdfHref}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className={cn(
-                      buttonVariants({ variant: 'outline', size: 'default' }),
-                      'w-full border-[#E2E6DC]',
-                    )}
+                    {pdfDownloadBusy ? 'Preparing…' : 'Download PDF'}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={pdfDownloadBusy || pdfOpenBusy}
+                    className="w-full border-[#E2E6DC]"
+                    onClick={() => {
+                      setPdfOpenBusy(true)
+                      openQuotationPdfInNewTab(id)
+                        .catch((e: unknown) => window.alert(e instanceof Error ? e.message : 'Could not open PDF'))
+                        .finally(() => setPdfOpenBusy(false))
+                    }}
                   >
-                    Open PDF in New Tab
-                  </a>
+                    {pdfOpenBusy ? 'Opening…' : 'Open PDF in New Tab'}
+                  </Button>
                 </div>
 
                 <div className="rounded-xl border border-[#E2E6DC] bg-white p-5 shadow-sm">
@@ -546,6 +765,131 @@ export default function QuotationDetailPage() {
           </div>
         </aside>
       </div>
+
+      <Dialog open={pdfEditOpen} onOpenChange={setPdfEditOpen}>
+        <DialogContent className="flex max-h-[min(90vh,880px)] max-w-5xl flex-col gap-0 overflow-hidden p-0 sm:max-w-5xl">
+          <div className="border-b border-surface-border px-6 py-4">
+            <DialogHeader className="space-y-1 text-left">
+              <DialogTitle>Edit PDF wording</DialogTitle>
+              <DialogDescription>
+                Optional labels for this quotation&apos;s PDF only. Pricing, quantities, and catalog data stay the same.
+                Use &quot;Clear PDF overrides&quot; to restore the default PDF text.
+              </DialogDescription>
+            </DialogHeader>
+          </div>
+          <div className="grid min-h-0 flex-1 grid-cols-1 gap-0 lg:grid-cols-2 lg:divide-x lg:divide-surface-border">
+            <div className="max-h-[min(72vh,720px)] space-y-4 overflow-y-auto p-6">
+              {pdfLineEdits.map((row, idx) => (
+                <div key={idx} className="rounded-lg border border-[#E2E6DC] bg-[#F9FAF7] p-4">
+                  <p className="text-[11px] font-medium uppercase tracking-wide text-[#8A9488]">
+                    Line {idx + 1} — description &amp; size on PDF
+                  </p>
+                  <div className="mt-3 space-y-3">
+                    <div>
+                      <label htmlFor={`pdf-desc-${idx}`} className="text-[11px] text-[#8A9488]">
+                        Description
+                      </label>
+                      <Textarea
+                        id={`pdf-desc-${idx}`}
+                        value={row.description}
+                        onChange={(e) =>
+                          setPdfLineEdits((prev) =>
+                            prev.map((r, i) => (i === idx ? { ...r, description: e.target.value } : r)),
+                          )
+                        }
+                        className="mt-1 min-h-[72px] text-[13px]"
+                        placeholder="Text shown in the PDF description column"
+                      />
+                    </div>
+                    <div>
+                      <label htmlFor={`pdf-size-${idx}`} className="text-[11px] text-[#8A9488]">
+                        Size
+                      </label>
+                      <Input
+                        id={`pdf-size-${idx}`}
+                        value={row.size}
+                        onChange={(e) =>
+                          setPdfLineEdits((prev) =>
+                            prev.map((r, i) => (i === idx ? { ...r, size: e.target.value } : r)),
+                          )
+                        }
+                        className="mt-1 h-10 text-[13px]"
+                        placeholder="e.g. DN 80"
+                      />
+                    </div>
+                  </div>
+                </div>
+              ))}
+              <div className="rounded-lg border border-[#E2E6DC] bg-white p-4">
+                <label className="flex cursor-pointer items-start gap-3 text-[13px] text-gray-900">
+                  <input
+                    type="checkbox"
+                    className="mt-1"
+                    checked={pdfNotesCustom}
+                    onChange={(e) => setPdfNotesCustom(e.target.checked)}
+                  />
+                  <span>
+                    <span className="font-medium">Custom notes on PDF</span>
+                    <span className="mt-0.5 block text-[12px] font-normal text-surface-muted">
+                      When off, the PDF uses the quotation notes field. When on, the text below is used only on the PDF.
+                    </span>
+                  </span>
+                </label>
+                {pdfNotesCustom && (
+                  <Textarea
+                    value={pdfNotesText}
+                    onChange={(e) => setPdfNotesText(e.target.value)}
+                    className="mt-3 min-h-[80px] text-[13px]"
+                    placeholder="Notes block at the bottom of the PDF"
+                  />
+                )}
+              </div>
+              {pdfEditError && <p className="text-[13px] text-red-600">{pdfEditError}</p>}
+            </div>
+            <div className="flex min-h-[280px] flex-col bg-surface-page lg:max-h-[min(72vh,720px)]">
+              <p className="shrink-0 border-b border-surface-border px-4 py-2 text-[11px] font-medium uppercase tracking-wide text-[#8A9488]">
+                PDF preview
+              </p>
+              {pdfPreviewLoading && (
+                <div className="flex flex-1 items-center justify-center p-8 text-[13px] text-surface-muted">
+                  Loading preview…
+                </div>
+              )}
+              {pdfPreviewFetchError && !pdfPreviewLoading && (
+                <div className="flex flex-1 flex-col items-center justify-center gap-2 px-6 py-8 text-center text-[13px] text-red-600">
+                  {pdfPreviewFetchError}
+                </div>
+              )}
+              {!pdfPreviewLoading && !pdfPreviewFetchError && pdfPreviewObjectUrl && (
+                <iframe
+                  title="Quotation PDF preview"
+                  src={pdfPreviewObjectUrl}
+                  className="min-h-[320px] w-full flex-1 border-0 lg:min-h-0"
+                />
+              )}
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-surface-border px-6 py-4">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              disabled={pdfEditBusy}
+              onClick={() => void clearPdfOverrides()}
+            >
+              Clear PDF overrides
+            </Button>
+            <div className="flex gap-2">
+              <Button type="button" variant="outline" size="sm" disabled={pdfEditBusy} onClick={() => setPdfEditOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="button" size="sm" disabled={pdfEditBusy} onClick={() => void savePdfDisplay()}>
+                {pdfEditBusy ? 'Saving…' : 'Save & regenerate PDF'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </PageShell>
   )
 }

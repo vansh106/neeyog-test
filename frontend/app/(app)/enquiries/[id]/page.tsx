@@ -10,11 +10,11 @@ import EmptyState from '@/components/ui/EmptyState'
 import AIReasoningPanel from '@/components/ui/AIReasoningPanel'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Progress } from '@/components/ui/progress'
-import { buttonVariants } from '@/components/ui/button'
+import { Button, buttonVariants } from '@/components/ui/button'
 import { ClientVerificationPanel } from '@/components/upload/ClientVerificationPanel'
 import ManualEntryForm from '@/components/upload/ManualEntryForm'
 import { useEnquiry } from '@/lib/queries'
-import { enquiriesApi, erpExportUrl, processManualDropdown, quotationsApi } from '@/lib/api'
+import { downloadQuotationPdf, enquiriesApi, erpExportUrl, processManualDropdown } from '@/lib/api'
 import { useQueryClient } from '@tanstack/react-query'
 import { formatCurrency, formatRelativeTime } from '@/lib/utils'
 import type {
@@ -314,11 +314,17 @@ export default function EnquiryDetailPage() {
     return null
   }, [parsed])
 
+  const quoteNumber = useMemo(() => {
+    const v = parsed?.quote_number
+    return typeof v === 'string' && v.trim() ? v.trim() : null
+  }, [parsed])
+
   const reasoningSteps = useMemo(() => toReasoningSteps(ext?.ai_reasoning ?? null), [ext?.ai_reasoning])
 
   const [clientContext, setClientContext] = useState<ClientVerificationContext | null>(null)
   const [exportBusy, setExportBusy] = useState(false)
   const [exportError, setExportError] = useState<string | null>(null)
+  const [pdfDownloadBusy, setPdfDownloadBusy] = useState(false)
 
   const [showManualCompletion, setShowManualCompletion] = useState(false)
   const [manualBusy, setManualBusy] = useState(false)
@@ -872,15 +878,22 @@ export default function EnquiryDetailPage() {
                 >
                   View Quotation →
                 </Link>
-                <a
-                  href={quotationsApi.getPdfUrl(quoteId)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className={buttonVariants({ variant: 'secondary', size: 'sm', className: 'gap-1.5' })}
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  disabled={pdfDownloadBusy}
+                  className="gap-1.5"
+                  onClick={() => {
+                    setPdfDownloadBusy(true)
+                    downloadQuotationPdf(quoteId, quoteNumber ? `${quoteNumber}.pdf` : undefined)
+                      .catch((e: unknown) => window.alert(e instanceof Error ? e.message : 'Download failed'))
+                      .finally(() => setPdfDownloadBusy(false))
+                  }}
                 >
                   <Download className="size-3.5" />
-                  Download PDF
-                </a>
+                  {pdfDownloadBusy ? 'Preparing…' : 'Download PDF'}
+                </Button>
               </div>
             </section>
           )}

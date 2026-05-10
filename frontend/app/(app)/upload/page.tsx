@@ -25,7 +25,7 @@ import ManualEntryForm from '@/components/upload/ManualEntryForm'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
-import { enquiriesApi, processManualDropdown, quotationsApi, uploadEmailStream } from '@/lib/api'
+import { downloadQuotationPdf, enquiriesApi, processManualDropdown, uploadEmailStream } from '@/lib/api'
 import { Permissions } from '@/lib/permissions'
 import { useEmailSyncStatus, useTriggerEmailSync } from '@/lib/queries'
 import { cn, formatCurrency } from '@/lib/utils'
@@ -130,6 +130,7 @@ function UploadPageInner() {
   const [clientVerified, setClientVerified] = useState<ClientVerificationResponse | null>(null)
 
   const [prefillManualNotes, setPrefillManualNotes] = useState<string | null>(null)
+  const [pdfDownloadBusy, setPdfDownloadBusy] = useState(false)
 
   useEffect(() => {
     if (tabParam === 'manual') setActiveTab('manual')
@@ -398,16 +399,25 @@ function UploadPageInner() {
                   <TotalsBlock result={extended!} />
                   <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:justify-center">
                     {result.quotation_id ? (
-                      <a
-                        href={quotationsApi.getPdfUrl(result.quotation_id)}
-                        download
+                      <Button
+                        type="button"
+                        disabled={pdfDownloadBusy}
                         className={cn(
                           buttonVariants({ variant: 'default' }),
                           'h-12 w-full bg-brand-green-500 text-white hover:bg-brand-green-600 sm:w-auto sm:min-w-[160px]',
                         )}
+                        onClick={() => {
+                          setPdfDownloadBusy(true)
+                          downloadQuotationPdf(
+                            result.quotation_id!,
+                            extended?.quote_number ? `${extended.quote_number}.pdf` : undefined,
+                          )
+                            .catch((e: unknown) => window.alert(e instanceof Error ? e.message : 'Download failed'))
+                            .finally(() => setPdfDownloadBusy(false))
+                        }}
                       >
-                        Download PDF
-                      </a>
+                        {pdfDownloadBusy ? 'Preparing…' : 'Download PDF'}
+                      </Button>
                     ) : (
                       <Button disabled className="h-12 w-full bg-brand-green-500/50 text-white sm:w-auto sm:min-w-[160px]">
                         Download PDF

@@ -3,7 +3,6 @@
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
-import { useQueries } from '@tanstack/react-query'
 import { Download, Eye, FileText, Inbox } from 'lucide-react'
 import PageShell from '@/components/layout/PageShell'
 import StatusBadge from '@/components/ui/StatusBadge'
@@ -18,9 +17,9 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { useEnquiries, useQuotations } from '@/lib/queries'
-import { erpExportUrl, quotationsApi } from '@/lib/api'
+import { erpExportUrl } from '@/lib/api'
 import { formatRelativeTime, cn } from '@/lib/utils'
-import type { EnquiryListItem, Quotation } from '@/types'
+import type { EnquiryListItem } from '@/types'
 
 type Pipeline = 'all' | 'complete' | 'incomplete' | 'pending' | 'failed'
 
@@ -143,24 +142,13 @@ export default function EnquiriesPage() {
 
   const { data: quotationRows = [] } = useQuotations({ limit: 100 })
 
-  const detailQueries = useQueries({
-    queries: quotationRows.map((q) => ({
-      queryKey: ['quotation', q.quotation_id] as const,
-      queryFn: () =>
-        quotationsApi.getQuotation(q.quotation_id) as unknown as Promise<Quotation>,
-      staleTime: 120_000,
-    })),
-  })
-
   const enquiryToQuotationId = useMemo(() => {
     const m = new Map<string, string>()
-    detailQueries.forEach((q, i) => {
-      const d = q.data
-      const row = quotationRows[i]
-      if (d?.enquiry_id && row) m.set(d.enquiry_id, row.quotation_id)
-    })
+    for (const row of quotationRows) {
+      if (row.enquiry_id) m.set(row.enquiry_id, row.quotation_id)
+    }
     return m
-  }, [detailQueries, quotationRows])
+  }, [quotationRows])
 
   const chips: { key: Pipeline; label: string }[] = [
     { key: 'all', label: 'All' },

@@ -66,6 +66,21 @@ export interface QuotationLineItem {
   catalog_row_id?: string | null
 }
 
+/** PDF-only labels for a quotation (does not change catalog rows or pricing math). */
+export interface QuotationPdfDisplayOverrides {
+  lines?: Array<{ description?: string; size?: string; product_name?: string } | null>
+  /** When present, replaces quotation notes on the PDF only. */
+  notes?: string
+}
+
+export interface QuotationClientEmployee {
+  id: string
+  full_name: string
+  email?: string | null
+  phone?: string | null
+  designation?: string | null
+}
+
 export interface Quotation {
   quotation_id: string
   enquiry_id: string
@@ -74,6 +89,8 @@ export interface Quotation {
   client_company: string | null
   client_email: string | null
   client_phone: string | null
+  client_employee_id?: string | null
+  client_employee?: QuotationClientEmployee | null
   line_items: QuotationLineItem[]
   subtotal: number
   gst_rate: number
@@ -84,8 +101,10 @@ export interface Quotation {
   total_amount: number
   validity_days: number
   status: string
+  status_remarks?: string | null
   pdf_path: string | null
   notes: string | null
+  pdf_display_overrides?: QuotationPdfDisplayOverrides | null
   created_at: string | null
 }
 
@@ -141,10 +160,14 @@ export interface QuotationAuditResponse {
 
 export interface QuotationListItem {
   quotation_id: string
+  enquiry_id: string
+  client_employee_id?: string | null
   quote_number: string
   client_name: string
+  client_company?: string | null
   total_amount: number
   status: string
+  status_remarks?: string | null
   created_at: string
 }
 
@@ -202,6 +225,17 @@ export const CLIENT_INDUSTRY_OPTIONS = [
   'General Manufacturing',
   'Other',
 ] as const
+
+/** Contact person at a client branch (quotes can be tied to a specific employee). */
+export interface ClientEmployeeResponse {
+  id: string
+  branch_id: string
+  full_name: string
+  email?: string | null
+  phone?: string | null
+  designation?: string | null
+  is_active?: boolean
+}
 
 export interface BranchResponse {
   id: string
@@ -339,6 +373,10 @@ export interface ManualEnquiryForm {
   clientMode: 'existing' | 'new'
   /** Selected branch id (UUID) for DB clients; dummy-* for demo clients. */
   selectedClientId: string | null
+  /** DB client_employees.id — quote is for this contact (must belong to selected branch). */
+  clientEmployeeId?: string | null
+  /** When creating a new company, optional extra contact stored as branch employee and used for the quote. */
+  newClientEmployee?: { fullName: string; email?: string | null }
   newClient: {
     company_name: string
     gst_number: string

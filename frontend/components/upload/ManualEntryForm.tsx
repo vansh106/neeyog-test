@@ -21,6 +21,7 @@ import {
 import type {
   AssembledProduct,
   BranchResponse,
+  ClientEmployeeResponse,
   CompanyResponse,
   ManualEnquiryForm,
   ManualLineItem,
@@ -28,6 +29,8 @@ import type {
   SupplierResponse,
 } from '@/types'
 import { CLIENT_INDUSTRY_OPTIONS } from '@/types'
+
+const BRANCH_PRIMARY_CONTACT = '__branch_primary__'
 
 type MatcherClientHint = {
   mode: 'existing' | 'new'
@@ -142,6 +145,7 @@ function buildEmailText(
   existingCompany: CompanyResponse | null,
   existingBranch: BranchResponse | null,
   productCalcs: ProductPricingCalc[],
+  quoteEmployee: ClientEmployeeResponse | null,
 ): string {
   let company_name = ''
   let branch_name = ''
@@ -167,6 +171,12 @@ function buildEmailText(
     phone = existingBranch.phone || ''
     email = existingBranch.email || ''
     address = existingBranch.address_line1 || ''
+    if (quoteEmployee) {
+      contact_name = quoteEmployee.full_name
+      designation = quoteEmployee.designation || ''
+      phone = quoteEmployee.phone || phone
+      email = quoteEmployee.email || email
+    }
   } else if (form.clientMode === 'new') {
     const nc = form.newClient
     company_name = nc.company_name
@@ -180,6 +190,11 @@ function buildEmailText(
     phone = nc.phone
     email = nc.email
     address = nc.address_line1 || nc.address
+    const ne = form.newClientEmployee
+    if (ne?.fullName?.trim()) {
+      contact_name = ne.fullName.trim()
+      if (ne.email?.trim()) email = ne.email.trim()
+    }
   }
 
   const subject = `Manual Enquiry — ${company_name || 'Client'}`
@@ -379,6 +394,15 @@ export default function ManualEntryForm({
 
   const [errors, setErrors] = useState<Record<string, string>>({})
 
+  const [branchEmployees, setBranchEmployees] = useState<ClientEmployeeResponse[]>([])
+  const [employeesLoading, setEmployeesLoading] = useState(false)
+  const [selectedClientEmployeeId, setSelectedClientEmployeeId] = useState<string | null>(null)
+  const [inlineNewEmployeeName, setInlineNewEmployeeName] = useState('')
+  const [inlineNewEmployeeEmail, setInlineNewEmployeeEmail] = useState('')
+  const [addEmployeeSaving, setAddEmployeeSaving] = useState(false)
+  const [newClientQuoteEmployeeName, setNewClientQuoteEmployeeName] = useState('')
+  const [newClientQuoteEmployeeEmail, setNewClientQuoteEmployeeEmail] = useState('')
+
   const [suppliers, setSuppliers] = useState<SupplierResponse[]>([])
   const [productCalcs, setProductCalcs] = useState<ProductPricingCalc[]>([])
   const [pricingLoading, setPricingLoading] = useState(false)
@@ -435,6 +459,34 @@ export default function ManualEntryForm({
       setCompanyMenuOpen(false)
     }
   }, [clientMode])
+
+  useEffect(() => {
+    setSelectedClientEmployeeId(null)
+    setBranchEmployees([])
+    if (clientMode !== 'existing' || !selectedCompany || !selectedBranchId) return
+    if (selectedBranchId.startsWith('dummy-')) return
+    let cancelled = false
+    setEmployeesLoading(true)
+    clientsApi
+      .listBranchEmployees(selectedCompany.id, selectedBranchId)
+      .then((rows) => {
+        if (!cancelled) setBranchEmployees(rows)
+      })
+      .catch(() => {
+        if (!cancelled) setBranchEmployees([])
+      })
+      .finally(() => {
+        if (!cancelled) setEmployeesLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [clientMode, selectedCompany?.id, selectedBranchId])
+
+  const selectedQuoteEmployee = useMemo((): ClientEmployeeResponse | null => {
+    if (!selectedClientEmployeeId) return null
+    return branchEmployees.find((e) => e.id === selectedClientEmployeeId) ?? null
+  }, [branchEmployees, selectedClientEmployeeId])
 
   useEffect(() => {
     let cancelled = false
@@ -769,6 +821,21 @@ export default function ManualEntryForm({
       priority: 'Normal',
       notes: (prefillNotesFromEnquiry || '').trim(),
     }
+    if (
+      clientMode === 'existing' &&
+      selectedBranchId &&
+      !selectedBranchId.startsWith('dummy-') &&
+      selectedClientEmployeeId
+    ) {
+      form.clientEmployeeId = selectedClientEmployeeId
+    }
+    const nqName = newClientQuoteEmployeeName.trim()
+    if (clientMode === 'new' && nqName) {
+      form.newClientEmployee = {
+        fullName: nqName,
+        email: newClientQuoteEmployeeEmail.trim() || undefined,
+      }
+    }
     if (typeof window !== 'undefined' && typeof console !== 'undefined') {
       console.log(
         '[ManualEntryForm] buildEmailText:\n' +
@@ -778,6 +845,7 @@ export default function ManualEntryForm({
             selectedCompany,
             selectedBranch,
             productCalcs,
+            selectedQuoteEmployee,
           ),
       )
     }
@@ -1058,6 +1126,97 @@ export default function ManualEntryForm({
                         .filter(Boolean)
                         .join(' · ')}
                     </p>
+
+                    {!selectedBranch.id.startsWith('dummy-') && selectedCompany ? (
+                      <div className="mt-4 space-y-3 border-t border-surface-border pt-4">
+                        <div className="text-[10px] font-medium uppercase tracking-wide text-[#8A9488]">
+                          Quote for (contact at this branch)
+                        </div>
+                        <Select
+                          value={selectedClientEmployeeId ?? BRANCH_PRIMARY_CONTACT}
+                          onValueChange={(v) =>
+                            setSelectedClientEmployeeId(v === BRANCH_PRIMARY_CONTACT ? null : v)
+                          }
+                          disabled={employeesLoading}
+                        >
+                          <SelectTrigger className="h-10">
+                            <SelectValue
+                              placeholder={employeesLoading ? 'Loading contacts…' : 'Select contact'}
+                            />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value={BRANCH_PRIMARY_CONTACT}>
+                              Branch primary contact (above)
+                            </SelectItem>
+                            {branchEmployees.map((e) => (
+                              <SelectItem key={e.id} value={e.id}>
+                                {e.full_name}
+                                {e.email ? ` · ${e.email}` : ''}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <div className="rounded-md bg-surface-page p-3">
+                          <p className="mb-2 text-[11px] font-medium text-gray-800">Add contact to this branch</p>
+                          <div className="grid gap-2 sm:grid-cols-2">
+                            <Input
+                              value={inlineNewEmployeeName}
+                              onChange={(e) => setInlineNewEmployeeName(e.target.value)}
+                              placeholder="Full name *"
+                              className="h-9 text-[13px]"
+                            />
+                            <Input
+                              value={inlineNewEmployeeEmail}
+                              onChange={(e) => setInlineNewEmployeeEmail(e.target.value)}
+                              placeholder="Email (optional)"
+                              type="email"
+                              className="h-9 text-[13px]"
+                            />
+                          </div>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="secondary"
+                            className="mt-2 h-8 text-[12px]"
+                            disabled={
+                              addEmployeeSaving ||
+                              !inlineNewEmployeeName.trim() ||
+                              (inlineNewEmployeeEmail.trim() !== '' &&
+                                !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(inlineNewEmployeeEmail.trim()))
+                            }
+                            onClick={async () => {
+                              const name = inlineNewEmployeeName.trim()
+                              if (!name || !selectedCompany || selectedBranch.id.startsWith('dummy-')) return
+                              setAddEmployeeSaving(true)
+                              try {
+                                const created = await clientsApi.createBranchEmployee(
+                                  selectedCompany.id,
+                                  selectedBranch.id,
+                                  {
+                                    full_name: name,
+                                    email: inlineNewEmployeeEmail.trim() || undefined,
+                                  },
+                                )
+                                const rows = await clientsApi.listBranchEmployees(
+                                  selectedCompany.id,
+                                  selectedBranch.id,
+                                )
+                                setBranchEmployees(rows)
+                                setSelectedClientEmployeeId(created.id)
+                                setInlineNewEmployeeName('')
+                                setInlineNewEmployeeEmail('')
+                              } catch {
+                                /* toast optional */
+                              } finally {
+                                setAddEmployeeSaving(false)
+                              }
+                            }}
+                          >
+                            {addEmployeeSaving ? 'Saving…' : 'Save & select for this quote'}
+                          </Button>
+                        </div>
+                      </div>
+                    ) : null}
                   </div>
                 ) : null}
               </div>
@@ -1172,6 +1331,30 @@ export default function ManualEntryForm({
                     className={cn('mt-1 h-10', errors.email && 'border-red-300')}
                   />
                   {errors.email && <p className="text-[12px] text-red-600">{errors.email}</p>}
+                </div>
+                <div className="sm:col-span-2 rounded-lg border border-dashed border-surface-border bg-white/60 p-3">
+                  <div className="text-[10px] font-medium uppercase tracking-wide text-[#8A9488]">
+                    Quote for — different contact (optional)
+                  </div>
+                  <p className="mb-2 mt-1 text-[11px] text-surface-muted">
+                    Saves as a branch contact person and uses them on this quotation. Leave blank to use the branch
+                    contact above.
+                  </p>
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    <Input
+                      value={newClientQuoteEmployeeName}
+                      onChange={(e) => setNewClientQuoteEmployeeName(e.target.value)}
+                      className="h-9 text-[13px]"
+                      placeholder="Employee full name"
+                    />
+                    <Input
+                      value={newClientQuoteEmployeeEmail}
+                      onChange={(e) => setNewClientQuoteEmployeeEmail(e.target.value)}
+                      className="h-9 text-[13px]"
+                      placeholder="Email (optional)"
+                      type="email"
+                    />
+                  </div>
                 </div>
                 <div className="sm:col-span-2">
                   <div className="text-[10px] font-medium uppercase tracking-wide text-[#8A9488]">

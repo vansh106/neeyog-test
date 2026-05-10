@@ -132,7 +132,17 @@ api.interceptors.response.use(
       }
       throw new Error(formatHttpDetail(error.response.data?.detail) || `Request failed (${status})`)
     }
-    throw new Error('Cannot reach API on localhost:8000')
+    const base = apiBaseURL()
+    const axiosMsg = error instanceof Error ? error.message : String(error)
+    const code = (error as { code?: string })?.code
+    const via = base
+      ? `Calling API directly at ${base} (NEXT_PUBLIC_API_URL).`
+      : 'Using same-origin /api (Next.js rewrites → BACKEND_INTERNAL_URL / 127.0.0.1:8000).'
+    const hint =
+      'Start the FastAPI server on port 8000. If you use `npm run dev`, add to frontend/.env.local: BACKEND_INTERNAL_URL=http://127.0.0.1:8000 then restart Next.js. Test: curl http://127.0.0.1:8000/health'
+    throw new Error(
+      `Cannot reach API — ${[code, axiosMsg].filter(Boolean).join(' ')}. ${via} ${hint}`,
+    )
   },
 )
 
@@ -150,6 +160,64 @@ function patch<T>(url: string, data?: unknown): Promise<T> {
 
 function postFormData<T>(url: string, formData: FormData): Promise<T> {
   return api.post(url, formData) as unknown as Promise<T>
+}
+
+/**
+ * Fetch quotation PDF bytes with Bearer auth (same as other API calls).
+ * A plain `<iframe src={apiUrl}>` cannot send Authorization headers, so previews must use blob URLs.
+ */
+export async function fetchQuotationPdfBlob(quotationId: string): Promise<Blob> {
+  const blob = (await api.get(`/api/quotations/${encodeURIComponent(quotationId)}/pdf`, {
+    responseType: 'blob',
+  })) as unknown as Blob
+  if (!(blob instanceof Blob)) throw new Error('Invalid PDF response')
+
+  const magic = await blob.slice(0, 4).text()
+  if (magic !== '%PDF') {
+    const text = await blob.text()
+    try {
+      const j = JSON.parse(text) as { detail?: unknown }
+      const d = j.detail
+      throw new Error(typeof d === 'string' ? d : 'Could not load PDF')
+    } catch (e) {
+      if (e instanceof SyntaxError) {
+        throw new Error('Could not load PDF')
+      }
+      throw e
+    }
+  }
+  return blob
+}
+
+/** Triggers a file download with Bearer auth (plain `<a href>` cannot send the token). */
+export async function downloadQuotationPdf(quotationId: string, filename?: string): Promise<void> {
+  const blob = await fetchQuotationPdfBlob(quotationId)
+  const safeName = (filename || `quotation_${quotationId.slice(0, 8)}`).replace(/[/\\?%*:|"<>]/g, '-')
+  const name = safeName.toLowerCase().endsWith('.pdf') ? safeName : `${safeName}.pdf`
+  const url = URL.createObjectURL(blob)
+  try {
+    const a = document.createElement('a')
+    a.href = url
+    a.download = name
+    a.rel = 'noopener'
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+  } finally {
+    URL.revokeObjectURL(url)
+  }
+}
+
+/** Opens the PDF in a new tab using an authenticated fetch + blob URL. */
+export async function openQuotationPdfInNewTab(quotationId: string): Promise<void> {
+  const blob = await fetchQuotationPdfBlob(quotationId)
+  const url = URL.createObjectURL(blob)
+  const w = window.open(url, '_blank', 'noopener,noreferrer')
+  if (!w) {
+    URL.revokeObjectURL(url)
+    throw new Error('Pop-up blocked — allow pop-ups to open the PDF')
+  }
+  window.setTimeout(() => URL.revokeObjectURL(url), 120_000)
 }
 
 export const enquiriesApi = {
@@ -186,10 +254,25 @@ export const quotationsApi = {
   getQuotation: <T = unknown>(id: string) => get<T>(`/api/quotations/${id}`),
   updateLineItems: <T = unknown>(id: string, body: { lineItems: unknown[] }) =>
     patch<T>(`/api/quotations/${id}`, body),
+  updatePdfDisplay: <T = unknown>(id: string, body: { pdf_display_overrides: Record<string, unknown> | null }) =>
+    patch<T>(`/api/quotations/${id}/pdf-display`, body),
   getAudit: <T = unknown>(id: string, limit: number = 25) =>
     get<T>(`/api/quotations/${id}/audit`, { limit }),
-  listQuotations: <T = unknown>(params?: { limit?: number; offset?: number }) =>
-    get<T>('/api/quotations/', params as Record<string, unknown>),
+  listQuotations: <T = unknown>(
+    params?: {
+      limit?: number
+      offset?: number
+      search?: string
+      client_name?: string
+      status?: string
+      date_from?: string
+      date_to?: string
+    },
+  ) => get<T>('/api/quotations/', params as Record<string, unknown>),
+  updateCrmStatus: <T = unknown>(
+    id: string,
+    body: { status: string; status_remarks?: string | null },
+  ) => patch<T>(`/api/quotations/${encodeURIComponent(id)}/crm-status`, body),
   getQuoteHistory: <T = unknown>(
     params: {
       category: string
@@ -264,6 +347,19 @@ export const clientsApi = {
     patch<import('@/types').BranchResponse>(
       `/api/clients/${companyId}/branches/${branchId}/deactivate`,
       {},
+    ),
+  listBranchEmployees: (companyId: string, branchId: string) =>
+    get<import('@/types').ClientEmployeeResponse[]>(
+      `/api/clients/${companyId}/branches/${branchId}/employees`,
+    ),
+  createBranchEmployee: (
+    companyId: string,
+    branchId: string,
+    data: { full_name: string; email?: string | null; phone?: string | null; designation?: string | null },
+  ) =>
+    post<import('@/types').ClientEmployeeResponse>(
+      `/api/clients/${companyId}/branches/${branchId}/employees`,
+      data,
     ),
 }
 

@@ -80,11 +80,28 @@ export function useUploadEmail() {
   })
 }
 
-export function useQuotations(params?: { limit?: number; offset?: number }) {
+export function useQuotations(params?: {
+  limit?: number
+  offset?: number
+  search?: string
+  client_name?: string
+  status?: string
+  date_from?: string
+  date_to?: string
+}) {
   return useQuery<QuotationListItem[]>({
     queryKey: ['quotations', params],
     queryFn: () => quotationsApi.listQuotations<QuotationListItem[]>(params),
     staleTime: 30000,
+  })
+}
+
+/** One fetch (no search/filters in query) for client-side filtering on the listing page. */
+export function useQuotationsListingDataset(limit: number = 2000) {
+  return useQuery<QuotationListItem[]>({
+    queryKey: ['quotations', 'listing_dataset', limit],
+    queryFn: () => quotationsApi.listQuotations<QuotationListItem[]>({ limit }),
+    staleTime: 60_000,
   })
 }
 
