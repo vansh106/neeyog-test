@@ -5,7 +5,6 @@ refinement can be layered later without changing the persisted ``matcher`` shape
 """
 
 from __future__ import annotations
-
 import json
 import re
 from typing import Any
@@ -129,45 +128,96 @@ def _email_mentions_any(norm_email: str, values: list[str]) -> bool:
     return False
 
 
-async def run_matcher_for_enquiry(enquiry: Enquiry, db: AsyncSession) -> dict[str, Any]:
-    raw = (enquiry.raw_input or "").strip()
-    norm = _norm_text(raw)
+# Start of a numbered RFQ line (Item 1:, Line 2:, SR No. 1, …)
+_RFQ_ITEM_HEAD = re.compile(
+    r"(?im)^[\s·\-\*]*(?:item|line|sr\.?\s*no\.?|s\.?\s*n[o]?\.?)\s*[:\-]?\s*(\d+)\s*[:\.\)\-]",
+)
 
-    catalog_key, product_label = _pick_catalog_key(raw)
-    steps = list(CASCADE_STEPS.get(catalog_key, [])) if catalog_key else []
 
-    model = SHEET_MODEL_BY_KEY.get(catalog_key) if catalog_key else None
+def _split_rfq_item_blocks(raw: str) -> list[str]:
+    """Split body into one string per RFQ line when multiple Item N: / Line N: blocks exist."""
+    text = (raw or "").strip()
+    if not text:
+        return []
+    matches = list(_RFQ_ITEM_HEAD.finditer(text))
+    if len(matches) <= 1:
+        return [text]
+    blocks: list[str] = []
+    for i, m in enumerate(matches):
+        start = m.start()
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+        chunk = text[start:end].strip()
+        if chunk:
+            blocks.append(chunk)
+    return blocks if blocks else [text]
 
+
+def _extract_quantity_from_segment(segment: str) -> int:
+    m = re.search(r"(?i)quantity\s*[:\-]?\s*(\d+)", segment or "")
+    if m:
+        return max(1, int(m.group(1)))
+    m2 = re.search(r"(?i)\bqty\s*[:\-]?\s*(\d+)", segment or "")
+    if m2:
+        return max(1, int(m2.group(1)))
+    return 1
+
+
+async def _analyze_sheet_shape(
+    model: type,
+    db: AsyncSession,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[tuple[str, list[str]]]]:
+    """Constants, derived OD columns, and multi-value columns (with sample values) for a sheet."""
     constant_columns: list[dict[str, Any]] = []
     derived_columns: list[dict[str, Any]] = []
-    ambiguous_groups: list[dict[str, Any]] = []
-    filled_cascade: dict[str, str] = {}
-    missing_cascade_keys: list[str] = []
+    multi_cols: list[tuple[str, list[str]]] = []
+    cols = _model_columns(model)
+    for col in cols:
+        if _is_od_column(col):
+            derived_columns.append(
+                {
+                    "key": col,
+                    "derived_from": "valve_size",
+                    "note": "OD follows valve size in masters — not matched from email text.",
+                }
+            )
+            continue
+        dc = await _distinct_count(db, model, col)
+        if dc <= 1:
+            r0 = await db.execute(select(getattr(model, col)).where(getattr(model, col).isnot(None)).limit(1))
+            row = r0.first()
+            val = str(row[0]).strip() if row and row[0] is not None else ""
+            constant_columns.append({"key": col, "value": val, "distinct_count": dc})
+        else:
+            tops = await _top_values(db, model, col, limit=15)
+            multi_cols.append((col, tops))
+    return constant_columns, derived_columns, multi_cols
 
+
+async def _match_segment_cascade(
+    segment: str,
+    full_raw: str,
+    steps: list[str],
+    model: type | None,
+    constant_columns: list[dict[str, Any]],
+    derived_columns: list[dict[str, Any]],
+    multi_cols: list[tuple[str, list[str]]],
+    db: AsyncSession,
+) -> tuple[dict[str, str], list[dict[str, Any]], list[str]]:
+    """Fill cascade fields for one RFQ line using only that line's text (+ masters)."""
+    seg_norm = _norm_text(segment)
+    full_norm = _norm_text(full_raw)
+    filled: dict[str, str] = {}
+
+    for c in constant_columns:
+        filled[str(c["key"])] = str(c.get("value") or "").strip()
+
+    for col, tops in multi_cols:
+        if _email_mentions_any(seg_norm, tops):
+            best = next((t for t in tops if _norm_text(t) in seg_norm), tops[0])
+            filled[col] = best
+
+    ambiguous: list[dict[str, Any]] = []
     if model is not None:
-        cols = _model_columns(model)
-        for col in cols:
-            if _is_od_column(col):
-                derived_columns.append(
-                    {
-                        "key": col,
-                        "derived_from": "valve_size",
-                        "note": "OD follows valve size in masters — not matched from email text.",
-                    }
-                )
-                continue
-            dc = await _distinct_count(db, model, col)
-            if dc <= 1:
-                r0 = await db.execute(select(getattr(model, col)).where(getattr(model, col).isnot(None)).limit(1))
-                row = r0.first()
-                val = str(row[0]).strip() if row and row[0] is not None else ""
-                constant_columns.append({"key": col, "value": val, "distinct_count": dc})
-            else:
-                tops = await _top_values(db, model, col, limit=15)
-                if _email_mentions_any(norm, tops):
-                    best = next((t for t in tops if _norm_text(t) in norm), tops[0])
-                    filled_cascade[col] = best
-
         for amb_col in ("diaphragm", "seat", "ball_disc"):
             if not hasattr(model, amb_col):
                 continue
@@ -175,11 +225,12 @@ async def run_matcher_for_enquiry(enquiry: Enquiry, db: AsyncSession) -> dict[st
             if dc_all <= 1:
                 continue
             tops = await _top_values(db, model, amb_col, limit=10)
-            if _email_mentions_any(norm, tops):
-                hit = next((t for t in tops if _norm_text(t) in norm), tops[0])
-                filled_cascade.setdefault(amb_col, hit)
+            if _email_mentions_any(seg_norm, tops):
+                hit = next((t for t in tops if _norm_text(t) in seg_norm), tops[0])
+                if hit:
+                    filled.setdefault(amb_col, hit)
                 continue
-            ambiguous_groups.append(
+            ambiguous.append(
                 {
                     "column": amb_col,
                     "options": tops,
@@ -187,45 +238,110 @@ async def run_matcher_for_enquiry(enquiry: Enquiry, db: AsyncSession) -> dict[st
                 }
             )
 
-    # Heuristic fills from email for cascade steps not yet filled
     for step in steps:
-        if step in filled_cascade:
+        if step in filled and str(filled.get(step, "")).strip():
             continue
         if any(c["key"] == step for c in constant_columns):
-            filled_cascade[step] = next(c["value"] for c in constant_columns if c["key"] == step)
+            filled[step] = next((str(c["value"]) for c in constant_columns if c["key"] == step), "")
             continue
         if any(d["key"] == step for d in derived_columns):
             continue
-        # DN / size
         if step == "valve_size":
-            m = re.search(r"dn\s*(\d+)", raw, re.I)
+            m = re.search(r"dn\s*(\d+)", segment, re.I)
             if m:
-                filled_cascade[step] = f"DN {m.group(1)}"
+                filled[step] = f"DN {m.group(1)}"
                 continue
-            m2 = re.search(r"(\d+(?:\.\d+)?)\s*mm\b", raw, re.I)
+            m2 = re.search(r"(\d+(?:\.\d+)?)\s*mm\b", segment, re.I)
             if m2:
-                filled_cascade[step] = f"{m2.group(1)}mm"
+                filled[step] = f"{m2.group(1)}mm"
                 continue
-        # OD hints (TC end 25 / TC 25 etc). Even if OD is derivable, capturing it improves sheet inference.
         if step in ("tc_od", "pipe_od"):
-            m_od = re.search(r"\btc\s*end\s*(\d+(?:\.\d+)?)\b", raw, re.I)
+            m_od = re.search(r"\btc\s*end\s*(\d+(?:\.\d+)?)\b", segment, re.I)
             if not m_od:
-                m_od = re.search(r"\btc\s*(\d+(?:\.\d+)?)\b", raw, re.I)
+                m_od = re.search(r"\btc\s*(\d+(?:\.\d+)?)\b", segment, re.I)
+            if not m_od:
+                m_od = re.search(r"\btc\s*(\d+(?:\.\d+)?)\b", full_raw, re.I)
             if m_od:
-                filled_cascade[step] = m_od.group(1)
+                filled[step] = m_od.group(1)
                 continue
         if model is not None and hasattr(model, step):
             tops = await _top_values(db, model, step, limit=20)
-            hit = next((t for t in tops if _norm_text(t) and _norm_text(t) in norm), None)
+            hit = next((t for t in tops if _norm_text(t) and _norm_text(t) in seg_norm), None)
+            if not hit:
+                hit = next((t for t in tops if _norm_text(t) and _norm_text(t) in full_norm), None)
             if hit:
-                filled_cascade[step] = hit
+                filled[step] = hit
 
+    missing = []
     for step in steps:
-        if step not in filled_cascade and not any(d["key"] == step for d in derived_columns):
-            if not any(c["key"] == step for c in constant_columns):
-                missing_cascade_keys.append(step)
+        if step in filled and str(filled.get(step, "")).strip():
+            continue
+        if any(d["key"] == step for d in derived_columns):
+            continue
+        if any(c["key"] == step for c in constant_columns):
+            v = next((str(c["value"]) for c in constant_columns if c["key"] == step), "")
+            if v.strip():
+                continue
+        missing.append(step)
 
-    product_completeness = "complete" if not ambiguous_groups and not missing_cascade_keys else "incomplete"
+    return filled, ambiguous, missing
+
+
+async def run_matcher_for_enquiry(enquiry: Enquiry, db: AsyncSession) -> dict[str, Any]:
+    raw = (enquiry.raw_input or "").strip()
+
+    catalog_key, product_label = _pick_catalog_key(raw)
+    steps = list(CASCADE_STEPS.get(catalog_key, [])) if catalog_key else []
+
+    model = SHEET_MODEL_BY_KEY.get(catalog_key) if catalog_key else None
+
+    segments = _split_rfq_item_blocks(raw)
+    if not segments:
+        segments = [raw]
+
+    constant_columns: list[dict[str, Any]] = []
+    derived_columns: list[dict[str, Any]] = []
+    multi_cols: list[tuple[str, list[str]]] = []
+    if model is not None:
+        constant_columns, derived_columns, multi_cols = await _analyze_sheet_shape(model, db)
+
+    line_items: list[dict[str, Any]] = []
+    ambiguous_groups: list[dict[str, Any]] = []
+    for i, segment in enumerate(segments):
+        fc, amb, miss = await _match_segment_cascade(
+            segment,
+            raw,
+            steps,
+            model,
+            constant_columns,
+            derived_columns,
+            multi_cols,
+            db,
+        )
+        qty = _extract_quantity_from_segment(segment)
+        idx = i + 1
+        for g in amb:
+            ambiguous_groups.append({**g, "line_index": idx})
+        line_items.append(
+            {
+                "index": idx,
+                "quantity": qty,
+                "filled_cascade": fc,
+                "ambiguous_groups": amb,
+                "missing_cascade_keys": miss,
+                "snippet": (segment[:600] + "…") if len(segment) > 600 else segment,
+            }
+        )
+
+    filled_cascade: dict[str, str] = dict(line_items[0]["filled_cascade"]) if line_items else {}
+    missing_cascade_keys: list[str] = sorted(
+        {k for li in line_items for k in (li.get("missing_cascade_keys") or [])}
+    )
+    all_complete = all(
+        not (li.get("missing_cascade_keys") or []) and not (li.get("ambiguous_groups") or [])
+        for li in line_items
+    )
+    product_completeness = "complete" if all_complete and not ambiguous_groups else "incomplete"
 
     # Client resolution (dummy DB)
     emails = _extract_emails(raw)
@@ -271,20 +387,29 @@ async def run_matcher_for_enquiry(enquiry: Enquiry, db: AsyncSession) -> dict[st
 
     client_block = matched or {"mode": "suggested_new", "suggested_new_client": suggested_new}
 
-    # Confidence heuristic
-    filled_n = len([k for k in steps if k in filled_cascade])
+    # Confidence heuristic: average fill ratio across RFQ lines
     total_n = max(len(steps), 1)
-    conf = 0.45 + 0.45 * (filled_n / total_n) - (0.12 if ambiguous_groups else 0) - (0.08 if not catalog_key else 0)
+    ratios: list[float] = []
+    for li in line_items:
+        fc_li = li.get("filled_cascade") if isinstance(li.get("filled_cascade"), dict) else {}
+        fn = len([k for k in steps if fc_li.get(k) and str(fc_li[k]).strip()])
+        ratios.append(fn / total_n)
+    avg_fill = sum(ratios) / max(len(ratios), 1) if ratios else 0.0
+    conf = 0.45 + 0.45 * avg_fill - (0.12 if ambiguous_groups else 0) - (0.08 if not catalog_key else 0)
+    if len(line_items) > 1:
+        conf = max(0.15, conf - 0.03)
     conf = max(0.15, min(0.97, conf))
 
     return {
-        "version": 1,
+        "version": 2,
         "product_completeness": product_completeness,
         "confidence": round(conf, 3),
         "catalog_key": catalog_key or None,
         "product_label": product_label or None,
+        "rfq_line_count": len(line_items),
         "cascade_steps": [{"key": s, "label": s.replace("_", " ").title()} for s in steps],
         "filled_cascade": filled_cascade,
+        "line_items": line_items,
         "missing_cascade_keys": missing_cascade_keys,
         "constant_columns": constant_columns,
         "derived_columns": derived_columns,
@@ -315,20 +440,37 @@ async def persist_matcher_on_enquiry(enquiry_id: str, db: AsyncSession) -> Enqui
             pd["client_company"] = str(nc.get("company_name") or pd.get("client_company") or "Unknown").strip()
     if not str(pd.get("client_company") or "").strip():
         pd["client_company"] = infer_company_from_email_raw(e.raw_input or "") or "Unknown"
-    e.parsed_data = pd
     e.confidence_score = float(payload.get("confidence") or 0)
     e.flow_type = "product_complete" if payload.get("product_completeness") == "complete" else "product_incomplete"
     e.status = "matcher_ready"
     fc = payload.get("filled_cascade") or {}
+    lix = payload.get("line_items") if isinstance(payload.get("line_items"), list) else []
+    nlines = len(lix) if lix else 1
     filled_summary = ", ".join(fc.keys()) if isinstance(fc, dict) and fc else "—"
     e.ai_reasoning = json.dumps(
         [
             f"Catalog: {payload.get('product_label') or '—'}",
+            f"RFQ lines detected: {nlines}",
             f"Completeness: {payload.get('product_completeness')}",
-            f"Filled fields: {filled_summary}",
+            f"Line 1 filled fields: {filled_summary}",
         ],
         ensure_ascii=False,
     )
+    pd["products_requested"] = [
+        {
+            "product_description": f"{payload.get('product_label') or 'Product'} — item {li.get('index', i + 1)}",
+            "quantity": li.get("quantity") if isinstance(li.get("quantity"), int) else 1,
+        }
+        for i, li in enumerate(lix)
+    ] if lix else (
+        [
+            {
+                "product_description": str(payload.get("product_label") or "Product"),
+                "quantity": 1,
+            }
+        ]
+    )
+    e.parsed_data = pd
     await db.commit()
     await db.refresh(e)
     return e

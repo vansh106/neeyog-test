@@ -65,6 +65,52 @@ def _normalize_int(x: object, default: int = 1) -> int:
         return default
 
 
+def _normalize_discount_pct(x: object) -> float | None:
+    try:
+        if x is None:
+            return None
+        n = float(x)
+    except (TypeError, ValueError):
+        return None
+    if n < 0:
+        return 0.0
+    if n > 100:
+        return 100.0
+    return n
+
+
+_DESC_FIELDS: list[tuple[str, str]] = [
+    ("variant_type", "Variant Type"),
+    ("product_sheet", "Product Sheet"),
+    ("construction", "Construction"),
+    ("valve_size", "Valve Size"),
+    ("bore_type", "Bore Type"),
+    ("end_connection", "End Connection"),
+    ("pressure", "Pressure"),
+    ("body", "Body"),
+    ("ball_disc", "Ball/Disc"),
+    ("ball", "Ball"),
+    ("stem", "Stem"),
+    ("seat", "Seat"),
+    ("fasteners", "Fasteners"),
+    ("operator", "Operator"),
+    ("operator_model", "Operator Model"),
+    ("operator_size", "Operator Size"),
+    ("sov", "Sov"),
+    ("limit_switch_box", "Lsb"),
+    ("positioner", "Positioner"),
+    ("bracket_coupler", "Bracket/Coupler"),
+]
+
+
+def _build_structured_description(name: str, cascade: dict) -> str:
+    lines = [f"Product : {name or 'Product'}"]
+    for key, label in _DESC_FIELDS:
+        v = str(cascade.get(key) or "").strip() if isinstance(cascade, dict) else ""
+        lines.append(f"{label} : {v or '----'}")
+    return "\n".join(lines)
+
+
 def expand_manual_line_items_to_quote_parts(
     line_items_in: list,
 ) -> tuple[list[dict], list[dict], list[dict], list[dict]]:
@@ -86,21 +132,18 @@ def expand_manual_line_items_to_quote_parts(
             continue
         name = str(sp.get("name") or "Product").strip()
         unit = str(sp.get("unit") or "Nos").strip() or "Nos"
-        unit_price = _clean_float(sp.get("base_price"), 0.0)
+        base_unit_price = _clean_float(sp.get("base_price"), 0.0)
+        customer_discount_pct = _normalize_discount_pct(li.get("customer_discount_pct")) or 0.0
+        customer_discount_amount = round(base_unit_price * (customer_discount_pct / 100.0), 2)
+        unit_price = round(base_unit_price - customer_discount_amount, 2)
         size_inch = sp.get("size_inch")
         size_mm = sp.get("size_mm")
         material = sp.get("material")
 
-        desc_parts = [name]
-        if size_inch is not None or size_mm is not None:
-            inch_part = f'{size_inch}"' if size_inch is not None else ""
-            mm_part = f"({size_mm}mm)" if size_mm is not None else ""
-            sz = " ".join([p for p in [inch_part, mm_part] if p]).strip()
-            if sz:
-                desc_parts.append(sz)
-        if material:
-            desc_parts.append(str(material))
-        description = " — ".join([p for p in desc_parts if p])
+        cascade = li.get("cascadeSelections") or {}
+        if not isinstance(cascade, dict):
+            cascade = {}
+        description = _build_structured_description(name, cascade)
 
         parsed_products.append(
             {
@@ -118,12 +161,11 @@ def expand_manual_line_items_to_quote_parts(
                 "size_inch": size_inch,
                 "size_mm": size_mm,
                 "base_price": unit_price,
+                "base_unit_price": base_unit_price,
+                "customer_discount_pct": customer_discount_pct,
                 "unit": unit,
             }
         )
-        cascade = li.get("cascadeSelections") or {}
-        if not isinstance(cascade, dict):
-            cascade = {}
         cat = str(li.get("category") or "unknown").strip().lower()
         catalog_table = None
         catalog_row_id = None
@@ -141,10 +183,16 @@ def expand_manual_line_items_to_quote_parts(
                 "description": description,
                 "quantity": qty,
                 "unit_price": unit_price,
+                "base_unit_price": base_unit_price,
+                "customer_discount_pct": customer_discount_pct,
+                "customer_discount_amount": customer_discount_amount,
                 "unit": unit,
                 "category": cat,
                 "catalog_table": catalog_table,
                 "catalog_row_id": str(catalog_row_id) if catalog_row_id else None,
+                "component_pricing": li.get("component_pricing")
+                if isinstance(li.get("component_pricing"), dict)
+                else None,
             }
         )
         history_rows.append(
@@ -361,7 +409,7 @@ def _downgrade_matcher_to_incomplete(enquiry: Enquiry, reason: str) -> None:
 
 
 async def try_automatic_quotation_from_matcher(enquiry: Enquiry, db: AsyncSession) -> dict | None:
-    """When matcher is complete, resolve a single catalog row and run manual quote on this enquiry."""
+    """When matcher is complete, resolve catalog row(s) and run manual quote on this enquiry."""
     from services.masters_service import (
         CASCADE_STEPS,
         SHEET_MODEL_BY_KEY,
@@ -379,73 +427,92 @@ async def try_automatic_quotation_from_matcher(enquiry: Enquiry, db: AsyncSessio
         await db.commit()
         return None
 
-    filters = _matcher_to_cascade_filters(m, cat)
-    data = await get_cascade_matching_rows(cat, filters, db, limit=120)
-    items = data.get("items") or []
-    if len(items) == 0:
-        _downgrade_matcher_to_incomplete(enquiry, "No catalog row matched resolved cascade")
-        await db.commit()
-        return None
-
-    if len(items) > 1:
-        steps = CASCADE_STEPS.get(cat, [])
-        od_cols = [c for c in ("pipe_od", "tc_od") if c in steps]
-        for od_col in od_cols:
-            distinct_od = {str(r.get(od_col) or "").strip() for r in items}
-            distinct_od.discard("")
-            if len(distinct_od) != 1:
-                continue
-            only = next(iter(distinct_od))
-            filters2 = {**filters, od_col: only}
-            data2 = await get_cascade_matching_rows(cat, filters2, db, limit=120)
-            narrowed = data2.get("items") or []
-            if len(narrowed) == 1:
-                items = narrowed
-                filters = filters2
-                break
-        if len(items) != 1:
-            _downgrade_matcher_to_incomplete(
-                enquiry, f"{len(items)} catalog rows still match — complete manually"
-            )
-            await db.commit()
-            return None
-
-    row = items[0]
-    steps = CASCADE_STEPS.get(cat, [])
-    cascade_selections = {
-        k: str(row.get(k) or "").strip() for k in steps if str(row.get(k) or "").strip()
-    }
+    raw_line_items = m.get("line_items")
+    if isinstance(raw_line_items, list) and raw_line_items:
+        line_entries = raw_line_items
+    else:
+        line_entries = [{"filled_cascade": m.get("filled_cascade") or {}, "quantity": 1, "index": 1}]
 
     model_cls = SHEET_MODEL_BY_KEY.get(cat)
     if model_cls is None:
         _downgrade_matcher_to_incomplete(enquiry, "Unknown catalog model")
         await db.commit()
         return None
-    rid = row.get("row_id")
-    try:
-        rid_uuid = rid if isinstance(rid, uuid.UUID) else uuid.UUID(str(rid))
-    except (ValueError, TypeError):
-        _downgrade_matcher_to_incomplete(enquiry, "Invalid catalog row id")
-        await db.commit()
-        return None
-    orm_row = await db.get(model_cls, rid_uuid)
-    if orm_row is None:
-        _downgrade_matcher_to_incomplete(enquiry, "Catalog row not found")
-        await db.commit()
-        return None
-    selected = catalog_row_to_size_option(cat, orm_row)
 
-    client_block = m.get("client") if isinstance(m.get("client"), dict) else {}
-    mode = str(client_block.get("mode") or "").strip().lower()
-    body: dict = {
-        "lineItems": [
+    line_items_out: list[dict] = []
+    steps = CASCADE_STEPS.get(cat, [])
+
+    for entry in line_entries:
+        lix = entry.get("index")
+        fc = entry.get("filled_cascade") if isinstance(entry.get("filled_cascade"), dict) else {}
+        mm = {**m, "filled_cascade": fc}
+        filters = _matcher_to_cascade_filters(mm, cat)
+        data = await get_cascade_matching_rows(cat, filters, db, limit=120)
+        items = data.get("items") or []
+        if len(items) == 0:
+            _downgrade_matcher_to_incomplete(
+                enquiry, f"No catalog row matched for RFQ line {lix or '?'}"
+            )
+            await db.commit()
+            return None
+
+        if len(items) > 1:
+            od_cols = [c for c in ("pipe_od", "tc_od") if c in steps]
+            for od_col in od_cols:
+                distinct_od = {str(r.get(od_col) or "").strip() for r in items}
+                distinct_od.discard("")
+                if len(distinct_od) != 1:
+                    continue
+                only = next(iter(distinct_od))
+                filters2 = {**filters, od_col: only}
+                data2 = await get_cascade_matching_rows(cat, filters2, db, limit=120)
+                narrowed = data2.get("items") or []
+                if len(narrowed) == 1:
+                    items = narrowed
+                    break
+            if len(items) != 1:
+                _downgrade_matcher_to_incomplete(
+                    enquiry,
+                    f"RFQ line {lix or '?'}: {len(items)} catalog rows still match — complete manually",
+                )
+                await db.commit()
+                return None
+
+        row = items[0]
+        cascade_selections = {
+            k: str(row.get(k) or "").strip() for k in steps if str(row.get(k) or "").strip()
+        }
+        rid = row.get("row_id")
+        try:
+            rid_uuid = rid if isinstance(rid, uuid.UUID) else uuid.UUID(str(rid))
+        except (ValueError, TypeError):
+            _downgrade_matcher_to_incomplete(enquiry, "Invalid catalog row id")
+            await db.commit()
+            return None
+        orm_row = await db.get(model_cls, rid_uuid)
+        if orm_row is None:
+            _downgrade_matcher_to_incomplete(enquiry, "Catalog row not found")
+            await db.commit()
+            return None
+        selected = catalog_row_to_size_option(cat, orm_row)
+        qty = entry.get("quantity", 1)
+        try:
+            qn = max(1, int(qty))
+        except (TypeError, ValueError):
+            qn = 1
+        line_items_out.append(
             {
                 "category": cat,
                 "cascadeSelections": cascade_selections,
                 "selectedProduct": selected,
-                "quantity": 1,
+                "quantity": qn,
             }
-        ],
+        )
+
+    client_block = m.get("client") if isinstance(m.get("client"), dict) else {}
+    mode = str(client_block.get("mode") or "").strip().lower()
+    body: dict = {
+        "lineItems": line_items_out,
         "notes": str(pd.get("notes") or "").strip(),
         "priority": str(pd.get("priority") or "Normal").strip() or "Normal",
         "targetEnquiryId": str(enquiry.id),
@@ -538,9 +605,12 @@ async def process_manual_dropdown(body: dict, db: AsyncSession) -> dict:
     """Manual dropdown flow: no parser/matcher/HITL; create enquiry + quote directly."""
     from services.client_service import (
         client_for_export,
+        create_branch_employee,
         create_company_with_branch,
         get_branch_with_company,
+        get_employee_for_branch,
         increment_branch_enquiry_count,
+        set_company_default_discount,
     )
     from services.erp_export_service import generate_enquiry_list_excel
     from services.pdf_service import generate_quotation_pdf
@@ -627,11 +697,55 @@ async def process_manual_dropdown(body: dict, db: AsyncSession) -> dict:
         client_email = (branch.email or "") if branch else ""
         client_phone = (branch.phone or "") if branch else ""
 
+    employee_for_quote = None
+    sel_cid = selected_client_id if isinstance(selected_client_id, str) else ""
+    is_dummy_branch = sel_cid.startswith("dummy-")
+    if branch_id_uuid is not None and not is_dummy_branch:
+        new_emp_body = body.get("newClientEmployee")
+        if isinstance(new_emp_body, dict):
+            fn = str(new_emp_body.get("fullName") or new_emp_body.get("full_name") or "").strip()
+            em_raw = new_emp_body.get("email")
+            em_val = str(em_raw).strip() if em_raw is not None and str(em_raw).strip() else None
+            if fn:
+                employee_for_quote = await create_branch_employee(
+                    branch_id_uuid,
+                    full_name=fn,
+                    email=em_val,
+                    db=db,
+                )
+        if employee_for_quote is None:
+            emp_raw = body.get("clientEmployeeId")
+            if emp_raw:
+                try:
+                    eid = uuid.UUID(str(emp_raw))
+                except ValueError as exc:
+                    raise EnquiryParseError("Invalid clientEmployeeId") from exc
+                employee_for_quote = await get_employee_for_branch(eid, branch_id_uuid, db)
+                if employee_for_quote is None:
+                    raise EnquiryParseError("Client employee not found for this branch")
+
+    if employee_for_quote is not None:
+        client_name = employee_for_quote.full_name or client_name
+        if employee_for_quote.email:
+            client_email = employee_for_quote.email or ""
+        if employee_for_quote.phone:
+            client_phone = employee_for_quote.phone or ""
+
     enquiry_id = enquiry_uuid
 
     parsed_products, matched_products, quote_line_items, history_rows = expand_manual_line_items_to_quote_parts(
         line_items_in
     )
+
+    chosen_discount_pct: float | None = None
+    for li in line_items_in:
+        if not isinstance(li, dict):
+            continue
+        d = _normalize_discount_pct(li.get("customer_discount_pct"))
+        if d is None:
+            continue
+        chosen_discount_pct = d
+        break
 
     quote_line_items, subtotal, gst_amount, pf_amount, total_amount = _calc_totals(
         quote_line_items, gst_rate=gst_rate, pf_rate=pf_rate
@@ -646,6 +760,7 @@ async def process_manual_dropdown(body: dict, db: AsyncSession) -> dict:
             "company": client_company,
             "email": client_email,
             "phone": client_phone,
+            "client_employee_id": str(employee_for_quote.id) if employee_for_quote else None,
         },
         "line_items": quote_line_items,
         # Full configurator payload for quotation edit / rehydrate UI.
@@ -664,6 +779,7 @@ async def process_manual_dropdown(body: dict, db: AsyncSession) -> dict:
         "notes": notes,
         "products_requested": parsed_products,
         "manual_line_items": line_items_in,
+        "client_employee_id": str(employee_for_quote.id) if employee_for_quote else None,
     }
 
     if existing_enquiry is not None:
@@ -729,6 +845,7 @@ async def process_manual_dropdown(body: dict, db: AsyncSession) -> dict:
         client_company=client_company,
         client_email=client_email,
         client_phone=client_phone,
+        client_employee_id=(employee_for_quote.id if employee_for_quote else None),
         line_items=quote_line_items,
         subtotal=subtotal,
         gst_rate=gst_rate,
@@ -737,7 +854,7 @@ async def process_manual_dropdown(body: dict, db: AsyncSession) -> dict:
         pf_amount=pf_amount,
         total_amount=total_amount,
         validity_days=int(client_json.get("quote_validity_days", 15)),
-        status="approved",
+        status="ongoing",
         notes=notes or None,
     )
     db.add(quotation)
@@ -832,6 +949,8 @@ async def process_manual_dropdown(body: dict, db: AsyncSession) -> dict:
 
     if branch_id_uuid is not None:
         await increment_branch_enquiry_count(str(branch_id_uuid), db)
+    if company_id_uuid is not None and chosen_discount_pct is not None:
+        await set_company_default_discount(company_id_uuid, chosen_discount_pct, db)
 
     return {
         "enquiry_id": str(enquiry_id),

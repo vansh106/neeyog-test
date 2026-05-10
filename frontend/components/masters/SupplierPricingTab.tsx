@@ -31,7 +31,6 @@ export default function SupplierPricingTab() {
 
   const [margin, setMargin] = useState<string>('')
   const [discount, setDiscount] = useState<string>('')
-  const [customerDiscount, setCustomerDiscount] = useState<string>('')
   const [saving, setSaving] = useState(false)
 
   const loadSuppliers = useCallback(async () => {
@@ -81,7 +80,6 @@ export default function SupplierPricingTab() {
         setSavedRow(found)
         setMargin(found?.margin_multiplier != null ? String(found.margin_multiplier) : '')
         setDiscount(found?.supplier_discount_pct != null ? String(found.supplier_discount_pct) : '')
-        setCustomerDiscount(found?.customer_discount_pct != null ? String(found.customer_discount_pct) : '')
       } catch (e: unknown) {
         if (!cancelled) setErr(e instanceof Error ? e.message : 'Failed to load pricing')
       } finally {
@@ -174,7 +172,6 @@ export default function SupplierPricingTab() {
                     const payload: Record<string, unknown> = {}
                     if (margin.trim() !== '') payload.margin_multiplier = Number(margin)
                     if (discount.trim() !== '') payload.supplier_discount_pct = Number(discount)
-                    if (customerDiscount.trim() !== '') payload.customer_discount_pct = Number(customerDiscount)
                     const saved = await suppliersApi.upsertCategoryPricing(supplierId, activeKey, payload)
                     setSavedRow(saved)
                     const res = await suppliersApi.getResolvedCategoryPricing(supplierId, activeKey)
@@ -190,7 +187,7 @@ export default function SupplierPricingTab() {
               </Button>
             </div>
 
-            <div className="mt-4 grid gap-4 sm:grid-cols-3">
+            <div className="mt-4 grid gap-4 sm:grid-cols-2">
               <div className="space-y-1.5">
                 <p className="text-[10px] font-medium uppercase tracking-wide text-[#8A9488]">Margin (x)</p>
                 <Input
@@ -207,22 +204,13 @@ export default function SupplierPricingTab() {
                   placeholder={String(resolved?.supplier_discount_pct ?? 0)}
                 />
               </div>
-              <div className="space-y-1.5">
-                <p className="text-[10px] font-medium uppercase tracking-wide text-[#8A9488]">Customer discount (%)</p>
-                <Input
-                  value={customerDiscount}
-                  onChange={(e) => setCustomerDiscount(e.target.value)}
-                  placeholder={String(resolved?.customer_discount_pct ?? 0)}
-                />
-              </div>
             </div>
 
             <div className="mt-4 rounded-lg border border-surface-border bg-surface-page p-3 text-[13px] text-surface-muted">
               <p>
                 <span className="font-medium text-gray-900">Resolved:</span> margin{' '}
                 <span className="font-mono">{resolved?.margin_multiplier ?? 1.4}</span> · discount{' '}
-                <span className="font-mono">{resolved?.supplier_discount_pct ?? 0}</span>% · customer discount{' '}
-                <span className="font-mono">{resolved?.customer_discount_pct ?? 0}</span>%
+                <span className="font-mono">{resolved?.supplier_discount_pct ?? 0}</span>%
               </p>
               {savedRow ? (
                 <p className="mt-1">

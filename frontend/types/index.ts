@@ -55,6 +55,9 @@ export interface QuotationLineItem {
   quantity: number
   unit: string
   unit_price: number
+  base_unit_price?: number
+  customer_discount_pct?: number
+  customer_discount_amount?: number
   line_total: number
   total?: number
   product_name?: string
@@ -230,6 +233,7 @@ export interface CompanyResponse {
   gst_number: string | null
   industry: string | null
   erp_code: string | null
+  default_discount_pct?: number | null
   is_erp_synced: boolean
   total_enquiry_count: number
   branch_count: number
@@ -325,6 +329,8 @@ export interface ManualLineItem {
   cascadeSelections: Record<string, string>
   selectedProduct: ProductSizeOption | null
   quantity: number
+  customer_discount_pct?: number
+  component_pricing?: Record<string, unknown>
 }
 
 export interface ManualEnquiryForm {
@@ -361,7 +367,6 @@ export interface ManualSupplierPricingContext {
   supplier_id: string
   supplier_name: string
   margin_multiplier: number
-  customer_discount_pct: number
   subtotal: number
   gst_amount: number
   pf_amount: number
@@ -581,12 +586,26 @@ export interface AssembledProduct {
   /** Supplier selected for this assembled product (per-product supplier selection). */
   supplier_id: string | null
   supplier_name?: string | null
+  component_pricing?: Record<
+    string,
+    {
+      enabled: boolean
+      supplier_id?: string | null
+      supplier_name?: string | null
+      base_price?: number | null
+      temp_price?: number | null
+      discount_pct?: number | null
+      final_price?: number | null
+    }
+  >
   sov: AccessoryItem | null
   limit_switch_box: AccessoryItem | null
   positioner: AccessoryItem | null
   bracket: BracketCoupler | null
   include_bracket: boolean
   quantity: number
+  unit?: string | null
+  customer_discount_pct?: number | null
   unit_price: number | null
   has_unknown_prices: boolean
   unknown_components: string[]

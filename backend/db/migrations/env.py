@@ -9,6 +9,7 @@ from db.models import (  # noqa: F401
     AuditLog,
     ClientBranch,
     ClientCompany,
+    ClientEmployee,
     ClientPricingConfig,
     EmailSyncState,
     Enquiry,

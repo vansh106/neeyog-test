@@ -278,14 +278,19 @@ export default function QuotationDetailPage() {
                             </Button>
                           </div>
                         </td>
-                        <td className="max-w-[200px] px-2 py-2.5 text-gray-900">
+                        <td className="max-w-[260px] whitespace-pre-line px-2 py-2.5 text-gray-900">
                           {line.product_name || line.description}
                         </td>
                         <td className="px-2 py-2.5 text-surface-muted">{line.size || '—'}</td>
                         <td className="px-2 py-2.5 text-right font-mono">{line.quantity}</td>
                         <td className="px-2 py-2.5 text-surface-muted">{line.unit}</td>
                         <td className="px-2 py-2.5 text-right font-mono text-gray-800">
-                          {formatCurrency(line.unit_price)}
+                          <div>{formatCurrency(line.unit_price)}</div>
+                          {typeof line.customer_discount_pct === 'number' && line.customer_discount_pct > 0 && (
+                            <div className="text-[11px] text-surface-muted">
+                              ({line.customer_discount_pct}% discount)
+                            </div>
+                          )}
                         </td>
                         <td className="px-2 py-2.5 text-right font-mono text-gray-900">
                           {formatCurrency(line.line_total ?? line.total ?? 0)}

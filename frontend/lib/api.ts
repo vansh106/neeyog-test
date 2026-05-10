@@ -275,7 +275,6 @@ export const suppliersApi = {
     primary_category_key?: string
     margin_multiplier?: number | null
     supplier_discount_pct?: number | null
-    customer_discount_pct?: number | null
     contact_person?: string | null
     phone?: string | null
     email?: string | null
@@ -313,7 +312,6 @@ export const suppliersApi = {
     data: Partial<{
       margin_multiplier: number | null
       supplier_discount_pct: number | null
-      customer_discount_pct: number | null
     }>,
   ) =>
     patch<import('@/types').SupplierCategoryPricing>(

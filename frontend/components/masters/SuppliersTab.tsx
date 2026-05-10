@@ -37,7 +37,6 @@ export default function SuppliersTab() {
   const [primaryCategory, setPrimaryCategory] = useState('all')
   const [marginMultiplier, setMarginMultiplier] = useState<number | null>(null)
   const [supplierDiscount, setSupplierDiscount] = useState<number | null>(null)
-  const [customerDiscount, setCustomerDiscount] = useState<number | null>(null)
   const [contactPerson, setContactPerson] = useState('')
   const [phone, setPhone] = useState('')
   const [email, setEmail] = useState('')
@@ -67,7 +66,6 @@ export default function SuppliersTab() {
     setPrimaryCategory('all')
     setMarginMultiplier(null)
     setSupplierDiscount(null)
-    setCustomerDiscount(null)
     setContactPerson('')
     setPhone('')
     setEmail('')
@@ -82,7 +80,6 @@ export default function SuppliersTab() {
     setPrimaryCategory(s.primary_category_key || 'all')
     setMarginMultiplier(null)
     setSupplierDiscount(null)
-    setCustomerDiscount(null)
     setContactPerson(s.contact_person ?? '')
     setPhone(s.phone ?? '')
     setEmail(s.email ?? '')
@@ -111,7 +108,6 @@ export default function SuppliersTab() {
           primary_category_key: primaryCategory,
           margin_multiplier: marginMultiplier,
           supplier_discount_pct: supplierDiscount,
-          customer_discount_pct: customerDiscount,
           contact_person: contactPerson || null,
           phone: phone || null,
           email: email || null,
@@ -270,7 +266,7 @@ export default function SuppliersTab() {
             {!editing && (
               <div className="rounded-lg border border-surface-border bg-surface-page p-3">
                 <p className="text-[12px] font-semibold text-gray-900">Initial pricing vars (optional)</p>
-                <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
+                <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
                   <div className="space-y-1">
                     <label className="text-[11px] font-medium uppercase tracking-wide text-[#8A9488]">Margin (x)</label>
                     <Input
@@ -287,17 +283,6 @@ export default function SuppliersTab() {
                       placeholder="10"
                       value={supplierDiscount == null ? '' : String(supplierDiscount)}
                       onChange={(e) => setSupplierDiscount(e.target.value ? Number(e.target.value) : null)}
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-medium uppercase tracking-wide text-[#8A9488]">
-                      Customer discount (%)
-                    </label>
-                    <Input
-                      inputMode="decimal"
-                      placeholder="2"
-                      value={customerDiscount == null ? '' : String(customerDiscount)}
-                      onChange={(e) => setCustomerDiscount(e.target.value ? Number(e.target.value) : null)}
                     />
                   </div>
                 </div>

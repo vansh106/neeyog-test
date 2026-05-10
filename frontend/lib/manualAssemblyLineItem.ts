@@ -109,7 +109,11 @@ export function parseSizeMm(valveSize: string | null | undefined): number | null
 }
 
 /** Adapt an AssembledProduct into the ManualLineItem request shape. */
-export function assembledToLineItem(p: AssembledProduct, unitPriceOverride: number | null): ManualLineItem {
+export function assembledToLineItem(
+  p: AssembledProduct,
+  unitPriceOverride: number | null,
+  customerDiscountPct: number | null = null,
+): ManualLineItem {
   const v = p.valve
   const materialParts = v
     ? [v.body, v.ball_disc ?? v.ball, v.stem, v.seat, v.fasteners].filter(Boolean)
@@ -136,7 +140,7 @@ export function assembledToLineItem(p: AssembledProduct, unitPriceOverride: numb
     material,
     base_price:
       unitPriceOverride != null && Number.isFinite(unitPriceOverride) ? unitPriceOverride : (p.unit_price ?? 0),
-    unit: 'Nos',
+    unit: p.unit || 'Nos',
     display_label: name,
   }
 
@@ -174,5 +178,8 @@ export function assembledToLineItem(p: AssembledProduct, unitPriceOverride: numb
     cascadeSelections: cascade,
     selectedProduct: sel,
     quantity: p.quantity,
+    customer_discount_pct:
+      customerDiscountPct != null && Number.isFinite(customerDiscountPct) ? customerDiscountPct : undefined,
+    component_pricing: p.component_pricing ?? undefined,
   }
 }

@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.models import ClientBranch, ClientCompany
+from db.models import ClientBranch, ClientCompany, ClientEmployee
 from services import client_service
 from core.config import get_settings
 
@@ -38,6 +38,7 @@ class CompanyResponse(BaseModel):
     gst_number: str | None
     industry: str | None
     erp_code: str | None
+    default_discount_pct: float | None = None
     is_erp_synced: bool
     total_enquiry_count: int
     branch_count: int
@@ -75,6 +76,23 @@ class AddBranchRequest(BaseModel):
     pincode: str | None = None
     address_line1: str | None = None
     country: str = "India"
+
+
+class ClientEmployeeResponse(BaseModel):
+    id: str
+    branch_id: str
+    full_name: str
+    email: str | None = None
+    phone: str | None = None
+    designation: str | None = None
+    is_active: bool = True
+
+
+class CreateClientEmployeeRequest(BaseModel):
+    full_name: str
+    email: str | None = None
+    phone: str | None = None
+    designation: str | None = None
 
 
 def _branch_resp(b: ClientBranch) -> BranchResponse:
@@ -124,6 +142,7 @@ async def _company_resp(
         gst_number=c.gst_number,
         industry=c.industry,
         erp_code=c.erp_code,
+        default_discount_pct=float(c.default_discount_pct) if c.default_discount_pct is not None else None,
         is_erp_synced=bool(c.is_erp_synced),
         total_enquiry_count=int(c.total_enquiry_count or 0),
         branch_count=len(branches),
@@ -136,6 +155,65 @@ async def _company_resp(
 
 def _client_cfg() -> str:
     return get_settings().ACTIVE_CLIENT
+
+
+def _employee_resp(e: ClientEmployee) -> ClientEmployeeResponse:
+    return ClientEmployeeResponse(
+        id=str(e.id),
+        branch_id=str(e.branch_id),
+        full_name=e.full_name,
+        email=e.email,
+        phone=e.phone,
+        designation=e.designation,
+        is_active=bool(e.is_active),
+    )
+
+
+async def handle_list_branch_employees(
+    company_id: str,
+    branch_id: str,
+    db: AsyncSession,
+) -> list[ClientEmployeeResponse]:
+    try:
+        bid = uuid.UUID(branch_id)
+        cid = uuid.UUID(company_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid id") from exc
+    b = await db.get(ClientBranch, bid)
+    if b is None or b.company_id != cid:
+        raise HTTPException(status_code=404, detail="Branch not found")
+    rows = await client_service.list_branch_employees(bid, db)
+    return [_employee_resp(e) for e in rows]
+
+
+async def handle_create_branch_employee(
+    company_id: str,
+    branch_id: str,
+    body: CreateClientEmployeeRequest,
+    db: AsyncSession,
+) -> ClientEmployeeResponse:
+    try:
+        bid = uuid.UUID(branch_id)
+        cid = uuid.UUID(company_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid id") from exc
+    b = await db.get(ClientBranch, bid)
+    if b is None or b.company_id != cid:
+        raise HTTPException(status_code=404, detail="Branch not found")
+    if not b.is_active:
+        raise HTTPException(status_code=400, detail="Cannot add employees to an inactive branch")
+    try:
+        emp = await client_service.create_branch_employee(
+            bid,
+            full_name=body.full_name.strip(),
+            email=body.email,
+            phone=body.phone,
+            designation=body.designation,
+            db=db,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return _employee_resp(emp)
 
 
 async def handle_list_companies(
@@ -190,6 +268,7 @@ async def handle_patch_company(company_id: str, body: dict[str, Any], db: AsyncS
         "industry",
         "website",
         "erp_code",
+        "default_discount_pct",
         "is_erp_synced",
         "notes",
         "is_active",

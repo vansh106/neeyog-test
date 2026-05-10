@@ -22,7 +22,6 @@ class CreateSupplierRequest(BaseModel):
     primary_category_key: str = "all"
     margin_multiplier: float | None = None
     supplier_discount_pct: float | None = None
-    customer_discount_pct: float | None = None
     contact_person: str | None = None
     phone: str | None = None
     email: str | None = None
@@ -58,7 +57,6 @@ class SupplierCategoryPricingResponse(BaseModel):
     category_key: str
     margin_multiplier: float | None
     supplier_discount_pct: float | None
-    customer_discount_pct: float | None
 
 
 class UpsertPriceRequest(BaseModel):
@@ -74,7 +72,6 @@ class BulkUpsertPricesRequest(BaseModel):
 
 class PricingConfigRequest(BaseModel):
     margin_multiplier: float
-    default_customer_discount_pct: float
     default_supplier_id: str | None = None
 
 
@@ -99,7 +96,6 @@ class SupplierPriceRowResponse(BaseModel):
 
 class PricingConfigResponse(BaseModel):
     margin_multiplier: float
-    default_customer_discount_pct: float
     default_supplier_id: str | None
     default_supplier_name: str | None
 
@@ -130,7 +126,6 @@ def _category_pricing_to_response(r: SupplierCategoryPricing) -> SupplierCategor
         category_key=r.category_key,
         margin_multiplier=float(r.margin_multiplier) if r.margin_multiplier is not None else None,
         supplier_discount_pct=float(r.supplier_discount_pct) if r.supplier_discount_pct is not None else None,
-        customer_discount_pct=float(r.customer_discount_pct) if r.customer_discount_pct is not None else None,
     )
 
 
@@ -165,7 +160,6 @@ async def handle_create_supplier(body: CreateSupplierRequest, db: AsyncSession) 
         body.primary_category_key,
         body.margin_multiplier,
         body.supplier_discount_pct,
-        body.customer_discount_pct,
         body.contact_person,
         body.phone,
         body.email,
@@ -331,7 +325,6 @@ async def handle_get_supplier_category_pricing(
 class UpsertSupplierCategoryPricingRequest(BaseModel):
     margin_multiplier: float | None = None
     supplier_discount_pct: float | None = None
-    customer_discount_pct: float | None = None
 
 
 async def handle_upsert_supplier_category_pricing(
@@ -353,7 +346,6 @@ async def handle_upsert_supplier_category_pricing(
         db,
         margin_multiplier=body.margin_multiplier,
         supplier_discount_pct=body.supplier_discount_pct,
-        customer_discount_pct=body.customer_discount_pct,
     )
     return _category_pricing_to_response(row)
 

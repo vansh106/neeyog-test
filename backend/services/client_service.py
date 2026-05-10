@@ -9,7 +9,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from db.models import ClientBranch, ClientCompany, Enquiry
+from db.models import ClientBranch, ClientCompany, ClientEmployee, Enquiry
 
 
 @dataclass
@@ -300,6 +300,18 @@ async def increment_branch_enquiry_count(branch_id: str, db: AsyncSession) -> No
     await db.commit()
 
 
+async def set_company_default_discount(
+    company_id: uuid.UUID,
+    default_discount_pct: float,
+    db: AsyncSession,
+) -> None:
+    company = await db.get(ClientCompany, company_id)
+    if company is None:
+        return
+    company.default_discount_pct = float(default_discount_pct)
+    await db.commit()
+
+
 async def list_recent_enquiries_for_company(
     company_id: uuid.UUID,
     db: AsyncSession,
@@ -313,3 +325,54 @@ async def list_recent_enquiries_for_company(
         .limit(limit)
     )
     return list(result.scalars().all())
+
+
+async def list_branch_employees(branch_id: uuid.UUID, db: AsyncSession) -> list[ClientEmployee]:
+    result = await db.execute(
+        select(ClientEmployee)
+        .where(ClientEmployee.branch_id == branch_id, ClientEmployee.is_active.is_(True))
+        .order_by(ClientEmployee.full_name)
+    )
+    return list(result.scalars().all())
+
+
+async def get_employee_for_branch(
+    employee_id: uuid.UUID,
+    branch_id: uuid.UUID,
+    db: AsyncSession,
+) -> ClientEmployee | None:
+    result = await db.execute(
+        select(ClientEmployee).where(
+            ClientEmployee.id == employee_id,
+            ClientEmployee.branch_id == branch_id,
+            ClientEmployee.is_active.is_(True),
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def create_branch_employee(
+    branch_id: uuid.UUID,
+    *,
+    full_name: str,
+    email: str | None = None,
+    phone: str | None = None,
+    designation: str | None = None,
+    db: AsyncSession,
+) -> ClientEmployee:
+    name = (full_name or "").strip()
+    if not name:
+        raise ValueError("Employee name is required")
+    em = (email or "").strip().lower() or None
+    emp = ClientEmployee(
+        branch_id=branch_id,
+        full_name=name,
+        email=em,
+        phone=(phone or "").strip() or None,
+        designation=(designation or "").strip() or None,
+        is_active=True,
+    )
+    db.add(emp)
+    await db.commit()
+    await db.refresh(emp)
+    return emp

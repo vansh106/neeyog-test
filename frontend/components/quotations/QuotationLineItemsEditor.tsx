@@ -51,6 +51,7 @@ export default function QuotationLineItemsEditor({
   /** Start true when we open with lines so we never paint the pricing table before rows exist (avoids missing temp-price cells). */
   const [pricingLoading, setPricingLoading] = useState(() => initialAssembledProducts.length > 0)
   const [tempQuoteUnitByProduct, setTempQuoteUnitByProduct] = useState<Record<string, string>>({})
+  const [customerDiscountByProduct, setCustomerDiscountByProduct] = useState<Record<string, string>>({})
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
 
@@ -62,6 +63,7 @@ export default function QuotationLineItemsEditor({
     setActiveConfigIds(cloned.length ? [] : [uuidv4()])
     setEditingId(null)
     setTempQuoteUnitByProduct({})
+    setCustomerDiscountByProduct({})
     setErrors({})
     if (cloned.length > 0) {
       setProductCalcs([])
@@ -102,24 +104,42 @@ export default function QuotationLineItemsEditor({
       const out: ProductPricingCalc[] = []
       for (const p of assembledProducts) {
         const supplierId = p.supplier_id
+        const componentKeyForPart = (label: string): string => {
+          const l = label.toLowerCase()
+          if (l === 'valve') return 'valve'
+          if (l === 'operator') return 'operator'
+          if (l === 'sov') return 'sov'
+          if (l.includes('limit switch')) return 'lsb'
+          if (l === 'positioner') return 'positioner'
+          if (l.includes('bracket')) return 'bracket'
+          return ''
+        }
         const parts = catalogPartsForAssembly(p)
         const missing: string[] = []
         if (parts.length === 0) missing.push('Valve configuration')
         if (suppliers.length > 0 && !supplierId) missing.push('Supplier selection')
         const rows: Array<{ component: string; calc: PriceCalculationResult }> = []
-        if (supplierId) {
+        if (supplierId || p.component_pricing) {
           for (const part of parts) {
-            const pr = await suppliersApi.getProductPrice(supplierId, part.catalog_table, part.catalog_row_id)
+            const compKey = componentKeyForPart(part.label)
+            const partSupplierId = compKey
+              ? (p.component_pricing?.[compKey]?.supplier_id ?? supplierId)
+              : supplierId
+            if (!partSupplierId) {
+              missing.push(`${part.label} supplier`)
+              continue
+            }
+            const pr = await suppliersApi.getProductPrice(partSupplierId, part.catalog_table, part.catalog_row_id)
             if (!pr) {
               missing.push(part.label)
               continue
             }
-            const vars = await suppliersApi.getResolvedCategoryPricing(supplierId, part.catalog_table)
+            const vars = await suppliersApi.getResolvedCategoryPricing(partSupplierId, part.catalog_table)
             const calc = await suppliersApi.calculatePrice({
               list_price: pr.list_price_inr,
               supplier_discount_pct: vars.supplier_discount_pct,
               margin_multiplier: vars.margin_multiplier,
-              customer_discount_pct: vars.customer_discount_pct,
+              customer_discount_pct: 0,
               quantity: p.quantity,
             })
             rows.push({ component: part.label, calc })
@@ -177,43 +197,36 @@ export default function QuotationLineItemsEditor({
     if (!productCalcs.length) return null
     if (assembledProducts.length === 0) return null
 
+    const parseDiscount = (id: string): number => {
+      const raw = (customerDiscountByProduct[id] ?? '').trim()
+      const n = Number(raw)
+      if (raw && Number.isFinite(n) && n >= 0) return Math.min(n, 100)
+      return 0
+    }
     let subtotal = 0
     for (const p of assembledProducts) {
       const ov = parseOverride(p.id)
+      const discountFactor = 1 - parseDiscount(p.id) / 100
       if (ov != null) {
-        subtotal += ov * p.quantity
+        subtotal += ov * discountFactor * p.quantity
         continue
       }
       const pc = productCalcs.find((c) => c.productId === p.id)
       if (!pc) return null
       if (!pc.ok) return null
-      subtotal += pc.lineTotal
+      subtotal += pc.assemblyUnit * discountFactor * p.quantity
     }
     const gst = subtotal * 0.18
     const pf = subtotal * 0.03
     const grand = subtotal + gst + pf
     return { subtotal, gst, pf, grand }
-  }, [assembledProducts, productCalcs, tempQuoteUnitByProduct])
+  }, [assembledProducts, customerDiscountByProduct, productCalcs, tempQuoteUnitByProduct])
 
   const supplierRequired = suppliers.length > 0
   const pricingReady = useMemo(() => {
-    if (!supplierRequired) return true
     if (assembledProducts.length === 0) return false
-    const parseOverride = (id: string): number | null => {
-      const raw = (tempQuoteUnitByProduct[id] ?? '').trim()
-      if (!raw) return null
-      const n = Number(raw)
-      if (!Number.isFinite(n) || n <= 0) return null
-      return n
-    }
-    return assembledProducts.every((p) => {
-      const ov = parseOverride(p.id)
-      if (ov != null) return true
-      const pc = productCalcs.find((c) => c.productId === p.id)
-      if (!pc) return false
-      return Boolean(pc.ok)
-    })
-  }, [assembledProducts, productCalcs, supplierRequired, tempQuoteUnitByProduct])
+    return assembledProducts.every((p) => Number.isFinite(Number(p.unit_price)) && Number(p.unit_price) > 0)
+  }, [assembledProducts])
 
   const handleProductComplete = useCallback(
     (configId: string) => (product: AssembledProduct) => {
@@ -254,8 +267,7 @@ export default function QuotationLineItemsEditor({
       const missingSupplier = assembledProducts.some((p) => !p.supplier_id)
       if (missingSupplier) e.supplier = 'Please select a supplier for each product'
       else if (!pricingReady) {
-        e.pricing =
-          'Prices are missing for one or more products. Either configure supplier list prices, or enter a temporary quote unit price override.'
+        e.pricing = 'Prices are missing for one or more products. Complete Step 5 pricing before saving.'
       }
     }
     setErrors(e)
@@ -264,18 +276,12 @@ export default function QuotationLineItemsEditor({
 
   async function save() {
     if (!validate()) return
-    const overrideByProductId = new Map<string, number>()
-    for (const [pid, raw] of Object.entries(tempQuoteUnitByProduct)) {
-      const t = String(raw ?? '').trim()
-      if (!t) continue
-      const n = Number(t)
-      if (Number.isFinite(n) && n > 0) overrideByProductId.set(pid, n)
-    }
-    const unitByProduct = new Map(
-      productCalcs.filter((c) => c.ok).map((c) => [c.productId, c.assemblyUnit]),
-    )
     const lineItems = assembledProducts.map((p) =>
-      assembledToLineItem(p, overrideByProductId.get(p.id) ?? unitByProduct.get(p.id) ?? null),
+      assembledToLineItem(
+        p,
+        null,
+        p.customer_discount_pct ?? null,
+      ),
     )
 
     setSaving(true)
@@ -360,11 +366,11 @@ export default function QuotationLineItemsEditor({
         </div>
       </section>
 
-      {assembledProducts.length > 0 && (
+      {false && assembledProducts.length > 0 && (
         <section className="rounded-xl border border-surface-border bg-white p-4 shadow-sm border-t-2 border-t-brand-navy-200">
           <h2 className="text-[15px] font-semibold text-gray-900">Pricing &amp; supplier</h2>
           <p className="mt-1 text-[13px] text-surface-muted">
-            Totals use margin / discount / customer discount per supplier per category.
+            Totals use margin / supplier discount from supplier pricing. Customer discount is set per quote line.
           </p>
           {suppliers.length === 0 ? (
             <p className="mt-3 text-[13px] text-surface-muted">
@@ -384,6 +390,7 @@ export default function QuotationLineItemsEditor({
                         <th className="px-2 py-2">Cost to Parth</th>
                         <th className="px-2 py-2">Selling (unit)</th>
                         <th className="px-2 py-2">Quote unit (temp)</th>
+                        <th className="px-2 py-2">Customer discount (%)</th>
                         <th className="px-2 py-2 text-right">Line total</th>
                       </tr>
                     </thead>
@@ -415,8 +422,24 @@ export default function QuotationLineItemsEditor({
                                   Temporary quote unit (doesn&apos;t change Masters)
                                 </p>
                               </td>
+                              <td className="px-2 py-2">
+                                <Input
+                                  value={customerDiscountByProduct[p.id] ?? ''}
+                                  onChange={(e) =>
+                                    setCustomerDiscountByProduct((cur) => ({ ...cur, [p.id]: e.target.value }))
+                                  }
+                                  className="h-8 min-w-[7rem] max-w-[9rem] font-mono text-[12px]"
+                                  placeholder="0"
+                                />
+                              </td>
                               <td className="px-2 py-2 text-right font-mono text-surface-muted">
-                                {overrideNum != null ? formatCurrency(overrideNum * p.quantity) : '—'}
+                                {overrideNum != null
+                                  ? formatCurrency(
+                                      overrideNum *
+                                        p.quantity *
+                                        (1 - (Math.max(0, Math.min(100, Number(customerDiscountByProduct[p.id] ?? '') || 0)) / 100)),
+                                    )
+                                  : '—'}
                               </td>
                             </tr>
                           )
@@ -441,15 +464,35 @@ export default function QuotationLineItemsEditor({
                                   Temporary quote unit (doesn&apos;t change Masters)
                                 </p>
                               </td>
+                              <td className="px-2 py-2">
+                                <Input
+                                  value={customerDiscountByProduct[p.id] ?? ''}
+                                  onChange={(e) =>
+                                    setCustomerDiscountByProduct((cur) => ({ ...cur, [p.id]: e.target.value }))
+                                  }
+                                  className="h-8 min-w-[7rem] max-w-[9rem] font-mono text-[12px]"
+                                  placeholder="0"
+                                />
+                              </td>
                               <td className="px-2 py-2 text-right font-mono text-surface-muted">
-                                {overrideNum != null ? formatCurrency(overrideNum * p.quantity) : '—'}
+                                {overrideNum != null
+                                  ? formatCurrency(
+                                      overrideNum *
+                                        p.quantity *
+                                        (1 - (Math.max(0, Math.min(100, Number(customerDiscountByProduct[p.id] ?? '') || 0)) / 100)),
+                                    )
+                                  : '—'}
                               </td>
                             </tr>
                           )
                         }
                         const listSum = pc.rows.reduce((s, r) => s + r.calc.list_price, 0)
                         const costSum = pc.rows.reduce((s, r) => s + r.calc.cost_to_parth, 0)
-                        const effectiveUnit = overrideNum ?? pc.assemblyUnit
+                        const discountPct = Math.max(
+                          0,
+                          Math.min(100, Number(customerDiscountByProduct[p.id] ?? '') || 0),
+                        )
+                        const effectiveUnit = (overrideNum ?? pc.assemblyUnit) * (1 - discountPct / 100)
                         const effectiveLine = effectiveUnit * p.quantity
                         return (
                           <tr key={p.id} className="border-b border-[#E2E6DC]">
@@ -470,6 +513,16 @@ export default function QuotationLineItemsEditor({
                                 Override calculated selling price if needed
                               </p>
                             </td>
+                            <td className="px-2 py-2">
+                              <Input
+                                value={customerDiscountByProduct[p.id] ?? ''}
+                                onChange={(e) =>
+                                  setCustomerDiscountByProduct((cur) => ({ ...cur, [p.id]: e.target.value }))
+                                }
+                                className="h-8 min-w-[7rem] max-w-[9rem] font-mono text-[12px]"
+                                placeholder="0"
+                              />
+                            </td>
                             <td className="px-2 py-2 text-right font-mono">{formatCurrency(effectiveLine)}</td>
                           </tr>
                         )
@@ -483,19 +536,19 @@ export default function QuotationLineItemsEditor({
                 <div className="rounded-lg border border-surface-border bg-surface-page p-3 text-[12px]">
                   <div className="flex justify-between">
                     <span>Subtotal</span>
-                    <span className="font-mono">{formatCurrency(pricingTotals.subtotal)}</span>
+                    <span className="font-mono">{formatCurrency(pricingTotals?.subtotal ?? 0)}</span>
                   </div>
                   <div className="mt-1 flex justify-between text-surface-muted">
                     <span>GST @ 18%</span>
-                    <span className="font-mono">{formatCurrency(pricingTotals.gst)}</span>
+                    <span className="font-mono">{formatCurrency(pricingTotals?.gst ?? 0)}</span>
                   </div>
                   <div className="mt-1 flex justify-between text-surface-muted">
                     <span>P&amp;F @ 3%</span>
-                    <span className="font-mono">{formatCurrency(pricingTotals.pf)}</span>
+                    <span className="font-mono">{formatCurrency(pricingTotals?.pf ?? 0)}</span>
                   </div>
                   <div className="mt-2 flex justify-between border-t border-surface-border pt-2 font-semibold text-gray-900">
                     <span>Grand total</span>
-                    <span className="font-mono">{formatCurrency(pricingTotals.grand)}</span>
+                    <span className="font-mono">{formatCurrency(pricingTotals?.grand ?? 0)}</span>
                   </div>
                 </div>
               )}

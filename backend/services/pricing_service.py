@@ -113,11 +113,10 @@ async def get_resolved_supplier_category_pricing(
         row = await get_supplier_category_pricing(supplier_id, "all", db)
     margin = float(row.margin_multiplier) if row and row.margin_multiplier is not None else 1.4
     sup_disc = float(row.supplier_discount_pct) if row and row.supplier_discount_pct is not None else 0.0
-    cust_disc = float(row.customer_discount_pct) if row and row.customer_discount_pct is not None else 0.0
     return {
         "margin_multiplier": margin,
         "supplier_discount_pct": sup_disc,
-        "customer_discount_pct": cust_disc,
+        "customer_discount_pct": 0.0,
     }
 
 
@@ -169,7 +168,6 @@ async def create_supplier(
     primary_category_key: str,
     margin_multiplier: float | None,
     supplier_discount_pct: float | None,
-    customer_discount_pct: float | None,
     contact_person: str | None,
     phone: str | None,
     email: str | None,
@@ -198,7 +196,6 @@ async def create_supplier(
             category_key=(primary_category_key or "all"),
             margin_multiplier=margin_multiplier,
             supplier_discount_pct=supplier_discount_pct,
-            customer_discount_pct=customer_discount_pct,
         )
     )
     await db.commit()
@@ -260,7 +257,6 @@ async def upsert_supplier_category_pricing(
     *,
     margin_multiplier: float | None = None,
     supplier_discount_pct: float | None = None,
-    customer_discount_pct: float | None = None,
 ) -> SupplierCategoryPricing:
     row = await get_supplier_category_pricing(supplier_id, category_key, db)
     if row is None:
@@ -271,8 +267,6 @@ async def upsert_supplier_category_pricing(
         row.margin_multiplier = margin_multiplier
     if supplier_discount_pct is not None:
         row.supplier_discount_pct = supplier_discount_pct
-    if customer_discount_pct is not None:
-        row.customer_discount_pct = customer_discount_pct
     await db.commit()
     await db.refresh(row)
     return row

@@ -30,6 +30,7 @@ class ClientCompany(Base):
     source: Mapped[str] = mapped_column(String(50), default="manual")
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    default_discount_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     total_enquiry_count: Mapped[int] = mapped_column(Integer, default=0)
 
@@ -83,6 +84,38 @@ class ClientBranch(Base):
     )
 
     company: Mapped["ClientCompany"] = relationship("ClientCompany", back_populates="branches")
+    employees: Mapped[list["ClientEmployee"]] = relationship(
+        "ClientEmployee",
+        back_populates="branch",
+        cascade="all, delete-orphan",
+    )
+
+
+class ClientEmployee(Base):
+    """Contact person at a client branch (quotes can be attributed per employee)."""
+
+    __tablename__ = "client_employees"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    branch_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("client_branches.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    full_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    email: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    designation: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
+    )
+
+    branch: Mapped["ClientBranch"] = relationship("ClientBranch", back_populates="employees")
 
 
 class Enquiry(Base):
@@ -159,11 +192,23 @@ class Quotation(Base):
     freight_note: Mapped[str] = mapped_column(String(255), nullable=False, default="Extra at actual")
     total_amount: Mapped[float] = mapped_column(Float, nullable=False)
     validity_days: Mapped[int] = mapped_column(Integer, nullable=False, default=15)
-    status: Mapped[str] = mapped_column(String(50), nullable=False, default="draft")
+    #: CRM: po_received | lost | hold | ongoing
+    status: Mapped[str] = mapped_column(String(50), nullable=False, default="ongoing")
+    status_remarks: Mapped[str | None] = mapped_column(Text, nullable=True)
     pdf_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: PDF-only display tweaks (line descriptions/size, optional notes); does not change catalog / quote math.
+    pdf_display_overrides: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+    client_employee_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("client_employees.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
 
     enquiry: Mapped["Enquiry"] = relationship(back_populates="quotations")
+    client_employee: Mapped["ClientEmployee | None"] = relationship("ClientEmployee")
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)

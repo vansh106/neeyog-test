@@ -6,16 +6,62 @@ Raises only from core.exceptions.
 
 import json
 import uuid
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
-from sqlalchemy import and_, delete, func, select
+from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from core.config import get_settings
 from core.exceptions import ProductNotFoundError, QuotationBuildError
-from db.models import AuditLog, Quotation, QuotationProductHistory
+from db.models import AuditLog, ClientCompany, Quotation, QuotationProductHistory
 from services import enquiry_service as enquiry_svc
 from services.pdf_service import generate_quotation_pdf
+
+QUOTATION_CRM_STATUSES: frozenset[str] = frozenset({"po_received", "lost", "hold", "ongoing"})
+
+
+def _trim_pdf_display_overrides(overrides: dict | None, line_count: int) -> dict | None:
+    if overrides is None:
+        return None
+    if not isinstance(overrides, dict):
+        return None
+    out = dict(overrides)
+    lines = out.get("lines")
+    if isinstance(lines, list):
+        out["lines"] = lines[: max(0, line_count)]
+    return out
+
+
+def _quotation_payload_for_pdf(q: Quotation) -> dict:
+    li = q.line_items if isinstance(q.line_items, list) else []
+    ov = q.pdf_display_overrides if isinstance(q.pdf_display_overrides, dict) else {}
+    return {
+        "quote_number": q.quote_number,
+        "client_name": q.client_name,
+        "client_company": q.client_company,
+        "client_email": q.client_email,
+        "client_phone": q.client_phone,
+        "line_items": li,
+        "subtotal": float(q.subtotal or 0),
+        "gst_rate": float(q.gst_rate),
+        "gst_amount": float(q.gst_amount or 0),
+        "pf_rate": float(q.pf_rate),
+        "pf_amount": float(q.pf_amount or 0),
+        "freight_note": q.freight_note or "Extra at actual",
+        "total_amount": float(q.total_amount or 0),
+        "validity_days": int(q.validity_days or 15),
+        "professional_notes": q.notes or "",
+        "pdf_display_overrides": ov,
+    }
+
+
+async def regenerate_quotation_pdf(q: Quotation) -> str | None:
+    settings = get_settings()
+    client_json = settings.get_client_json()
+    pdf_path = await generate_quotation_pdf(_quotation_payload_for_pdf(q), client_json)
+    return pdf_path
 
 
 def _safe_float(x: object, default: float = 0.0) -> float:
@@ -41,7 +87,16 @@ def _diff_quote_lines(before: list[dict], after: list[dict]) -> dict:
     added = [k for k in amap.keys() if k not in bmap]
     removed = [k for k in bmap.keys() if k not in amap]
     changed: list[dict] = []
-    fields = ("description", "quantity", "unit_price", "unit", "line_total")
+    fields = (
+        "description",
+        "quantity",
+        "base_unit_price",
+        "customer_discount_pct",
+        "customer_discount_amount",
+        "unit_price",
+        "unit",
+        "line_total",
+    )
     for k in amap.keys():
         if k not in bmap:
             continue
@@ -60,7 +115,7 @@ def _diff_quote_lines(before: list[dict], after: list[dict]) -> dict:
                     av = int(av) if av is not None else None
                 except Exception:
                     pass
-            if f in ("unit_price", "line_total"):
+            if f in ("base_unit_price", "customer_discount_pct", "customer_discount_amount", "unit_price", "line_total"):
                 bv = round(_safe_float(bv, 0.0), 2)
                 av = round(_safe_float(av, 0.0), 2)
             if (bv is None and av is None) or str(bv) == str(av):
@@ -80,7 +135,9 @@ def _diff_quote_lines(before: list[dict], after: list[dict]) -> dict:
 async def get_quotation(quotation_id: str, db: AsyncSession) -> Quotation:
     """Fetch a quotation by ID. Raises ProductNotFoundError if missing."""
     result = await db.execute(
-        select(Quotation).where(Quotation.id == quotation_id)
+        select(Quotation)
+        .options(selectinload(Quotation.client_employee))
+        .where(Quotation.id == quotation_id)
     )
     quotation = result.scalar_one_or_none()
     if not quotation:
@@ -110,15 +167,96 @@ async def list_quotations(
     db: AsyncSession,
     limit: int = 50,
     offset: int = 0,
+    *,
+    search: str | None = None,
+    client_name: str | None = None,
+    status: str | None = None,
+    date_from: date | None = None,
+    date_to: date | None = None,
 ) -> list[Quotation]:
-    """Return list of quotations ordered by creation date."""
-    result = await db.execute(
-        select(Quotation)
-        .order_by(Quotation.created_at.desc())
-        .offset(offset)
-        .limit(limit)
-    )
+    """Return list of quotations ordered by creation date, with optional filters."""
+    stmt = select(Quotation)
+    conds: list = []
+
+    if search and str(search).strip():
+        term = f"%{str(search).strip()}%"
+        conds.append(
+            or_(
+                Quotation.quote_number.ilike(term),
+                Quotation.client_name.ilike(term),
+                Quotation.client_company.ilike(term),
+            )
+        )
+
+    if client_name and str(client_name).strip():
+        cn = f"%{str(client_name).strip()}%"
+        conds.append(
+            or_(
+                Quotation.client_name.ilike(cn),
+                Quotation.client_company.ilike(cn),
+            )
+        )
+
+    if status and str(status).strip():
+        conds.append(Quotation.status == str(status).strip())
+
+    if date_from is not None:
+        dt0 = datetime.combine(date_from, datetime.min.time(), tzinfo=timezone.utc)
+        conds.append(Quotation.created_at >= dt0)
+
+    if date_to is not None:
+        dt1 = datetime.combine(date_to + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
+        conds.append(Quotation.created_at < dt1)
+
+    if conds:
+        stmt = stmt.where(and_(*conds))
+
+    stmt = stmt.order_by(Quotation.created_at.desc()).offset(offset).limit(limit)
+    result = await db.execute(stmt)
     return list(result.scalars().all())
+
+
+async def update_quotation_crm_status(
+    quotation_id: str,
+    status: str,
+    status_remarks: str | None,
+    db: AsyncSession,
+    *,
+    performed_by: str = "user",
+    performed_by_name: str | None = None,
+) -> Quotation:
+    st = str(status or "").strip()
+    if st not in QUOTATION_CRM_STATUSES:
+        raise ValueError(f"Invalid status. Use one of: {', '.join(sorted(QUOTATION_CRM_STATUSES))}")
+
+    remarks = (str(status_remarks).strip() if status_remarks is not None else "") or None
+    if st in ("lost", "hold") and not remarks:
+        raise ValueError("Remarks are required for Lost and Hold")
+
+    q = await get_quotation(quotation_id, db)
+    q.status = st
+    q.status_remarks = remarks if st in ("lost", "hold") else None
+
+    db.add(
+        AuditLog(
+            id=uuid.uuid4(),
+            entity_type="quotation",
+            entity_id=q.id,
+            action="quotation_crm_status",
+            performed_by=performed_by or "user",
+            details={
+                "performed_by_name": performed_by_name,
+                "quotation_id": str(q.id),
+                "quote_number": q.quote_number,
+                "status": st,
+                "status_remarks": q.status_remarks,
+            },
+        )
+    )
+
+    await db.commit()
+    await db.refresh(q)
+    return q
 
 
 async def get_product_quote_history(
@@ -222,6 +360,15 @@ async def update_quotation_from_manual_line_items(
     parsed_products, matched_products, quote_line_items, history_rows = (
         enquiry_svc.expand_manual_line_items_to_quote_parts(line_items_in)
     )
+    chosen_discount_pct: float | None = None
+    for li in line_items_in:
+        if not isinstance(li, dict):
+            continue
+        d = enquiry_svc._normalize_discount_pct(li.get("customer_discount_pct"))
+        if d is None:
+            continue
+        chosen_discount_pct = d
+        break
     if not quote_line_items:
         raise ValueError("At least one valid line item is required")
 
@@ -274,6 +421,10 @@ async def update_quotation_from_manual_line_items(
     q.gst_amount = gst_amount
     q.pf_amount = pf_amount
     q.total_amount = total_amount
+    q.pdf_display_overrides = _trim_pdf_display_overrides(
+        q.pdf_display_overrides if isinstance(q.pdf_display_overrides, dict) else None,
+        len(quote_line_items),
+    )
 
     enquiry.matched_products = matched_products
     payload: dict = {}
@@ -295,20 +446,14 @@ async def update_quotation_from_manual_line_items(
 
     client_json = settings.get_client_json()
     quotation_data = {
-        "quote_number": q.quote_number,
-        "client_name": q.client_name,
-        "client_company": q.client_company,
-        "client_email": q.client_email,
-        "client_phone": q.client_phone,
+        **_quotation_payload_for_pdf(q),
         "line_items": quote_line_items,
         "subtotal": subtotal,
         "gst_rate": gst_rate,
         "gst_amount": gst_amount,
         "pf_rate": pf_rate,
         "pf_amount": pf_amount,
-        "freight_note": q.freight_note or "Extra at actual",
         "total_amount": total_amount,
-        "professional_notes": q.notes or "",
     }
 
     pdf_path = await generate_quotation_pdf(quotation_data, client_json)
@@ -339,6 +484,54 @@ async def update_quotation_from_manual_line_items(
                 "diff": diff,
                 "totals_before": before_totals,
                 "totals_after": after_totals,
+            },
+        )
+    )
+
+    if enquiry.company_id is not None and chosen_discount_pct is not None:
+        company = await db.get(ClientCompany, enquiry.company_id)
+        if company is not None:
+            company.default_discount_pct = float(chosen_discount_pct)
+
+    await db.commit()
+    await db.refresh(q)
+    return q
+
+
+async def update_quotation_pdf_display_overrides(
+    quotation_id: str,
+    pdf_display_overrides: dict | None,
+    db: AsyncSession,
+    *,
+    performed_by: str = "user",
+    performed_by_name: str | None = None,
+) -> Quotation:
+    """Store PDF-only text overlays (line description/size, notes) and regenerate the PDF file."""
+    q = await get_quotation(quotation_id, db)
+    line_count = len(q.line_items) if isinstance(q.line_items, list) else 0
+
+    if pdf_display_overrides is None:
+        q.pdf_display_overrides = None
+    elif isinstance(pdf_display_overrides, dict):
+        q.pdf_display_overrides = _trim_pdf_display_overrides(pdf_display_overrides, line_count)
+    else:
+        raise ValueError("pdf_display_overrides must be an object or null")
+
+    pdf_path = await regenerate_quotation_pdf(q)
+    if pdf_path:
+        q.pdf_path = pdf_path
+
+    db.add(
+        AuditLog(
+            id=uuid.uuid4(),
+            entity_type="quotation",
+            entity_id=q.id,
+            action="quotation_pdf_display_updated",
+            performed_by=performed_by or "user",
+            details={
+                "performed_by_name": performed_by_name,
+                "quotation_id": str(q.id),
+                "quote_number": q.quote_number,
             },
         )
     )

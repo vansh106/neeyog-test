@@ -124,7 +124,9 @@ export function manualLineItemsToAssembledProducts(items: ManualLineItem[]): Ass
       bracket,
       include_bracket: include,
       quantity: qty,
+      unit: li.selectedProduct?.unit || 'Nos',
       unit_price,
+      component_pricing: li.component_pricing as AssembledProduct['component_pricing'],
       has_unknown_prices: false,
       unknown_components: [],
       price_breakdown: [],
@@ -161,7 +163,12 @@ export function quotationLinesToFallbackManualItems(lines: QuotationLineItem[]):
     const id = ct && cr ? `${ct}:${cr}` : `quote-line:${i}:${uuidv4()}`
     const qty = typeof line.quantity === 'number' && line.quantity > 0 ? line.quantity : 1
     const unit = (line.unit || 'Nos').toString() || 'Nos'
-    const unit_price = typeof line.unit_price === 'number' ? line.unit_price : Number(line.unit_price) || 0
+    const unit_price =
+      typeof line.base_unit_price === 'number'
+        ? line.base_unit_price
+        : typeof line.unit_price === 'number'
+          ? line.unit_price
+          : Number(line.unit_price) || 0
 
     return {
       id: uuidv4(),
@@ -178,6 +185,10 @@ export function quotationLinesToFallbackManualItems(lines: QuotationLineItem[]):
         display_label: name,
       },
       quantity: qty,
+      customer_discount_pct:
+        typeof line.customer_discount_pct === 'number' ? line.customer_discount_pct : undefined,
+      component_pricing:
+        (line as unknown as { component_pricing?: Record<string, unknown> }).component_pricing,
     }
   })
 }

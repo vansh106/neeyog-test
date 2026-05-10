@@ -72,6 +72,8 @@ class ManualLineItemRequest(BaseModel):
     cascadeSelections: dict[str, str] = {}
     selectedProduct: ManualSelectedProduct
     quantity: int = 1
+    customer_discount_pct: float | None = None
+    component_pricing: dict | None = None
 
 
 class ManualNewClientRequest(BaseModel):
@@ -95,11 +97,19 @@ class ManualSupplierPricingPayload(BaseModel):
     supplier_id: str
     supplier_name: str
     margin_multiplier: float
-    customer_discount_pct: float
     subtotal: float
     gst_amount: float
     pf_amount: float
     grand_total: float
+
+
+class ManualNewClientEmployeeRequest(BaseModel):
+    """Optional contact to create under the new branch when submitting manual entry."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    full_name: str = Field(..., alias="fullName")
+    email: str | None = None
 
 
 class ManualDropdownProcessRequest(BaseModel):
@@ -113,6 +123,9 @@ class ManualDropdownProcessRequest(BaseModel):
     notes: str = ""
     supplier_pricing: ManualSupplierPricingPayload | None = Field(None, alias="supplierPricing")
     target_enquiry_id: str | None = Field(None, alias="targetEnquiryId")
+    #: Branch contact person for this quote (must belong to selected branch unless newClientEmployee creates one).
+    client_employee_id: str | None = Field(None, alias="clientEmployeeId")
+    new_client_employee: ManualNewClientEmployeeRequest | None = Field(None, alias="newClientEmployee")
 
     @model_validator(mode="after")
     def validate_fields(self):

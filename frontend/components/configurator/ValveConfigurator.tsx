@@ -14,7 +14,6 @@ import type {
   Accessories,
   AccessoryItem,
   AssembledProduct,
-  BracketCoupler,
   CascadeStep,
   OperatorKey,
   OperatorModel,
@@ -76,7 +75,12 @@ function catalogRowToValveProduct(
 
 type Stage = 'valve_specs' | 'operator' | 'actuator' | 'accessories' | 'supplier' | 'complete'
 
-type SpecSeed = { catalog_category: string; field_values: Record<string, string> }
+type SpecSeed = {
+  catalog_category: string
+  field_values: Record<string, string>
+  /** When no ``initialProduct``, seeds qty from matcher RFQ line. */
+  quantity?: number
+}
 
 type Props = {
   productIndex: number
@@ -87,6 +91,17 @@ type Props = {
   initialSpecSeed?: SpecSeed | null
   suppliers?: SupplierResponse[]
 }
+
+type ComponentPricingEntry = {
+  enabled: boolean
+  supplier_id: string | null
+  supplier_name: string | null
+  temp_price: string
+}
+
+type ComponentPricingState = Record<string, ComponentPricingEntry>
+const UNIT_OPTIONS = ['Nos', 'Pcs', 'Set', 'Pair', 'Meter', 'Kg'] as const
+const ADDON_ENABLED_CATEGORIES = new Set(['butterfly_valve', 'ball_valve'])
 
 function emptySpecs(): ValveSpecSelections {
   return { catalog_category: null, field_values: {} }
@@ -128,6 +143,10 @@ function valveProductToSpecs(v: ValveProduct): ValveSpecSelections {
 function priceText(v: number | null | undefined): string {
   if (v == null) return '₹TBD'
   return formatCurrency(v)
+}
+
+function stripMasconPrefix(label: string): string {
+  return label.replace(/^Mascon\s*—\s*/i, '').trim()
 }
 
 function OperatorKeyLabel(key: OperatorKey | null): string {
@@ -231,13 +250,12 @@ export function CompletedProductCard({
         {product.positioner && (
           <p className="text-surface-muted">Positioner: {product.positioner.type}</p>
         )}
-        {product.include_bracket && product.bracket && (
-          <p className="text-surface-muted">Bracket & Coupler: {product.bracket.size}</p>
-        )}
       </div>
 
       <div className="mt-3 flex items-center justify-between border-t border-surface-border pt-2 text-[13px]">
-        <span className="text-surface-muted">Qty: {product.quantity}</span>
+        <span className="text-surface-muted">
+          Qty: {product.quantity} {product.unit || 'Nos'}
+        </span>
         <span className="font-mono text-brand-green-700">
           {product.unit_price != null ? (
             <>
@@ -285,9 +303,6 @@ export function ValveConfigurator({
   const [daOps, setDaOps] = useState<OperatorModel[]>([])
   const [saOps, setSaOps] = useState<OperatorModel[]>([])
   const [constructWay, setConstructWay] = useState<string | null>(null)
-  const [bracket, setBracket] = useState<BracketCoupler | null>(
-    initialProduct?.bracket ?? null,
-  )
   const [operatorKey, setOperatorKey] = useState<OperatorKey | null>(
     initialProduct?.operator_key ?? null,
   )
@@ -305,17 +320,15 @@ export function ValveConfigurator({
   const [positioner, setPositioner] = useState<AccessoryItem | null>(
     initialProduct?.positioner ?? null,
   )
-  const [includeBracket, setIncludeBracket] = useState<boolean>(
-    initialProduct?.include_bracket ?? false,
+  const [quantity, setQuantity] = useState<number>(
+    initialProduct?.quantity ?? initialSpecSeed?.quantity ?? 1,
+  )
+  const [unit, setUnit] = useState<string>(initialProduct?.unit ?? 'Nos')
+  const [customerDiscountPct, setCustomerDiscountPct] = useState<string>(
+    initialProduct?.customer_discount_pct != null ? String(initialProduct.customer_discount_pct) : '',
   )
 
-  const [quantity, setQuantity] = useState<number>(initialProduct?.quantity ?? 1)
-
   const [supplierId, setSupplierId] = useState<string | null>(initialProduct?.supplier_id ?? null)
-  const supplierLabel = useMemo(() => {
-    if (!supplierId) return null
-    return (suppliers ?? []).find((s) => s.id === supplierId)?.name ?? null
-  }, [supplierId, suppliers])
 
   useEffect(() => {
     if (supplierId) return
@@ -325,11 +338,12 @@ export function ValveConfigurator({
     setSupplierId(pref?.id ?? active[0].id)
   }, [supplierId, suppliers])
 
+  const [componentPricing, setComponentPricing] = useState<ComponentPricingState>({})
+
   const categoryDisplayLabel = useMemo(() => {
     if (!specs.catalog_category) return ''
-    return (
-      valveCategories.find((c) => c.key === specs.catalog_category)?.label ?? specs.catalog_category
-    )
+    const raw = valveCategories.find((c) => c.key === specs.catalog_category)?.label ?? specs.catalog_category
+    return stripMasconPrefix(raw)
   }, [specs.catalog_category, valveCategories])
 
   const {
@@ -398,6 +412,33 @@ export function ValveConfigurator({
   }, [specs, catalog, resolve, cascadeSteps, categoryDisplayLabel])
 
   useEffect(() => {
+    const activeSupplier = supplierId
+      ? (suppliers ?? []).find((s) => s.id === supplierId) ?? null
+      : null
+    setComponentPricing((prev) => {
+      const mk = (key: string, enabled: boolean): ComponentPricingEntry => {
+        const p = prev[key]
+        return {
+          enabled,
+          supplier_id: p?.supplier_id ?? activeSupplier?.id ?? null,
+          supplier_name: p?.supplier_name ?? activeSupplier?.name ?? null,
+          temp_price: p?.temp_price != null ? String(p.temp_price) : '',
+        }
+      }
+      const operatorPricingEnabled =
+        operatorKey != null && operatorKey !== 'bare_shaft'
+      return {
+        valve: mk('valve', !!resolvedValve),
+        operator: mk('operator', operatorPricingEnabled),
+        sov: mk('sov', !!sov),
+        lsb: mk('lsb', !!lsb),
+        positioner: mk('positioner', !!positioner),
+        bracket: mk('bracket', false),
+      }
+    })
+  }, [resolvedValve, operatorKey, sov, lsb, positioner, supplierId, suppliers])
+
+  useEffect(() => {
     if (catalogLoading || !specs.catalog_category || catalog.length === 0 || cascadeSteps.length === 0) return
     setSpecs((prev) => {
       if (!prev.catalog_category) return prev
@@ -440,13 +481,11 @@ export function ValveConfigurator({
         setOperatorOptions(res.operator_options ?? [])
         setDaOps(res.da_operators ?? [])
         setSaOps(res.sa_operators ?? [])
-        setBracket(res.bracket ?? null)
         setConstructWay(res.construct_way ?? null)
       } catch {
         setOperatorOptions([])
         setDaOps([])
         setSaOps([])
-        setBracket(null)
         setConstructWay(null)
       }
     })()
@@ -459,15 +498,12 @@ export function ValveConfigurator({
     const sovPrice = sov?.price ?? null
     const lsbPrice = lsb?.price ?? null
     const posPrice = positioner?.price ?? null
-    const brPrice = includeBracket ? bracket?.price ?? null : null
 
     let subtotal = 0
-    const unknowns: string[] = []
     const breakdown: Array<{ component: string; price: number | null }> = []
 
     const push = (component: string, price: number | null) => {
-      if (price == null) unknowns.push(component)
-      else subtotal += price
+      if (price != null) subtotal += price
       breakdown.push({ component, price })
     }
 
@@ -489,25 +525,77 @@ export function ValveConfigurator({
     if (sov) push('SOV', sovPrice)
     if (lsb) push('Limit switch box', lsbPrice)
     if (positioner) push('Positioner', posPrice)
-    if (includeBracket && bracket) push('Bracket & Coupler', brPrice)
 
-    const hasUnknown = unknowns.length > 0
-    return {
-      unit_price: hasUnknown ? null : subtotal,
-      subtotal,
-      has_unknown_prices: hasUnknown,
-      unknown_components: unknowns,
-      breakdown,
+    const componentBaseByKey: Record<string, number | null> = {
+      valve: valvePrice,
+      operator: operatorKey === 'da' || operatorKey === 'sa' ? opPrice : null,
+      sov: sovPrice,
+      lsb: lsbPrice,
+      positioner: posPrice,
+      bracket: null,
     }
-  }, [resolvedValve, operatorKey, operatorModel, sov, lsb, positioner, includeBracket, bracket])
+    const parseTemp = (x: string): number | null => {
+      const n = Number((x || '').trim())
+      return Number.isFinite(n) && n > 0 ? n : null
+    }
+    const componentFinalByKey: Record<string, number | null> = {}
+    for (const [key, base] of Object.entries(componentBaseByKey)) {
+      const cfg = componentPricing[key]
+      const enabled = (() => {
+        if (key === 'valve') return !!resolvedValve
+        if (key === 'operator')
+          return operatorKey != null && operatorKey !== 'bare_shaft'
+        if (key === 'sov') return !!sov
+        if (key === 'lsb') return !!lsb
+        if (key === 'positioner') return !!positioner
+        if (key === 'bracket') return false
+        return false
+      })()
+      if (!enabled) continue
+      const temp = cfg ? parseTemp(cfg.temp_price) : null
+      componentFinalByKey[key] = temp ?? base
+    }
+    const componentUnknowns = Object.entries(componentFinalByKey)
+      .filter(([, price]) => price == null)
+      .map(([k]) => k)
+    const unknownKeyLabels: Record<string, string> = {
+      valve: 'Valve',
+      operator: 'Operator',
+      sov: 'SOV',
+      lsb: 'Limit switch box',
+      positioner: 'Positioner',
+      bracket: 'Bracket & Coupler',
+    }
+    const componentSubtotal = Object.values(componentFinalByKey).reduce((sum, v) => sum + (v ?? 0), 0)
+    const productDiscount = Math.max(0, Math.min(100, Number(customerDiscountPct || 0)))
+    const discountedUnit = componentSubtotal * (1 - productDiscount / 100)
+    return {
+      unit_price: componentUnknowns.length > 0 ? null : discountedUnit,
+      subtotal,
+      // Master list prices can be null while Step 5 temp prices still resolve the line — only block on unresolved totals.
+      has_unknown_prices: componentUnknowns.length > 0,
+      unknown_components: componentUnknowns.map((k) => unknownKeyLabels[k] ?? k),
+      breakdown,
+      component_final_prices: componentFinalByKey,
+      component_subtotal: componentSubtotal,
+      product_discount_pct: productDiscount,
+    }
+  }, [resolvedValve, operatorKey, operatorModel, sov, lsb, positioner, componentPricing, customerDiscountPct])
 
   const isDaSa = operatorKey === 'da' || operatorKey === 'sa'
+  const supportsOperatorAccessoryFlow = !!specs.catalog_category && ADDON_ENABLED_CATEGORIES.has(specs.catalog_category)
   const operatorUnlocksAccessories =
-    operatorKey === 'da' || operatorKey === 'sa' || operatorKey === 'electric_actuator'
-  const canFinishNow =
-    operatorKey === 'bare_shaft' || operatorKey === 'manual' || operatorKey === 'gear_box'
+    supportsOperatorAccessoryFlow && operatorKey !== null && operatorKey !== 'bare_shaft'
+  const canFinishNow = supportsOperatorAccessoryFlow && operatorKey === 'bare_shaft'
   const availableModels: OperatorModel[] =
     operatorKey === 'da' ? daOps : operatorKey === 'sa' ? saOps : []
+
+  useEffect(() => {
+    if (supportsOperatorAccessoryFlow) return
+    if (stage === 'operator' || stage === 'actuator' || stage === 'accessories') {
+      setStage('supplier')
+    }
+  }, [supportsOperatorAccessoryFlow, stage])
 
   // ── Handlers ──────────────────────────────────────────────────────────
   const pickCatalogCategory = (key: string) => {
@@ -532,14 +620,38 @@ export function ValveConfigurator({
     operator_key: operatorKey,
     operator_model:
       operatorKey === 'da' || operatorKey === 'sa' ? operatorModel : null,
-    supplier_id: supplierId,
-    supplier_name: (suppliers ?? []).find((s) => s.id === supplierId)?.name ?? null,
+    supplier_id:
+      componentPricing.valve?.supplier_id ??
+      Object.values(componentPricing).find((x) => x.enabled && x.supplier_id)?.supplier_id ??
+      supplierId,
+    supplier_name:
+      componentPricing.valve?.supplier_name ??
+      Object.values(componentPricing).find((x) => x.enabled && x.supplier_name)?.supplier_name ??
+      (suppliers ?? []).find((s) => s.id === supplierId)?.name ??
+      null,
+    component_pricing: Object.fromEntries(
+      Object.entries(componentPricing).map(([k, v]) => {
+        const base = priceInfo.component_final_prices?.[k]
+        return [
+          k,
+          {
+            enabled: v.enabled,
+            supplier_id: v.supplier_id,
+            supplier_name: v.supplier_name,
+            final_price: base ?? null,
+            temp_price: Number.isFinite(Number(v.temp_price)) ? Number(v.temp_price) : null,
+          },
+        ]
+      }),
+    ),
     sov,
     limit_switch_box: lsb,
     positioner,
-    bracket,
-    include_bracket: includeBracket && !!bracket,
+    bracket: null,
+    include_bracket: false,
     quantity: Math.max(1, Math.floor(quantity || 1)),
+    unit: unit || 'Nos',
+    customer_discount_pct: Number.isFinite(Number(customerDiscountPct)) ? Number(customerDiscountPct) : null,
     unit_price: priceInfo.unit_price,
     has_unknown_prices: priceInfo.has_unknown_prices,
     unknown_components: priceInfo.unknown_components,
@@ -547,39 +659,105 @@ export function ValveConfigurator({
   })
 
   const finishAndEmit = () => {
-    if (!supplierId && (suppliers ?? []).length) return
+    const requiredMissing = Object.values(componentPricing).some(
+      (entry) => entry.enabled && (suppliers ?? []).length > 0 && !entry.supplier_id,
+    )
+    if (requiredMissing) return
     onProductComplete(buildAssembled())
     setStage('complete')
+  }
+  const hasSuppliers = (suppliers ?? []).length > 0
+  const componentNeedsSupplier = (key: string): boolean =>
+    hasSuppliers && !!componentPricing[key]?.enabled && !componentPricing[key]?.supplier_id
+
+  const renderComponentPricing = (key: string, title: string) => {
+    const cfg = componentPricing[key]
+    if (!cfg?.enabled) return null
+    return (
+      <div className="rounded-lg border border-surface-border bg-surface-page p-3">
+        <p className="text-[12px] font-semibold uppercase tracking-wide text-brand-navy-500">
+          {title} supplier & pricing
+        </p>
+        <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
+          <Select
+            value={toSelectValue(cfg.supplier_id ?? '')}
+            onValueChange={(raw) =>
+              setComponentPricing((prev) => ({
+                ...prev,
+                [key]: {
+                  ...prev[key],
+                  supplier_id: fromSelectValue(raw) || null,
+                  supplier_name:
+                    (suppliers ?? []).find((s) => s.id === fromSelectValue(raw))?.name ?? null,
+                },
+              }))
+            }
+          >
+            <SelectTrigger className="h-10 w-full">
+              <SelectValue placeholder="Select supplier">
+                {cfg.supplier_name}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={SELECT_EMPTY}>
+                <span className="text-muted-foreground">Select…</span>
+              </SelectItem>
+              {(suppliers ?? [])
+                .filter((s) => s.is_active)
+                .map((s) => (
+                  <SelectItem key={s.id} value={s.id}>
+                    {s.name}
+                    {s.is_preferred ? ' ★' : ''}
+                  </SelectItem>
+                ))}
+            </SelectContent>
+          </Select>
+          <div className="sm:col-span-2 rounded-md border border-surface-border bg-white px-3 py-2 text-[12px] text-surface-muted">
+            Temporary price is editable in Step 5 Review.
+          </div>
+        </div>
+      </div>
+    )
   }
 
   // ── Stage indicator ───────────────────────────────────────────────────
   // Supplier selection is always the last step before completion.
-  const baseSteps = isDaSa ? 4 : operatorUnlocksAccessories ? 3 : 2
+  const baseSteps = supportsOperatorAccessoryFlow
+    ? isDaSa
+      ? 4
+      : operatorUnlocksAccessories
+        ? 3
+        : 2
+    : 1
   const totalSteps = baseSteps + 1
   const stageNumber =
     stage === 'valve_specs'
       ? 1
-      : stage === 'operator'
-        ? 2
-        : stage === 'actuator'
-          ? 3
-          : stage === 'accessories'
-            ? isDaSa
-              ? 4
-              : 3
-            : stage === 'supplier'
-              ? totalSteps
-              : totalSteps
+      : !supportsOperatorAccessoryFlow
+        ? totalSteps
+        : stage === 'operator'
+          ? 2
+          : stage === 'actuator'
+            ? 3
+            : stage === 'accessories'
+              ? isDaSa
+                ? 4
+                : 3
+              : stage === 'supplier'
+                ? totalSteps
+                : totalSteps
   const stageTitle =
     stage === 'valve_specs'
       ? `Step 1 of ${totalSteps} — Select Valve Specifications`
+      : !supportsOperatorAccessoryFlow
+        ? `Step ${totalSteps} of ${totalSteps} — Review & Add`
       : stage === 'operator'
         ? `Step 2 of ${totalSteps} — Select Operator Type`
         : stage === 'actuator'
           ? `Step 3 of ${totalSteps} — Select ${operatorKey === 'da' ? 'Double Acting' : 'Single Acting'} Actuator`
           : stage === 'accessories'
             ? `Step ${isDaSa ? 4 : 3} of ${totalSteps} — Optional Accessories`
-            : `Step ${totalSteps} of ${totalSteps} — Select Supplier`
+            : `Step ${totalSteps} of ${totalSteps} — Review & Add`
 
   // ── Render ────────────────────────────────────────────────────────────
   if (stage === 'complete') {
@@ -651,7 +829,9 @@ export function ValveConfigurator({
                       : 'border-surface-border bg-white hover:bg-surface-page',
                   )}
                 >
-                  <p className="text-[13px] font-semibold text-gray-900 leading-snug">{c.label}</p>
+                  <p className="text-[13px] font-semibold text-gray-900 leading-snug">
+                    {stripMasconPrefix(c.label)}
+                  </p>
                 </button>
               )
             })}
@@ -732,6 +912,7 @@ export function ValveConfigurator({
               </p>
             </div>
           )}
+          {resolvedValve && renderComponentPricing('valve', 'Valve')}
 
           <div className="flex items-center justify-between">
             <span className="text-[12px] text-surface-muted">
@@ -741,18 +922,18 @@ export function ValveConfigurator({
             </span>
             <Button
               type="button"
-              onClick={() => setStage('operator')}
-              disabled={!resolvedValve}
+              onClick={() => setStage(supportsOperatorAccessoryFlow ? 'operator' : 'supplier')}
+              disabled={!resolvedValve || componentNeedsSupplier('valve')}
               className="bg-brand-green-500 text-white hover:bg-brand-green-600"
             >
-              Next <ChevronRight className="ml-1 size-4" />
+              {supportsOperatorAccessoryFlow ? 'Next' : 'Next: Review'} <ChevronRight className="ml-1 size-4" />
             </Button>
           </div>
         </div>
       )}
 
       {/* ── STAGE 2: Operator type ──────────────────────────────────── */}
-      {stage === 'operator' && (
+      {stage === 'operator' && supportsOperatorAccessoryFlow && (
         <div className="mt-4 space-y-4">
           {constructWay && (
             <div className="rounded-lg border border-surface-border bg-surface-page px-3 py-2 text-[12px] text-surface-muted">
@@ -816,7 +997,6 @@ export function ValveConfigurator({
               Selected: <span className="font-semibold">{OperatorKeyLabel(operatorKey)}</span>
             </div>
           )}
-
           <div className="flex items-center justify-between">
             <Button type="button" variant="outline" onClick={() => setStage('valve_specs')}>
               <ChevronLeft className="mr-1 size-4" /> Change Valve
@@ -825,7 +1005,7 @@ export function ValveConfigurator({
               <Button
                 type="button"
                 onClick={() => setStage('actuator')}
-                disabled={availableModels.length === 0}
+                disabled={availableModels.length === 0 || componentNeedsSupplier('operator')}
                 className="bg-brand-green-500 text-white hover:bg-brand-green-600 disabled:opacity-50"
               >
                 Next: Pick Actuator <ChevronRight className="ml-1 size-4" />
@@ -835,6 +1015,17 @@ export function ValveConfigurator({
               <Button
                 type="button"
                 onClick={() => setStage('accessories')}
+                disabled={componentNeedsSupplier('operator')}
+                className="bg-brand-green-500 text-white hover:bg-brand-green-600"
+              >
+                Next: Accessories <ChevronRight className="ml-1 size-4" />
+              </Button>
+            )}
+            {(operatorKey === 'manual' || operatorKey === 'gear_box') && (
+              <Button
+                type="button"
+                onClick={() => setStage('accessories')}
+                disabled={componentNeedsSupplier('operator')}
                 className="bg-brand-green-500 text-white hover:bg-brand-green-600"
               >
                 Next: Accessories <ChevronRight className="ml-1 size-4" />
@@ -844,6 +1035,7 @@ export function ValveConfigurator({
               <Button
                 type="button"
                 onClick={() => setStage('supplier')}
+                disabled={componentNeedsSupplier('operator')}
                 className="bg-brand-green-500 text-white hover:bg-brand-green-600"
               >
                 Next <ChevronRight className="ml-1 size-4" />
@@ -854,7 +1046,7 @@ export function ValveConfigurator({
       )}
 
       {/* ── STAGE 3: Actuator model (DA/SA only) ────────────────────── */}
-      {stage === 'actuator' && isDaSa && (
+      {stage === 'actuator' && isDaSa && supportsOperatorAccessoryFlow && (
         <div className="mt-4 space-y-4">
           <div className="rounded-lg border border-surface-border bg-surface-page px-3 py-2 text-[12px]">
             Pick the {operatorKey === 'da' ? 'Double Acting' : 'Single Acting'} actuator for a{' '}
@@ -910,6 +1102,7 @@ export function ValveConfigurator({
               </p>
             </div>
           )}
+          {operatorKey && renderComponentPricing('operator', 'Operator')}
 
           <div className="flex items-center justify-between">
             <Button type="button" variant="outline" onClick={() => setStage('operator')}>
@@ -918,7 +1111,7 @@ export function ValveConfigurator({
             <Button
               type="button"
               onClick={() => setStage('accessories')}
-              disabled={!operatorModel}
+              disabled={!operatorModel || componentNeedsSupplier('operator')}
               className="bg-brand-green-500 text-white hover:bg-brand-green-600 disabled:opacity-50"
             >
               Next: Accessories <ChevronRight className="ml-1 size-4" />
@@ -928,7 +1121,7 @@ export function ValveConfigurator({
       )}
 
       {/* ── STAGE 4 (or 3 for electric): Accessories ────────────────── */}
-      {stage === 'accessories' && (
+      {stage === 'accessories' && supportsOperatorAccessoryFlow && (
         <div className="mt-4 space-y-4">
           <p className="text-[12px] text-surface-muted">
             All accessories are optional. Select any combination.
@@ -942,50 +1135,35 @@ export function ValveConfigurator({
                 value={sov}
                 onChange={setSov}
               />
+              {sov && renderComponentPricing('sov', 'SOV')}
               <AccessoryToggleRow
                 label="Limit Switch Box (LSB)"
                 items={accessories?.limit_switch_boxes ?? []}
                 value={lsb}
                 onChange={setLsb}
               />
+              {lsb && renderComponentPricing('lsb', 'LSB')}
               <AccessoryToggleRow
                 label="Positioner"
                 items={accessories?.positioners ?? []}
                 value={positioner}
                 onChange={setPositioner}
               />
+              {positioner && renderComponentPricing('positioner', 'Positioner')}
             </>
-          )}
-
-          {/* Bracket & coupler */}
-          {operatorKey !== 'bare_shaft' && (
-            <div className="rounded-xl border border-surface-border bg-surface-page p-4">
-              <p className="text-[13px] font-semibold text-gray-900">Bracket & Coupler</p>
-              {bracket ? (
-                <label className="mt-2 flex cursor-pointer items-center gap-2 text-[13px]">
-                  <input
-                    type="checkbox"
-                    checked={includeBracket}
-                    onChange={(e) => setIncludeBracket(e.target.checked)}
-                  />
-                  <span>
-                    Include Bracket &amp; Coupler (Recommended). Size matched:{' '}
-                    <span className="font-mono">{bracket.size}</span> —{' '}
-                    {bracket.price != null ? formatCurrency(bracket.price) : '₹TBD'}
-                  </span>
-                </label>
-              ) : (
-                <p className="mt-2 text-[12px] text-brand-gold-700">
-                  Bracket & Coupler not available for this size — contact team
-                </p>
-              )}
-            </div>
           )}
 
           <PriceSummary
             price={priceInfo}
             quantity={quantity}
+            unit={unit}
             onQuantityChange={setQuantity}
+            onUnitChange={setUnit}
+            editableComponentPrices={false}
+            componentPricing={componentPricing}
+            setComponentPricing={setComponentPricing}
+            customerDiscountPct={customerDiscountPct}
+            onCustomerDiscountPctChange={setCustomerDiscountPct}
           />
 
           <div className="flex items-center justify-between">
@@ -1002,7 +1180,7 @@ export function ValveConfigurator({
               onClick={() => setStage('supplier')}
               className="bg-brand-green-500 text-white hover:bg-brand-green-600"
             >
-              Next: Supplier <ChevronRight className="ml-1 size-4" />
+              Next: Review <ChevronRight className="ml-1 size-4" />
             </Button>
           </div>
         </div>
@@ -1011,48 +1189,29 @@ export function ValveConfigurator({
       {stage === 'supplier' && (
         <div className="mt-4 space-y-4">
           <p className="text-[12px] text-surface-muted">
-            Select which supplier will provide this assembled product.
+            Review total and add this assembled product to quotation.
           </p>
 
-          {(suppliers ?? []).length === 0 ? (
-            <p className="text-[13px] text-surface-muted">
-              No suppliers configured. Add suppliers under Masters.
-            </p>
-          ) : (
-            <div className="space-y-1.5">
-              <div className="text-[10px] font-medium uppercase tracking-wide text-[#8A9488]">
-                Supplier
-              </div>
-              <Select
-                value={toSelectValue(supplierId ?? '')}
-                onValueChange={(raw) => setSupplierId(fromSelectValue(raw) || null)}
-              >
-                <SelectTrigger className="h-11 w-full">
-                  <SelectValue placeholder="Select supplier">
-                    {supplierLabel}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={SELECT_EMPTY}>
-                    <span className="text-muted-foreground">Select…</span>
-                  </SelectItem>
-                  {(suppliers ?? [])
-                    .filter((s) => s.is_active)
-                    .map((s) => (
-                      <SelectItem key={s.id} value={s.id}>
-                        {s.name}
-                        {s.is_preferred ? ' ★' : ''}
-                      </SelectItem>
-                    ))}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
+          {(suppliers ?? []).length > 0 &&
+            Object.entries(componentPricing)
+              .filter(([, cfg]) => cfg.enabled && !cfg.supplier_id)
+              .map(([k]) => (
+                <p key={k} className="text-[12px] text-red-600">
+                  Missing supplier for {k}.
+                </p>
+              ))}
 
           <PriceSummary
             price={priceInfo}
             quantity={quantity}
+            unit={unit}
             onQuantityChange={setQuantity}
+            onUnitChange={setUnit}
+            editableComponentPrices={true}
+            componentPricing={componentPricing}
+            setComponentPricing={setComponentPricing}
+            customerDiscountPct={customerDiscountPct}
+            onCustomerDiscountPctChange={setCustomerDiscountPct}
           />
 
           <div className="flex items-center justify-between">
@@ -1066,7 +1225,11 @@ export function ValveConfigurator({
             <Button
               type="button"
               onClick={finishAndEmit}
-              disabled={(suppliers ?? []).length > 0 && !supplierId}
+              disabled={
+                ((suppliers ?? []).length > 0 &&
+                  Object.values(componentPricing).some((entry) => entry.enabled && !entry.supplier_id)) ||
+                priceInfo.has_unknown_prices
+              }
               className="bg-brand-green-500 text-white hover:bg-brand-green-600 disabled:opacity-50"
             >
               <Check className="mr-1 size-4" /> Add to Quote
@@ -1152,7 +1315,14 @@ function AccessoryToggleRow({
 function PriceSummary({
   price,
   quantity,
+  unit,
   onQuantityChange,
+  onUnitChange,
+  editableComponentPrices,
+  componentPricing,
+  setComponentPricing,
+  customerDiscountPct,
+  onCustomerDiscountPctChange,
 }: {
   price: {
     unit_price: number | null
@@ -1160,10 +1330,29 @@ function PriceSummary({
     has_unknown_prices: boolean
     unknown_components: string[]
     breakdown: Array<{ component: string; price: number | null }>
+    component_subtotal?: number
+    product_discount_pct?: number
   }
   quantity: number
+  unit: string
   onQuantityChange: (q: number) => void
+  onUnitChange: (u: string) => void
+  editableComponentPrices: boolean
+  componentPricing: ComponentPricingState
+  setComponentPricing: (updater: (prev: ComponentPricingState) => ComponentPricingState) => void
+  customerDiscountPct: string
+  onCustomerDiscountPctChange: (v: string) => void
 }) {
+  const keyForComponent = (name: string): string => {
+    const s = name.toLowerCase()
+    if (s.includes('limit switch')) return 'lsb'
+    if (s.includes('positioner')) return 'positioner'
+    if (s.includes('sov')) return 'sov'
+    if (s.includes('bracket')) return 'bracket'
+    if (s.includes('gear')) return 'operator'
+    if (s.includes('da') || s.includes('sa') || s.includes('operator') || s.includes('actuator')) return 'operator'
+    return 'valve'
+  }
   return (
     <div className="sticky bottom-3 rounded-xl border border-surface-border bg-white p-4 shadow-sm">
       <p className="text-[12px] font-semibold uppercase tracking-wide text-brand-navy-500">
@@ -1171,14 +1360,40 @@ function PriceSummary({
       </p>
       <ul className="mt-2 space-y-1 text-[13px]">
         {price.breakdown.map((row, i) => (
-          <li key={`${row.component}-${i}`} className="flex items-center justify-between">
+          <li key={`${row.component}-${i}`} className="flex items-center justify-between gap-2">
             <span>{row.component}</span>
-            <span className="font-mono">
-              {row.price != null ? formatCurrency(row.price) : '₹TBD'}
-            </span>
+            {editableComponentPrices ? (
+              <Input
+                value={componentPricing[keyForComponent(row.component)]?.temp_price ?? ''}
+                onChange={(e) => {
+                  const key = keyForComponent(row.component)
+                  setComponentPricing((prev) => ({
+                    ...prev,
+                    [key]: { ...prev[key], temp_price: e.target.value },
+                  }))
+                }}
+                placeholder={row.price != null ? formatCurrency(row.price) : 'TBD'}
+                className="h-8 w-28 font-mono"
+              />
+            ) : (
+              <span className="font-mono">
+                {row.price != null ? formatCurrency(row.price) : '₹TBD'}
+              </span>
+            )}
           </li>
         ))}
       </ul>
+      {editableComponentPrices && (
+        <div className="mt-3 border-t border-surface-border pt-2 text-[13px]">
+          <div className="text-[11px] font-medium uppercase tracking-wide text-[#8A9488]">Customer discount (%)</div>
+          <Input
+            value={customerDiscountPct}
+            onChange={(e) => onCustomerDiscountPctChange(e.target.value)}
+            placeholder="Optional"
+            className="mt-1 h-9 w-28 font-mono"
+          />
+        </div>
+      )}
       <div className="mt-3 flex items-center justify-between border-t border-surface-border pt-2 text-[13px]">
         <span className="font-semibold">Unit price</span>
         <span className="font-mono text-brand-green-700">
@@ -1196,6 +1411,21 @@ function PriceSummary({
             onChange={(e) => onQuantityChange(Math.max(1, Number(e.target.value || 1)))}
             className="h-9 w-20"
           />
+          <Select
+            value={toSelectValue(unit)}
+            onValueChange={(v) => onUnitChange(fromSelectValue(v) || 'Nos')}
+          >
+            <SelectTrigger className="h-9 w-24">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {UNIT_OPTIONS.map((u) => (
+                <SelectItem key={u} value={u}>
+                  {u}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
         <div className="font-mono text-brand-green-700">
           Total:{' '}

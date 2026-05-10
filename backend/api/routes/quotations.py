@@ -1,5 +1,7 @@
 """Route definitions for quotation endpoints — thin router, no logic."""
 
+from datetime import date
+
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,8 +10,10 @@ from config.permissions import Permission
 from controllers import quotation_controller
 from controllers.quotation_controller import (
     QuotationAuditResponse,
+    QuotationCrmStatusBody,
     QuotationHistoryResponse,
     QuotationListItem,
+    QuotationPdfDisplayBody,
     QuotationUpdateLineItemsBody,
 )
 from core.auth_middleware import CurrentUser, require_permission
@@ -67,6 +71,28 @@ async def patch_quotation_line_items_route(
     return await quotation_controller.handle_patch_quotation_line_items(quotation_id, body, db, user)
 
 
+@router.patch("/{quotation_id}/pdf-display")
+async def patch_quotation_pdf_display_route(
+    quotation_id: str,
+    body: QuotationPdfDisplayBody,
+    user: CurrentUser = Depends(require_permission(Permission.APPROVE_QUOTATIONS)),
+    db: AsyncSession = Depends(get_db),
+):
+    """PDF-only text overlays for this quotation; regenerates the stored PDF."""
+    return await quotation_controller.handle_patch_quotation_pdf_display(quotation_id, body, db, user)
+
+
+@router.patch("/{quotation_id}/crm-status")
+async def patch_quotation_crm_status_route(
+    quotation_id: str,
+    body: QuotationCrmStatusBody,
+    user: CurrentUser = Depends(require_permission(Permission.APPROVE_QUOTATIONS)),
+    db: AsyncSession = Depends(get_db),
+):
+    """CRM status on the quotation list (PO received, Ongoing, Lost, Hold + remarks)."""
+    return await quotation_controller.handle_patch_quotation_crm_status(quotation_id, body, db, user)
+
+
 @router.get("/{quotation_id}/audit", response_model=QuotationAuditResponse)
 async def get_quotation_audit_route(
     quotation_id: str,
@@ -103,8 +129,22 @@ async def get_quotation_route(
 @router.get("/", response_model=list[QuotationListItem])
 async def list_quotations_route(
     _user: CurrentUser = Depends(require_permission(Permission.VIEW_QUOTATIONS)),
-    limit: int = Query(50, le=100),
+    limit: int = Query(50, le=2000),
     offset: int = Query(0),
+    search: str | None = Query(None, description="Quote number or client (partial)"),
+    client_name: str | None = Query(None, description="Filter by client name or company (partial)"),
+    status: str | None = Query(None, description="po_received | ongoing | lost | hold"),
+    date_from: date | None = Query(None, description="Created on/after (UTC date)"),
+    date_to: date | None = Query(None, description="Created on/before (UTC date)"),
     db: AsyncSession = Depends(get_db),
 ):
-    return await quotation_controller.handle_list_quotations(db, limit, offset)
+    return await quotation_controller.handle_list_quotations(
+        db,
+        limit,
+        offset,
+        search=search,
+        client_name=client_name,
+        status=status,
+        date_from=date_from,
+        date_to=date_to,
+    )

@@ -126,9 +126,10 @@ class Settings(BaseSettings):
 
     @property
     def is_supabase(self) -> bool:
-        """True when the primary DATABASE_URL points at a Supabase host."""
-        url = (self.DATABASE_URL or "").lower()
-        return "supabase.co" in url or "supabase.com" in url
+        """True when any configured DB URL points at Supabase (pooler or direct)."""
+        u = (self.DATABASE_URL or "").lower()
+        d = (self.DATABASE_URL_DIRECT or "").lower()
+        return "supabase.co" in u or "supabase.com" in u or "supabase.co" in d or "supabase.com" in d
 
 
 @lru_cache

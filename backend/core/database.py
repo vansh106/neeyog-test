@@ -1,9 +1,11 @@
 """Async SQLAlchemy engine + session factory.
 
 Works transparently against either a local PostgreSQL (Docker) or a hosted
-Supabase Postgres. When ``settings.is_supabase`` is true, the engine is
-configured for Supabase's transaction-mode pooler (PgBouncer), which
-requires prepared-statement caching to be disabled.
+Supabase Postgres. Supabase URLs use a **bounded connection pool** with
+prepared-statement caching disabled for PgBouncer compatibility.
+
+``NullPool`` is avoided: one new TCP connection per request exhausts Supabase
+connection limits under concurrent traffic and surfaces as pool checkout stalls.
 """
 
 import logging
@@ -14,7 +16,6 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.engine import URL, make_url
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.pool import NullPool
 from sqlalchemy.orm import DeclarativeBase
 
 from core.config import get_settings
@@ -100,11 +101,11 @@ def _sanitize_async_database_url(raw: str) -> tuple[str, dict[str, Any]]:
 def _build_engine_kwargs() -> dict[str, Any]:
     """Assemble ``create_async_engine`` kwargs appropriate for the target DB.
 
-    Supabase (PgBouncer in transaction mode) constraints:
-      * Prepared statements MUST be disabled — PgBouncer rewrites
-        statements between transactions. For asyncpg this means
-        ``statement_cache_size=0`` and ``prepared_statement_cache_size=0``.
-      * ``pool_pre_ping`` guards against stale pooled connections.
+    Supabase / PgBouncer:
+      * Disable asyncpg statement cache (``statement_cache_size=0``) so
+        transaction-pooler mode does not break; safe for session pooler too.
+      * Reuse connections via a **small** pool — ``NullPool`` opens a new
+        socket per request and quickly hits ``max_connections`` / stalls checkout.
     """
     kwargs: dict[str, Any] = {
         "pool_pre_ping": True,
@@ -115,12 +116,15 @@ def _build_engine_kwargs() -> dict[str, Any]:
     if settings.is_supabase:
         kwargs.update(
             {
-                # Supabase poolers can be sensitive; avoid reusing connections.
-                "poolclass": NullPool,
+                "pool_size": 3,
+                "max_overflow": 7,
+                "pool_timeout": 45,
                 "connect_args": {
                     "statement_cache_size": 0,
-                    # Supabase requires TLS.
                     "ssl": "require",
+                    # Fail connect early instead of hanging; seconds.
+                    "timeout": 60,
+                    "command_timeout": 120,
                 },
             }
         )
@@ -137,6 +141,9 @@ _engine_kwargs["connect_args"] = {
     **_url_connect_args,
 }
 engine = create_async_engine(_db_url, **_engine_kwargs)
+
+_pool_meta = {k: _engine_kwargs[k] for k in ("pool_size", "max_overflow", "pool_timeout") if k in _engine_kwargs}
+logger.info("SQLAlchemy async engine ready (supabase=%s pool=%s)", settings.is_supabase, _pool_meta or "default")
 
 async_session_factory = async_sessionmaker(
     bind=engine,

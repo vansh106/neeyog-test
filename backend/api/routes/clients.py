@@ -10,7 +10,9 @@ from controllers import client_controller
 from controllers.client_controller import (
     AddBranchRequest,
     BranchResponse,
+    ClientEmployeeResponse,
     CompanyResponse,
+    CreateClientEmployeeRequest,
     CreateCompanyRequest,
 )
 from core.auth_middleware import CurrentUser, require_permission
@@ -86,3 +88,30 @@ async def deactivate_branch_route(
     db: AsyncSession = Depends(get_db),
 ):
     return await client_controller.handle_deactivate_branch(company_id, branch_id, db)
+
+
+@router.get(
+    "/{company_id}/branches/{branch_id}/employees",
+    response_model=list[ClientEmployeeResponse],
+)
+async def list_branch_employees_route(
+    company_id: str,
+    branch_id: str,
+    _user: CurrentUser = Depends(require_permission(Permission.CLIENT_VIEW)),
+    db: AsyncSession = Depends(get_db),
+):
+    return await client_controller.handle_list_branch_employees(company_id, branch_id, db)
+
+
+@router.post(
+    "/{company_id}/branches/{branch_id}/employees",
+    response_model=ClientEmployeeResponse,
+)
+async def create_branch_employee_route(
+    company_id: str,
+    branch_id: str,
+    body: CreateClientEmployeeRequest,
+    _user: CurrentUser = Depends(require_permission(Permission.CLIENT_VERIFY)),
+    db: AsyncSession = Depends(get_db),
+):
+    return await client_controller.handle_create_branch_employee(company_id, branch_id, body, db)

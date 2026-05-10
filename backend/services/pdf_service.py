@@ -30,6 +30,19 @@ _LIGHT_GRAY = colors.HexColor("#f5f5f5")
 _MID_GRAY = colors.HexColor("#888888")
 
 
+def _line_pdf_override(pdf_display_overrides: object, idx_zero_based: int) -> dict:
+    """Return per-line override dict (description, size, …) from quotation PDF overlay settings."""
+    if not isinstance(pdf_display_overrides, dict):
+        return {}
+    lines = pdf_display_overrides.get("lines")
+    if isinstance(lines, list) and 0 <= idx_zero_based < len(lines):
+        row = lines[idx_zero_based]
+        return row if isinstance(row, dict) else {}
+    key = str(idx_zero_based)
+    row = pdf_display_overrides.get(key)
+    return row if isinstance(row, dict) else {}
+
+
 async def generate_quotation_pdf(
     quotation_data: dict,
     client_config: dict | str,
@@ -124,9 +137,18 @@ async def generate_quotation_pdf(
         header = ["Sr No", "Description", "Size", "Qty", "Unit", "Unit Price (₹)", "Total (₹)"]
         table_data = [header]
 
+        pdf_ov = quotation_data.get("pdf_display_overrides")
+
         for idx, item in enumerate(line_items, 1):
+            row_ov = _line_pdf_override(pdf_ov, idx - 1)
             desc = item.get("product_name") or item.get("description", "")
+            if row_ov.get("description"):
+                desc = str(row_ov["description"])
+            elif row_ov.get("product_name"):
+                desc = str(row_ov["product_name"])
             size = item.get("size", "")
+            if row_ov.get("size"):
+                size = str(row_ov["size"])
             qty = item.get("quantity", 1)
             unit = item.get("unit", "Nos")
             price = float(item.get("unit_price", 0))
@@ -237,6 +259,8 @@ async def generate_quotation_pdf(
 
         # --- NOTES ---
         notes = quotation_data.get("professional_notes") or quotation_data.get("notes", "")
+        if isinstance(pdf_ov, dict) and "notes" in pdf_ov:
+            notes = str(pdf_ov.get("notes") or "")
         if notes:
             el.append(Spacer(1, 4 * mm))
             el.append(Paragraph("<b>Notes:</b>", s_bold))

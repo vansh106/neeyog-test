@@ -50,8 +50,13 @@ type Props = {
   prefillNotesFromEnquiry?: string | null
   /** Completing an existing email enquiry — server merges quote onto this id. */
   targetEnquiryId?: string | null
-  /** Pre-select catalog sheet + cascade (from matcher). */
-  matcherSeed?: { catalogKey: string; filledCascade: Record<string, string> } | null
+  /** Pre-select catalog sheet + cascade (from matcher). Multiple RFQ lines → multiple configurators. */
+  matcherSeed?: {
+    catalogKey: string
+    lines?: Array<{ filledCascade: Record<string, string>; quantity?: number }>
+    /** @deprecated prefer `lines` */
+    filledCascade?: Record<string, string>
+  } | null
   matcherClientHint?: MatcherClientHint | null
   /** Bump to remount valve configurator (e.g. clear matcher seed for full manual). */
   matcherSeedVersion?: number
@@ -232,7 +237,6 @@ function buildEmailText(
     if (p.sov) lines.push(`SOV: ${p.sov.type}`)
     if (p.limit_switch_box) lines.push(`Limit Switch Box: ${p.limit_switch_box.type}`)
     if (p.positioner) lines.push(`Positioner: ${p.positioner.type}`)
-    if (p.include_bracket && p.bracket) lines.push(`Bracket & Coupler: included (${p.bracket.size})`)
     lines.push(`Quantity: ${p.quantity}`)
     if (p.unit_price != null) {
       lines.push(`Unit Price: ${formatCurrency(p.unit_price)}`)
@@ -307,15 +311,6 @@ export default function ManualEntryForm({
     country: 'India',
     address: '',
   })
-  const [priority, setPriority] = useState<'Normal' | 'High' | 'Urgent'>('Normal')
-  const [notes, setNotes] = useState('')
-
-  useEffect(() => {
-    const p = (prefillNotesFromEnquiry || '').trim()
-    if (!p) return
-    setNotes((prev) => (prev.trim() ? prev : p))
-  }, [prefillNotesFromEnquiry])
-
   useEffect(() => {
     if (!matcherClientHint) return
     if (matcherClientHint.mode === 'existing' && matcherClientHint.selectedClientId) {
@@ -373,12 +368,22 @@ export default function ManualEntryForm({
   const [activeConfigIds, setActiveConfigIds] = useState<string[]>([uuidv4()])
   const [editingId, setEditingId] = useState<string | null>(null)
 
+  useEffect(() => {
+    if (!matcherSeed?.catalogKey) {
+      if (matcherSeedVersion > 0) setActiveConfigIds([uuidv4()])
+      return
+    }
+    const n = matcherSeed.lines && matcherSeed.lines.length > 0 ? matcherSeed.lines.length : 1
+    setActiveConfigIds(Array.from({ length: n }, () => uuidv4()))
+  }, [matcherSeed, matcherSeedVersion])
+
   const [errors, setErrors] = useState<Record<string, string>>({})
 
   const [suppliers, setSuppliers] = useState<SupplierResponse[]>([])
   const [productCalcs, setProductCalcs] = useState<ProductPricingCalc[]>([])
   const [pricingLoading, setPricingLoading] = useState(false)
   const [tempQuoteUnitByProduct, setTempQuoteUnitByProduct] = useState<Record<string, string>>({})
+  const [customerDiscountByProduct, setCustomerDiscountByProduct] = useState<Record<string, string>>({})
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedCompanyQuery(companyQuery), 300)
@@ -456,6 +461,12 @@ export default function ManualEntryForm({
     return (selectedCompany.branches || []).find((b) => b.id === selectedBranchId) ?? null
   }, [selectedCompany, selectedBranchId])
 
+  const defaultClientDiscount = useMemo(() => {
+    if (clientMode !== 'existing') return null
+    const v = selectedCompany?.default_discount_pct
+    return typeof v === 'number' && Number.isFinite(v) ? v : null
+  }, [clientMode, selectedCompany?.default_discount_pct])
+
   const totalEstimate = useMemo(() => {
     const parseOverride = (id: string): number | null => {
       const raw = (tempQuoteUnitByProduct[id] ?? '').trim()
@@ -465,21 +476,35 @@ export default function ManualEntryForm({
       return n
     }
 
+    const parseDiscount = (id: string): number => {
+      const raw = (customerDiscountByProduct[id] ?? '').trim()
+      if (raw) {
+        const n = Number(raw)
+        if (Number.isFinite(n) && n >= 0) return Math.min(n, 100)
+      }
+      return defaultClientDiscount ?? 0
+    }
+
+    const discountedUnit = (id: string, unit: number): number => {
+      const pct = parseDiscount(id)
+      return unit * (1 - pct / 100)
+    }
+
     if (productCalcs.length && productCalcs.every((c) => c.ok)) {
       return assembledProducts.reduce((sum, p) => {
         const ov = parseOverride(p.id)
-        if (ov != null) return sum + ov * p.quantity
+        if (ov != null) return sum + discountedUnit(p.id, ov) * p.quantity
         const pc = productCalcs.find((c) => c.productId === p.id)
-        return sum + (pc?.lineTotal ?? 0)
+        return sum + discountedUnit(p.id, pc?.assemblyUnit ?? 0) * p.quantity
       }, 0)
     }
     return assembledProducts.reduce((sum, p) => {
       const ov = parseOverride(p.id)
-      if (ov != null) return sum + ov * p.quantity
+      if (ov != null) return sum + discountedUnit(p.id, ov) * p.quantity
       if (p.unit_price == null) return sum
-      return sum + p.unit_price * p.quantity
+      return sum + discountedUnit(p.id, p.unit_price) * p.quantity
     }, 0)
-  }, [assembledProducts, productCalcs, tempQuoteUnitByProduct])
+  }, [assembledProducts, customerDiscountByProduct, defaultClientDiscount, productCalcs, tempQuoteUnitByProduct])
 
   useEffect(() => {
     if (assembledProducts.length === 0) {
@@ -493,15 +518,33 @@ export default function ManualEntryForm({
       const out: ProductPricingCalc[] = []
       for (const p of assembledProducts) {
         const supplierId = p.supplier_id
+        const componentKeyForPart = (label: string): string => {
+          const l = label.toLowerCase()
+          if (l === 'valve') return 'valve'
+          if (l === 'operator') return 'operator'
+          if (l === 'sov') return 'sov'
+          if (l.includes('limit switch')) return 'lsb'
+          if (l === 'positioner') return 'positioner'
+          if (l.includes('bracket')) return 'bracket'
+          return ''
+        }
         const parts = catalogPartsForAssembly(p)
         const missing: string[] = []
         if (parts.length === 0) missing.push('Valve configuration')
         if (suppliers.length > 0 && !supplierId) missing.push('Supplier selection')
         const rows: Array<{ component: string; calc: PriceCalculationResult }> = []
-        if (supplierId) {
+        if (supplierId || p.component_pricing) {
           for (const part of parts) {
+            const compKey = componentKeyForPart(part.label)
+            const partSupplierId = compKey
+              ? (p.component_pricing?.[compKey]?.supplier_id ?? supplierId)
+              : supplierId
+            if (!partSupplierId) {
+              missing.push(`${part.label} supplier`)
+              continue
+            }
             const pr = await suppliersApi.getProductPrice(
-              supplierId,
+              partSupplierId,
               part.catalog_table,
               part.catalog_row_id,
             )
@@ -509,12 +552,12 @@ export default function ManualEntryForm({
               missing.push(part.label)
               continue
             }
-            const vars = await suppliersApi.getResolvedCategoryPricing(supplierId, part.catalog_table)
+            const vars = await suppliersApi.getResolvedCategoryPricing(partSupplierId, part.catalog_table)
             const calc = await suppliersApi.calculatePrice({
               list_price: pr.list_price_inr,
               supplier_discount_pct: vars.supplier_discount_pct,
               margin_multiplier: vars.margin_multiplier,
-              customer_discount_pct: vars.customer_discount_pct,
+              customer_discount_pct: 0,
               quantity: p.quantity,
             })
             rows.push({ component: part.label, calc })
@@ -561,42 +604,66 @@ export default function ManualEntryForm({
     if (!productCalcs.length) return null
     if (assembledProducts.length === 0) return null
 
-    // Subtotal: per product we accept either an override unit price OR supplier-calculated price.
+    const parseDiscount = (id: string): number => {
+      const raw = (customerDiscountByProduct[id] ?? '').trim()
+      if (raw) {
+        const n = Number(raw)
+        if (Number.isFinite(n) && n >= 0) return Math.min(n, 100)
+      }
+      return defaultClientDiscount ?? 0
+    }
+
     let subtotal = 0
     for (const p of assembledProducts) {
       const ov = parseOverride(p.id)
+      const discountFactor = 1 - parseDiscount(p.id) / 100
       if (ov != null) {
-        subtotal += ov * p.quantity
+        subtotal += ov * discountFactor * p.quantity
         continue
       }
       const pc = productCalcs.find((c) => c.productId === p.id)
       if (!pc?.ok) return null
-      subtotal += pc.lineTotal
+      subtotal += pc.assemblyUnit * discountFactor * p.quantity
     }
     const gst = subtotal * 0.18
     const pf = subtotal * 0.03
     const grand = subtotal + gst + pf
     return { subtotal, gst, pf, grand }
-  }, [assembledProducts, productCalcs, tempQuoteUnitByProduct])
+  }, [assembledProducts, customerDiscountByProduct, defaultClientDiscount, productCalcs, tempQuoteUnitByProduct])
 
   const supplierRequired = suppliers.length > 0
   const pricingReady = useMemo(() => {
-    if (!supplierRequired) return true
     if (assembledProducts.length === 0) return false
-    const parseOverride = (id: string): number | null => {
-      const raw = (tempQuoteUnitByProduct[id] ?? '').trim()
-      if (!raw) return null
-      const n = Number(raw)
-      if (!Number.isFinite(n) || n <= 0) return null
-      return n
+    return assembledProducts.every((p) => Number.isFinite(Number(p.unit_price)) && Number(p.unit_price) > 0)
+  }, [assembledProducts])
+
+  /** Subtotal = Σ (quoted unit × qty); taxes match quotation rules (GST 18%, P&amp;F 3% on subtotal). */
+  const netOrderTotals = useMemo(() => {
+    if (assembledProducts.length === 0) return null
+    let subtotal = 0
+    for (const p of assembledProducts) {
+      const u = p.unit_price
+      if (u == null || !Number.isFinite(Number(u)) || Number(u) <= 0) {
+        return {
+          subtotal: null as number | null,
+          gst: null as number | null,
+          pf: null as number | null,
+          grand: null as number | null,
+          allPriced: false,
+        }
+      }
+      subtotal += Number(u) * p.quantity
     }
-    return assembledProducts.every((p) => {
-      const ov = parseOverride(p.id)
-      if (ov != null) return true
-      const pc = productCalcs.find((c) => c.productId === p.id)
-      return Boolean(pc?.ok)
-    })
-  }, [assembledProducts, productCalcs, supplierRequired, tempQuoteUnitByProduct])
+    const gst = subtotal * 0.18
+    const pf = subtotal * 0.03
+    return {
+      subtotal,
+      gst,
+      pf,
+      grand: subtotal + gst + pf,
+      allPriced: true,
+    }
+  }, [assembledProducts])
 
   const handleProductComplete = useCallback(
     (configId: string) => (product: AssembledProduct) => {
@@ -653,8 +720,7 @@ export default function ManualEntryForm({
       const missingSupplier = assembledProducts.some((p) => !p.supplier_id)
       if (missingSupplier) e.supplier = 'Please select a supplier for each product'
       else if (!pricingReady) {
-        e.pricing =
-          'Prices are missing for one or more products. Either configure supplier list prices, or enter a temporary quote unit price override.'
+        e.pricing = 'Prices are missing for one or more products. Complete Step 5 pricing before processing.'
       }
     }
     setErrors(e)
@@ -671,7 +737,8 @@ export default function ManualEntryForm({
     if (!clientLabel || assembledProducts.length === 0) {
       return 'Fill in client and product details above'
     }
-    return `${clientLabel} — ${assembledProducts.length} product(s) — Est. ${formatCurrency(totalEstimate)}`
+    const est = netOrderTotals?.grand ?? totalEstimate
+    return `${clientLabel} — ${assembledProducts.length} product(s) — Est. ${formatCurrency(est)}`
   }, [
     clientMode,
     newClient.company_name,
@@ -679,20 +746,11 @@ export default function ManualEntryForm({
     selectedCompany,
     selectedBranch,
     totalEstimate,
+    netOrderTotals?.grand,
   ])
 
   async function submit() {
     if (!validate()) return
-    const overrideByProductId = new Map<string, number>()
-    for (const [pid, raw] of Object.entries(tempQuoteUnitByProduct)) {
-      const t = String(raw ?? '').trim()
-      if (!t) continue
-      const n = Number(t)
-      if (Number.isFinite(n) && n > 0) overrideByProductId.set(pid, n)
-    }
-    const unitByProduct = new Map(
-      productCalcs.filter((c) => c.ok).map((c) => [c.productId, c.assemblyUnit]),
-    )
     const form: ManualEnquiryForm = {
       ...(targetEnquiryId ? { targetEnquiryId } : {}),
       clientMode,
@@ -702,10 +760,14 @@ export default function ManualEntryForm({
         address: newClient.address_line1 || newClient.address,
       },
       lineItems: assembledProducts.map((p) =>
-        assembledToLineItem(p, overrideByProductId.get(p.id) ?? unitByProduct.get(p.id) ?? null),
+        assembledToLineItem(
+          p,
+          null,
+          p.customer_discount_pct ?? defaultClientDiscount,
+        ),
       ),
-      priority,
-      notes,
+      priority: 'Normal',
+      notes: (prefillNotesFromEnquiry || '').trim(),
     }
     if (typeof window !== 'undefined' && typeof console !== 'undefined') {
       console.log(
@@ -1189,27 +1251,42 @@ export default function ManualEntryForm({
             ),
           )}
 
-          {activeConfigIds.map((cid, idx) => (
-            <ValveConfigurator
-              key={`${cid}-${matcherSeedVersion}`}
-              productIndex={assembledProducts.length + idx}
-              suppliers={suppliers}
-              initialSpecSeed={
-                idx === 0 && matcherSeed?.catalogKey
-                  ? {
-                      catalog_category: matcherSeed.catalogKey,
-                      field_values: matcherSeed.filledCascade || {},
-                    }
-                  : undefined
+          {activeConfigIds.map((cid, idx) => {
+            let initialSpecSeed:
+              | { catalog_category: string; field_values: Record<string, string>; quantity?: number }
+              | undefined
+            if (matcherSeed?.catalogKey) {
+              const lines = matcherSeed.lines
+              if (lines && lines.length > 0) {
+                const L = lines[idx] ?? { filledCascade: {} as Record<string, string> }
+                const q = L.quantity
+                initialSpecSeed = {
+                  catalog_category: matcherSeed.catalogKey,
+                  field_values: L.filledCascade ?? {},
+                  ...(typeof q === 'number' && q > 0 ? { quantity: Math.floor(q) } : {}),
+                }
+              } else if (idx === 0) {
+                initialSpecSeed = {
+                  catalog_category: matcherSeed.catalogKey,
+                  field_values: matcherSeed.filledCascade ?? {},
+                }
               }
-              onProductComplete={handleProductComplete(cid)}
-              onProductRemove={
-                assembledProducts.length > 0 || activeConfigIds.length > 1
-                  ? () => removeActiveConfig(cid)
-                  : undefined
-              }
-            />
-          ))}
+            }
+            return (
+              <ValveConfigurator
+                key={`${cid}-${matcherSeedVersion}`}
+                productIndex={assembledProducts.length + idx}
+                suppliers={suppliers}
+                initialSpecSeed={initialSpecSeed}
+                onProductComplete={handleProductComplete(cid)}
+                onProductRemove={
+                  assembledProducts.length > 0 || activeConfigIds.length > 1
+                    ? () => removeActiveConfig(cid)
+                    : undefined
+                }
+              />
+            )
+          })}
 
           {errors.products && <p className="text-[12px] text-red-600">{errors.products}</p>}
           {errors.supplier && <p className="text-[12px] text-red-600">{errors.supplier}</p>}
@@ -1229,45 +1306,80 @@ export default function ManualEntryForm({
         </div>
       </section>
 
-      {/* ── Additional Options ──────────────────────────────────────── */}
-      <section className="rounded-xl border border-surface-border bg-white p-5 shadow-sm">
-        <h2 className="text-[15px] font-semibold text-gray-900">Additional Options</h2>
-        <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <div className="space-y-1.5">
-            <div className="text-[10px] font-medium uppercase tracking-wide text-[#8A9488]">Priority</div>
-            <Select
-              value={priority}
-              onValueChange={(v) => setPriority(v as 'Normal' | 'High' | 'Urgent')}
-            >
-              <SelectTrigger className="h-10 w-full min-w-0">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {(['Normal', 'High', 'Urgent'] as const).map((p) => (
-                  <SelectItem key={p} value={p}>
-                    {p}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-1.5 sm:col-span-2">
-            <div className="text-[10px] font-medium uppercase tracking-wide text-[#8A9488]">Notes</div>
-            <Textarea
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              className="min-h-[90px]"
-              placeholder="Any special requirements, delivery location, deadline..."
-            />
-          </div>
-        </div>
-      </section>
-
+      {/* ── Net total & taxes ─────────────────────────────────────── */}
       {assembledProducts.length > 0 && (
+        <section className="rounded-xl border border-surface-border bg-white p-5 shadow-sm border-t-2 border-t-brand-navy-200">
+          <h2 className="text-[15px] font-semibold text-gray-900">Net total &amp; taxes</h2>
+          <p className="mt-1 text-[13px] text-surface-muted">
+            Subtotal uses each product&apos;s quoted unit price (after any customer discount from Step 5). GST and
+            P&amp;F are calculated on that subtotal, same as on quotations.
+          </p>
+          <div className="mt-4 space-y-3 text-[13px]">
+            <div className="rounded-lg border border-surface-border bg-surface-page p-3">
+              <p className="text-[11px] font-medium uppercase tracking-wide text-[#8A9488]">Line totals</p>
+              <ul className="mt-2 space-y-2">
+                {assembledProducts.map((p) => {
+                  const u = p.unit_price
+                  const ok = u != null && Number.isFinite(Number(u)) && Number(u) > 0
+                  const line = ok ? Number(u) * p.quantity : null
+                  return (
+                    <li key={p.id} className="flex flex-col gap-0.5 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
+                      <span className="min-w-0 font-medium text-gray-900">{assemblyLabel(p)}</span>
+                      <span className="shrink-0 font-mono text-[12px] sm:text-[13px]">
+                        {ok ? (
+                          <>
+                            {p.quantity} {p.unit || 'Nos'} × {formatCurrency(Number(u))} ={' '}
+                            {formatCurrency(line!)}
+                          </>
+                        ) : (
+                          <span className="text-brand-gold-700">Price pending</span>
+                        )}
+                      </span>
+                    </li>
+                  )
+                })}
+              </ul>
+            </div>
+            <div className="rounded-lg border border-surface-border bg-[#FAFAF8] p-4">
+              <div className="flex justify-between">
+                <span className="text-surface-muted">Subtotal (excl. taxes)</span>
+                <span className="font-mono">
+                  {netOrderTotals?.subtotal != null ? formatCurrency(netOrderTotals.subtotal) : '—'}
+                </span>
+              </div>
+              <div className="mt-2 flex justify-between text-surface-muted">
+                <span>GST @ 18%</span>
+                <span className="font-mono">
+                  {netOrderTotals?.gst != null ? formatCurrency(netOrderTotals.gst) : '—'}
+                </span>
+              </div>
+              <div className="mt-2 flex justify-between text-surface-muted">
+                <span>P&amp;F @ 3%</span>
+                <span className="font-mono">
+                  {netOrderTotals?.pf != null ? formatCurrency(netOrderTotals.pf) : '—'}
+                </span>
+              </div>
+              <div className="mt-3 flex justify-between border-t border-surface-border pt-3 font-semibold text-gray-900">
+                <span>Net total (incl. taxes)</span>
+                <span className="font-mono text-brand-green-700">
+                  {netOrderTotals?.grand != null ? formatCurrency(netOrderTotals.grand) : '—'}
+                </span>
+              </div>
+            </div>
+            {!pricingReady && (
+              <p className="text-[12px] text-brand-gold-700">
+                Complete Step 5 pricing for every product to show subtotal, taxes, and net total.
+              </p>
+            )}
+          </div>
+        </section>
+      )}
+
+      {false && assembledProducts.length > 0 && (
         <section className="rounded-xl border border-surface-border bg-white p-5 shadow-sm border-t-2 border-t-brand-navy-200">
           <h2 className="text-[15px] font-semibold text-gray-900">Pricing &amp; supplier</h2>
           <p className="mt-1 text-[13px] text-surface-muted">
-            Totals use margin / discount / customer discount per supplier per category.
+            Totals use margin / supplier discount from supplier pricing. Customer discount is set per quote line.
           </p>
           {suppliers.length === 0 ? (
             <p className="mt-3 text-[13px] text-surface-muted">
@@ -1287,6 +1399,7 @@ export default function ManualEntryForm({
                         <th className="px-3 py-2">Cost to Parth</th>
                         <th className="px-3 py-2">Selling (unit)</th>
                         <th className="px-3 py-2">Quote unit (temp)</th>
+                        <th className="px-3 py-2">Customer discount (%)</th>
                         <th className="px-3 py-2 text-right">Line total</th>
                       </tr>
                     </thead>
@@ -1302,7 +1415,7 @@ export default function ManualEntryForm({
                           return (
                             <tr key={p.id} className="border-b border-[#E2E6DC]">
                               <td className="px-3 py-2">{assemblyLabel(p)}</td>
-                              <td colSpan={5} className="px-3 py-2 text-surface-muted">
+                              <td colSpan={6} className="px-3 py-2 text-surface-muted">
                                 —
                               </td>
                             </tr>
@@ -1328,15 +1441,37 @@ export default function ManualEntryForm({
                                   Temporary quote price (doesn&apos;t change Masters)
                                 </p>
                               </td>
+                              <td className="px-3 py-2">
+                                <Input
+                                  value={customerDiscountByProduct[p.id] ?? ''}
+                                  onChange={(e) =>
+                                    setCustomerDiscountByProduct((cur) => ({ ...cur, [p.id]: e.target.value }))
+                                  }
+                                  className="h-8 w-32 font-mono"
+                                  placeholder={defaultClientDiscount != null ? String(defaultClientDiscount) : '0'}
+                                />
+                              </td>
                               <td className="px-3 py-2 text-right font-mono text-surface-muted">
-                                {overrideNum != null ? formatCurrency(overrideNum * p.quantity) : '—'}
+                                {overrideNum != null
+                                  ? formatCurrency(
+                                      overrideNum *
+                                        p.quantity *
+                                        (1 -
+                                          ((Number(customerDiscountByProduct[p.id]) || defaultClientDiscount || 0) /
+                                            100)),
+                                    )
+                                  : '—'}
                               </td>
                             </tr>
                           )
                         }
                         const listSum = pc.rows.reduce((s, r) => s + r.calc.list_price, 0)
                         const costSum = pc.rows.reduce((s, r) => s + r.calc.cost_to_parth, 0)
-                        const effectiveUnit = overrideNum ?? pc.assemblyUnit
+                        const discountPct = Math.min(
+                          100,
+                          Math.max(0, Number(customerDiscountByProduct[p.id] ?? '') || defaultClientDiscount || 0),
+                        )
+                        const effectiveUnit = (overrideNum ?? pc.assemblyUnit) * (1 - discountPct / 100)
                         const effectiveLine = effectiveUnit * p.quantity
                         return (
                           <tr key={p.id} className="border-b border-[#E2E6DC]">
@@ -1352,6 +1487,16 @@ export default function ManualEntryForm({
                                 }
                                 className="h-8 w-32 font-mono"
                                 placeholder="(optional)"
+                              />
+                            </td>
+                            <td className="px-3 py-2">
+                              <Input
+                                value={customerDiscountByProduct[p.id] ?? ''}
+                                onChange={(e) =>
+                                  setCustomerDiscountByProduct((cur) => ({ ...cur, [p.id]: e.target.value }))
+                                }
+                                className="h-8 w-32 font-mono"
+                                placeholder={defaultClientDiscount != null ? String(defaultClientDiscount) : '0'}
                               />
                             </td>
                             <td className="px-3 py-2 text-right font-mono">
@@ -1371,19 +1516,19 @@ export default function ManualEntryForm({
                 <div className="rounded-lg border border-surface-border bg-surface-page p-4 text-[13px]">
                   <div className="flex justify-between">
                     <span>Subtotal</span>
-                    <span className="font-mono">{formatCurrency(pricingTotals.subtotal)}</span>
+                    <span className="font-mono">{formatCurrency(pricingTotals?.subtotal ?? 0)}</span>
                   </div>
                   <div className="mt-1 flex justify-between text-surface-muted">
                     <span>GST @ 18%</span>
-                    <span className="font-mono">{formatCurrency(pricingTotals.gst)}</span>
+                    <span className="font-mono">{formatCurrency(pricingTotals?.gst ?? 0)}</span>
                   </div>
                   <div className="mt-1 flex justify-between text-surface-muted">
                     <span>P&amp;F @ 3%</span>
-                    <span className="font-mono">{formatCurrency(pricingTotals.pf)}</span>
+                    <span className="font-mono">{formatCurrency(pricingTotals?.pf ?? 0)}</span>
                   </div>
                   <div className="mt-2 flex justify-between border-t border-surface-border pt-2 font-semibold text-gray-900">
                     <span>Grand total</span>
-                    <span className="font-mono">{formatCurrency(pricingTotals.grand)}</span>
+                    <span className="font-mono">{formatCurrency(pricingTotals?.grand ?? 0)}</span>
                   </div>
                 </div>
               )}
