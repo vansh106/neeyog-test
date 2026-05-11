@@ -37,7 +37,7 @@ def _trim_pdf_display_overrides(overrides: dict | None, line_count: int) -> dict
 def _quotation_payload_for_pdf(q: Quotation) -> dict:
     li = q.line_items if isinstance(q.line_items, list) else []
     ov = q.pdf_display_overrides if isinstance(q.pdf_display_overrides, dict) else {}
-    return {
+    out: dict = {
         "quote_number": q.quote_number,
         "client_name": q.client_name,
         "client_company": q.client_company,
@@ -55,6 +55,20 @@ def _quotation_payload_for_pdf(q: Quotation) -> dict:
         "professional_notes": q.notes or "",
         "pdf_display_overrides": ov,
     }
+    if q.enquiry_id:
+        out["enquiry_id"] = str(q.enquiry_id)
+        enq = getattr(q, "enquiry", None)
+        if enq is not None and getattr(enq, "created_at", None):
+            out["enquiry_date"] = enq.created_at.strftime("%d/%m/%Y")
+    if getattr(q, "created_at", None):
+        out["quotation_date"] = q.created_at.strftime("%d/%m/%Y")
+    emp = getattr(q, "client_employee", None)
+    if emp is not None and getattr(emp, "full_name", None):
+        out["quotation_client_employee"] = {
+            "full_name": str(emp.full_name).strip(),
+            "designation": str(emp.designation).strip() if getattr(emp, "designation", None) else "",
+        }
+    return out
 
 
 async def regenerate_quotation_pdf(q: Quotation) -> str | None:
@@ -136,7 +150,10 @@ async def get_quotation(quotation_id: str, db: AsyncSession) -> Quotation:
     """Fetch a quotation by ID. Raises ProductNotFoundError if missing."""
     result = await db.execute(
         select(Quotation)
-        .options(selectinload(Quotation.client_employee))
+        .options(
+            selectinload(Quotation.client_employee),
+            selectinload(Quotation.enquiry),
+        )
         .where(Quotation.id == quotation_id)
     )
     quotation = result.scalar_one_or_none()
@@ -152,15 +169,22 @@ async def get_quotation_pdf_path(quotation_id: str, db: AsyncSession) -> str:
     Raises QuotationBuildError if PDF not yet generated or file missing.
     """
     quotation = await get_quotation(quotation_id, db)
+    # Always regenerate on download so the file matches the latest UI/PDF template.
+    regenerated = await regenerate_quotation_pdf(quotation)
+    if regenerated:
+        quotation.pdf_path = regenerated
+        await db.commit()
+        pdf = Path(regenerated)
+        if pdf.exists():
+            return str(pdf.resolve())
 
-    if not quotation.pdf_path:
-        raise QuotationBuildError(f"PDF not yet generated for quotation {quotation_id}")
+    # Fallback only if regeneration unexpectedly failed but an old file exists.
+    if quotation.pdf_path:
+        pdf = Path(quotation.pdf_path)
+        if pdf.exists():
+            return str(pdf.resolve())
 
-    pdf = Path(quotation.pdf_path)
-    if not pdf.exists():
-        raise QuotationBuildError(f"PDF file missing on disk: {quotation.pdf_path}")
-
-    return str(pdf.resolve())
+    raise QuotationBuildError(f"Could not generate PDF for quotation {quotation_id}")
 
 
 async def list_quotations(

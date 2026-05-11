@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
-import { FilePenLine, FileText, Info, Pencil } from 'lucide-react'
+import { FilePenLine, FileText, Pencil } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import PageShell from '@/components/layout/PageShell'
@@ -13,6 +13,7 @@ import { Button, buttonVariants } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import QuotationLineItemsEditor from '@/components/quotations/QuotationLineItemsEditor'
+import QuotationFormatPreview from '@/components/quotations/QuotationFormatPreview'
 import {
   Dialog,
   DialogContent,
@@ -35,7 +36,7 @@ import {
 } from '@/lib/quotationPrefillAssembly'
 import { Permissions } from '@/lib/permissions'
 import { useAuthStore } from '@/stores/authStore'
-import { cn, formatCurrency } from '@/lib/utils'
+import { formatCurrency } from '@/lib/utils'
 import type {
   AssembledProduct,
   QuotationAuditResponse,
@@ -58,24 +59,6 @@ function buildPdfLineOverridesPayload(
     if (edit.size.trim() !== baseSize) o.size = edit.size.trim()
     return o
   })
-}
-
-function effectiveLinePdfDisplay(
-  line: QuotationLineItem,
-  idx: number,
-  overrides: QuotationPdfDisplayOverrides | null | undefined,
-): { description: string; size: string } {
-  const row = overrides?.lines?.[idx]
-  const desc =
-    (typeof row?.description === 'string' && row.description !== ''
-      ? row.description
-      : typeof row?.product_name === 'string' && row.product_name !== ''
-        ? row.product_name
-        : null) ??
-    (line.product_name || line.description || '')
-  const size =
-    (typeof row?.size === 'string' && row.size !== '' ? row.size : null) ?? (line.size || '')
-  return { description: desc, size: size || '—' }
 }
 
 function formatQuoteDate(iso: string | null): string {
@@ -332,13 +315,6 @@ export default function QuotationDetailPage() {
     )
   }
 
-  const companyName = clientConfig?.company_name || 'PARTH VALVES AND HOSES LLP'
-  const address = clientConfig?.address || ''
-  const gst = clientConfig?.gst_number || ''
-  const phone = clientConfig?.phone || ''
-  const email = clientConfig?.email || ''
-
-  const lineItems = quotation.line_items ?? []
   const pdfOverrides = quotation.pdf_display_overrides
   const notesPreviewText =
     pdfOverrides && typeof pdfOverrides === 'object' && pdfOverrides !== null && 'notes' in pdfOverrides
@@ -391,166 +367,14 @@ export default function QuotationDetailPage() {
         <div className="lg:col-span-3">
           <div className="overflow-hidden rounded-xl border border-[#E2E6DC] bg-white shadow-sm">
             <div className="p-6 md:p-8">
-              <header className="text-center">
-                <p className="text-[18px] font-bold text-gray-900">{companyName}</p>
-                <div className="mx-auto mt-2 max-w-xl space-y-0.5 text-[11px] leading-relaxed text-[#8A9488]">
-                  {address && <p>{address}</p>}
-                  <p className="flex flex-wrap justify-center gap-x-3 gap-y-0.5">
-                    {gst && <span>GST: {gst}</span>}
-                    {phone && <span>Tel: {phone}</span>}
-                    {email && <span>{email}</span>}
-                  </p>
-                </div>
-                <div className="my-5 border-b border-[#E2E6DC]" />
-                <h2 className="text-[20px] font-semibold text-brand-gold-500">QUOTATION</h2>
-                <div className="mt-4 flex flex-wrap justify-center gap-4 text-[13px] text-gray-700">
-                  <span>
-                    <span className="text-[#8A9488]">No. </span>
-                    <span className="font-mono font-medium text-brand-gold-500">{quotation.quote_number}</span>
-                  </span>
-                  <span>
-                    <span className="text-[#8A9488]">Date </span>
-                    <span>{formatQuoteDate(quotation.created_at)}</span>
-                  </span>
-                </div>
-              </header>
-
-              <section className="mt-8 text-left">
-                <p className="text-[11px] font-medium uppercase tracking-wide text-[#8A9488]">To</p>
-                <div className="mt-2 space-y-1 text-[14px] text-gray-900">
-                  <p className="font-semibold">{quotation.client_name}</p>
-                  {quotation.client_company && <p>{quotation.client_company}</p>}
-                  {quotation.client_employee && (
-                    <p className="text-[12px] text-[#8A9488]">
-                      Client contact on file · {quotation.client_employee.full_name}
-                      {quotation.client_employee.designation
-                        ? ` · ${quotation.client_employee.designation}`
-                        : ''}
-                    </p>
-                  )}
-                  {quotation.client_email && (
-                    <p className="text-surface-muted">{quotation.client_email}</p>
-                  )}
-                  {quotation.client_phone && (
-                    <p className="text-surface-muted">{quotation.client_phone}</p>
-                  )}
-                </div>
-              </section>
-
-              <div className="mt-8 overflow-x-auto">
-                <table className="w-full border-collapse text-left">
-                  <thead>
-                    <tr className="bg-[#F4F5F0] text-[11px] font-medium uppercase tracking-wide text-[#8A9488]">
-                      <th className="px-2 py-2.5">Sr No</th>
-                      <th className="px-2 py-2.5">Description</th>
-                      <th className="px-2 py-2.5">Size</th>
-                      <th className="px-2 py-2.5 text-right">Qty</th>
-                      <th className="px-2 py-2.5">Unit</th>
-                      <th className="px-2 py-2.5 text-right">Unit Price</th>
-                      <th className="px-2 py-2.5 text-right">Total</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {lineItems.map((line: QuotationLineItem, idx: number) => {
-                      const pdfDisp = effectiveLinePdfDisplay(line, idx, pdfOverrides)
-                      return (
-                      <tr
-                        key={idx}
-                        className={cn(
-                          'border-b border-[#E2E6DC] text-[13px]',
-                          idx % 2 === 1 ? 'bg-[#F9FAF7]' : 'bg-white',
-                        )}
-                      >
-                        <td className="px-2 py-2.5 text-surface-muted">
-                          <div className="flex items-center gap-2">
-                            <span>{idx + 1}</span>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              className="h-7 w-7 p-0 text-surface-muted hover:text-gray-900"
-                              onClick={() => void openHistory(line)}
-                              title="View quote history"
-                            >
-                              <Info className="size-4" />
-                              <span className="sr-only">View quote history</span>
-                            </Button>
-                          </div>
-                        </td>
-                        <td className="max-w-[260px] whitespace-pre-line px-2 py-2.5 text-gray-900">
-                          {pdfDisp.description}
-                        </td>
-                        <td className="px-2 py-2.5 text-surface-muted">{pdfDisp.size}</td>
-                        <td className="px-2 py-2.5 text-right font-mono">{line.quantity}</td>
-                        <td className="px-2 py-2.5 text-surface-muted">{line.unit}</td>
-                        <td className="px-2 py-2.5 text-right font-mono text-gray-800">
-                          <div>{formatCurrency(line.unit_price)}</div>
-                          {typeof line.customer_discount_pct === 'number' && line.customer_discount_pct > 0 && (
-                            <div className="text-[11px] text-surface-muted">
-                              ({line.customer_discount_pct}% discount)
-                            </div>
-                          )}
-                        </td>
-                        <td className="px-2 py-2.5 text-right font-mono text-gray-900">
-                          {formatCurrency(line.line_total ?? line.total ?? 0)}
-                        </td>
-                      </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
-
-              <div className="mt-6 flex justify-end">
-                <div className="w-full max-w-xs space-y-2 text-[13px]">
-                  <div className="flex justify-between gap-4">
-                    <span className="text-[#8A9488]">Subtotal</span>
-                    <span className="font-mono text-gray-900">{formatCurrency(quotation.subtotal)}</span>
-                  </div>
-                  <div className="flex justify-between gap-4">
-                    <span className="text-[#8A9488]">GST @ {quotation.gst_rate}%</span>
-                    <span className="font-mono text-gray-900">{formatCurrency(quotation.gst_amount)}</span>
-                  </div>
-                  <div className="flex justify-between gap-4">
-                    <span className="text-[#8A9488]">P&amp;F @ {quotation.pf_rate}%</span>
-                    <span className="font-mono text-gray-900">{formatCurrency(quotation.pf_amount)}</span>
-                  </div>
-                  <div className="flex justify-between gap-4">
-                    <span className="text-[#8A9488]">Freight</span>
-                    <span className="text-right text-gray-800">{quotation.freight_note || 'Extra at actual'}</span>
-                  </div>
-                  <div className="border-t border-[#E2E6DC] pt-2" />
-                  <div className="flex justify-between gap-4">
-                    <span className="font-semibold text-gray-900">TOTAL</span>
-                    <span className="text-[20px] font-bold font-mono text-brand-green-600">
-                      {formatCurrency(quotation.total_amount)}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              <section className="mt-8 space-y-1 text-[12px] leading-relaxed text-[#8A9488]">
-                <p>GST {quotation.gst_rate}% extra as applicable.</p>
-                <p>P&amp;F {quotation.pf_rate}% extra as applicable.</p>
-                <p>Freight extra at actual.</p>
-                <p>Payment terms as per company policy / proforma invoice.</p>
-                <p>Material Test Certificate (MTC) can be provided on request where applicable.</p>
-              </section>
-
-              {(notesPreviewText !== null ? notesPreviewText : quotation.notes) && (
-                <section className="mt-6 rounded-lg border border-[#E2E6DC] bg-[#F9FAF7] p-4">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <p className="text-[11px] font-medium uppercase tracking-wide text-[#8A9488]">Notes</p>
-                    {notesPreviewText !== null && (
-                      <span className="rounded-full bg-brand-gold-100 px-2 py-0.5 text-[10px] font-medium text-brand-gold-800">
-                        PDF wording
-                      </span>
-                    )}
-                  </div>
-                  <p className="mt-2 whitespace-pre-wrap text-[13px] text-gray-800">
-                    {notesPreviewText !== null ? notesPreviewText : quotation.notes}
-                  </p>
-                </section>
-              )}
+              <QuotationFormatPreview
+                quotation={quotation}
+                clientConfig={clientConfig}
+                linkedEnquiry={linkedEnquiry}
+                pdfOverrides={pdfOverrides}
+                notesPreviewText={notesPreviewText}
+                onOpenHistory={(line) => void openHistory(line)}
+              />
             </div>
           </div>
         </div>

@@ -835,7 +835,16 @@ async def process_manual_dropdown(body: dict, db: AsyncSession) -> dict:
         "freight_note": "Extra at actual",
         "total_amount": total_amount,
         "professional_notes": notes or "",
+        "validity_days": int(client_json.get("quote_validity_days", 15)),
+        "enquiry_id": str(enquiry_id),
+        "enquiry_date": enquiry.created_at.strftime("%d/%m/%Y") if enquiry.created_at else "",
+        "quotation_date": datetime.now(timezone.utc).strftime("%d/%m/%Y"),
     }
+    if employee_for_quote is not None:
+        quotation_data["quotation_client_employee"] = {
+            "full_name": str(employee_for_quote.full_name or "").strip(),
+            "designation": str(getattr(employee_for_quote, "designation", None) or "").strip(),
+        }
 
     quotation = Quotation(
         id=quotation_id,
