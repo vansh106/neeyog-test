@@ -15,7 +15,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { useProducts, useClientConfig } from '@/lib/queries'
+import { useProducts } from '@/lib/queries'
 import { formatCurrency } from '@/lib/utils'
 import { suppliersApi } from '@/lib/api'
 import type { Product, SupplierPriceRow, SupplierResponse } from '@/types'
@@ -65,15 +65,6 @@ function ProductTableSkeleton() {
   )
 }
 
-function ConfigRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="border-b border-[#E2E6DC] py-3 last:border-0">
-      <p className="text-[10px] font-medium uppercase tracking-wide text-[#8A9488]">{label}</p>
-      <p className="mt-1 text-[14px] text-gray-900">{value}</p>
-    </div>
-  )
-}
-
 function parseCatalogRefFromProductId(productId: string): { catalog_table: string; catalog_row_id: string } | null {
   const parts = String(productId || '').split(':')
   if (parts.length < 2) return null
@@ -86,7 +77,6 @@ function parseCatalogRefFromProductId(productId: string): { catalog_table: strin
 const MASTERS_TABS = new Set([
   'catalog',
   'edit',
-  'config',
   'clients',
   'suppliers',
   'supplier-pricing',
@@ -99,8 +89,6 @@ export default function MastersPage() {
   const initialTab = MASTERS_TABS.has(defaultTab) ? defaultTab : 'catalog'
 
   const { data: products, isPending: productsPending } = useProducts()
-  const { data: config, isPending: configPending, isError: configError, isFetched: configFetched } =
-    useClientConfig()
 
   const [category, setCategory] = useState<string>('all')
   const [supplierId, setSupplierId] = useState<string>('') // empty = no supplier filter (table unchanged)
@@ -144,15 +132,12 @@ export default function MastersPage() {
     return map
   }, [supplierPrices])
 
-  const configEmpty = configFetched && !configPending && (configError || config == null)
-
   return (
     <PageShell title="Masters">
       <Tabs defaultValue={initialTab} className="w-full">
         <TabsList className="mb-6 flex flex-wrap gap-1">
           <TabsTrigger value="catalog">Product Catalog</TabsTrigger>
           <TabsTrigger value="edit">Edit Masters</TabsTrigger>
-          <TabsTrigger value="config">Client Config</TabsTrigger>
           <TabsTrigger value="clients">Clients</TabsTrigger>
           <TabsTrigger value="suppliers">Suppliers</TabsTrigger>
           <TabsTrigger value="supplier-pricing">Supplier pricing</TabsTrigger>
@@ -301,46 +286,6 @@ export default function MastersPage() {
 
         <TabsContent value="supplier-pricing" className="mt-0">
           <SupplierPricingTab />
-        </TabsContent>
-
-        <TabsContent value="config" className="mt-0">
-          {configPending ? (
-            <div className="space-y-4">
-              <Skeleton className="h-40 w-full rounded-xl border border-[#E2E6DC]" />
-              <Skeleton className="h-32 w-full rounded-xl border border-[#E2E6DC]" />
-            </div>
-          ) : configEmpty ? (
-            <p className="text-[14px] text-surface-muted">No config loaded</p>
-          ) : (
-            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-              <div className="rounded-xl border border-[#E2E6DC] bg-white p-5 shadow-sm">
-                <h3 className="mb-1 text-[12px] font-semibold text-gray-900">Company Info</h3>
-                <ConfigRow label="Company name" value={String(config!.company_name ?? '—')} />
-                <ConfigRow label="Address" value={String(config!.address ?? '—')} />
-                <ConfigRow label="GST number" value={String(config!.gst_number ?? '—')} />
-              </div>
-              <div className="rounded-xl border border-[#E2E6DC] bg-white p-5 shadow-sm">
-                <h3 className="mb-1 text-[12px] font-semibold text-gray-900">Pricing Config</h3>
-                <ConfigRow
-                  label="Default GST rate"
-                  value={`${config!.default_gst_rate ?? '—'}%`}
-                />
-                <ConfigRow
-                  label="Default P&amp;F rate"
-                  value={`${config!.default_pf_rate ?? '—'}%`}
-                />
-                <ConfigRow
-                  label="Quote validity (days)"
-                  value={String(config!.quote_validity_days ?? '—')}
-                />
-              </div>
-              <div className="rounded-xl border border-[#E2E6DC] bg-white p-5 shadow-sm md:col-span-2 lg:col-span-1">
-                <h3 className="mb-1 text-[12px] font-semibold text-gray-900">Contact Details</h3>
-                <ConfigRow label="Phone" value={String(config!.phone ?? '—')} />
-                <ConfigRow label="Email" value={String(config!.email ?? '—')} />
-              </div>
-            </div>
-          )}
         </TabsContent>
       </Tabs>
     </PageShell>
