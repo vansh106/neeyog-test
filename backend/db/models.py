@@ -167,6 +167,16 @@ class Enquiry(Base):
         index=True,
     )
 
+    created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    #: Snapshot for listing (set when enquiry is first persisted).
+    created_by_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_by_user: Mapped["User | None"] = relationship("User", foreign_keys=[created_by_user_id])
+
     quotations: Mapped[list["Quotation"]] = relationship(back_populates="enquiry")
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
@@ -209,6 +219,16 @@ class Quotation(Base):
 
     enquiry: Mapped["Enquiry"] = relationship(back_populates="quotations")
     client_employee: Mapped["ClientEmployee | None"] = relationship("ClientEmployee")
+
+    created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    #: Snapshot for listing (set at quote creation; kept if user is renamed or removed).
+    created_by_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_by_user: Mapped["User | None"] = relationship("User", foreign_keys=[created_by_user_id])
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)

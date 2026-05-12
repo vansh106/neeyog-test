@@ -52,6 +52,7 @@ def _quotation_api_dict(q: Quotation) -> dict:
         "notes": q.notes,
         "pdf_display_overrides": q.pdf_display_overrides if isinstance(q.pdf_display_overrides, dict) else None,
         "created_at": q.created_at.isoformat() if q.created_at else None,
+        "created_by_name": (q.created_by_name or "").strip() or None,
     }
 
 
@@ -68,6 +69,7 @@ class QuotationListItem(BaseModel):
     status: str
     status_remarks: str | None = None
     created_at: str
+    created_by_name: str | None = None
 
 
 class QuotationHistoryItem(BaseModel):
@@ -272,6 +274,7 @@ async def handle_list_quotations(
                 status=q.status,
                 status_remarks=q.status_remarks,
                 created_at=q.created_at.isoformat() if q.created_at else "",
+                created_by_name=(q.created_by_name or "").strip() or None,
             )
             for q in quotations
         ]

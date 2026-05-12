@@ -15,7 +15,7 @@ from controllers.client_controller import (
     CreateClientEmployeeRequest,
     CreateCompanyRequest,
 )
-from core.auth_middleware import CurrentUser, require_permission
+from core.auth_middleware import CurrentUser, require_any_permission, require_permission
 from core.database import get_db
 
 router = APIRouter(prefix="/clients", tags=["clients"])
@@ -111,7 +111,9 @@ async def create_branch_employee_route(
     company_id: str,
     branch_id: str,
     body: CreateClientEmployeeRequest,
-    _user: CurrentUser = Depends(require_permission(Permission.CLIENT_VERIFY)),
+    _user: CurrentUser = Depends(
+        require_any_permission(Permission.CLIENT_VERIFY, Permission.VIEW_QUOTATIONS)
+    ),
     db: AsyncSession = Depends(get_db),
 ):
     return await client_controller.handle_create_branch_employee(company_id, branch_id, body, db)

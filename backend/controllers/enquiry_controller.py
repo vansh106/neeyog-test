@@ -53,6 +53,7 @@ class EnquiryListItem(BaseModel):
     flow_type: str | None = None
     input_type: str
     created_at: str
+    created_by_name: str | None = None
     erp_export_available: bool = False
 
 
@@ -194,15 +195,19 @@ def _enquiry_client_org_name(e: Enquiry) -> str:
 async def handle_upload_email(
     body: UploadEmailRequest,
     db: AsyncSession,
+    user: CurrentUser,
 ) -> EnquiryResponse:
     enquiry_id = ""
     try:
+        creator_id, creator_name = _quotation_creator_from_user(user)
         # Dedicated session + commit so the row is not held open by this request
         # while run_enquiry_flow uses another session (avoids PG duplicate-PK block).
         enquiry = await enquiry_service.create_enquiry(
             email_text=body.email_text,
             input_type=body.input_type,
             db=None,
+            created_by_user_id=creator_id,
+            created_by_name=creator_name,
         )
         enquiry_id = str(enquiry.id)
         result = await enquiry_service.process_enquiry(
@@ -299,6 +304,7 @@ async def handle_list_enquiries(
                 flow_type=e.flow_type,
                 input_type=e.input_type,
                 created_at=e.created_at.isoformat() if e.created_at else "",
+                created_by_name=(e.created_by_name or "").strip() or None,
                 erp_export_available=bool(getattr(e, "erp_export_path", None)),
             )
             for e in enquiries
@@ -353,13 +359,30 @@ async def handle_revert_request_email_draft(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def _quotation_creator_from_user(user: CurrentUser) -> tuple[uuid.UUID | None, str | None]:
+    try:
+        uid = uuid.UUID(str(user.id))
+    except (ValueError, TypeError):
+        uid = None
+    raw = ((user.full_name or "").strip() or (user.email or "").strip()) or ""
+    name = raw[:255] if raw else None
+    return uid, name
+
+
 async def handle_process_manual_dropdown(
     body: ManualDropdownProcessRequest,
     db: AsyncSession,
+    user: CurrentUser,
 ) -> EnquiryResponse:
     """Manual dropdown processing: skip AI pipeline and generate quote directly."""
     try:
-        result = await enquiry_service.process_manual_dropdown(body.model_dump(by_alias=True), db)
+        creator_id, creator_name = _quotation_creator_from_user(user)
+        result = await enquiry_service.process_manual_dropdown(
+            body.model_dump(by_alias=True),
+            db,
+            created_by_user_id=creator_id,
+            created_by_name=creator_name,
+        )
         return EnquiryResponse(**result)
     except EnquiryParseError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
@@ -406,14 +429,18 @@ async def handle_list_email_enquiries(
 async def handle_upload_email_stream(
     body: UploadEmailRequest,
     db: AsyncSession,
+    user: CurrentUser,
 ) -> AsyncGenerator[str, None]:
     """Create emitter, kick off pipeline as background task, return stream."""
     from services.sse_service import SSEEventEmitter
 
+    creator_id, creator_name = _quotation_creator_from_user(user)
     enquiry = await enquiry_service.create_enquiry(
         email_text=body.email_text,
         input_type=body.input_type,
         db=None,
+        created_by_user_id=creator_id,
+        created_by_name=creator_name,
     )
 
     emitter = SSEEventEmitter()

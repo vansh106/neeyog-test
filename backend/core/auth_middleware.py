@@ -74,6 +74,24 @@ def require_permission(*permissions: Permission):
     return checker
 
 
+def require_any_permission(*permissions: Permission):
+    """User must have at least one of the listed permissions (or be superadmin)."""
+
+    async def checker(current_user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
+        if current_user.has_any(*permissions):
+            return current_user
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error": "insufficient_permissions",
+                "required_any": [p.value for p in permissions],
+                "message": "You don't have permission to perform this action.",
+            },
+        )
+
+    return checker
+
+
 def require_admin_permissions(*permissions: Permission):
     """Admin or superadmin tier AND all listed permissions."""
 

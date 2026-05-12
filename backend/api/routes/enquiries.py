@@ -24,19 +24,19 @@ router = APIRouter(prefix="/api/enquiries", tags=["enquiries"])
 @router.post("/upload-email", response_model=EnquiryResponse)
 async def upload_email_route(
     body: UploadEmailRequest,
-    _user: CurrentUser = Depends(require_permission(Permission.UPLOAD_EMAIL)),
+    user: CurrentUser = Depends(require_permission(Permission.UPLOAD_EMAIL)),
     db: AsyncSession = Depends(get_db),
 ):
-    return await enquiry_controller.handle_upload_email(body, db)
+    return await enquiry_controller.handle_upload_email(body, db, user)
 
 
 @router.post("/upload-email-stream")
 async def upload_email_stream_route(
     body: UploadEmailRequest,
-    _user: CurrentUser = Depends(require_permission(Permission.UPLOAD_EMAIL)),
+    user: CurrentUser = Depends(require_permission(Permission.UPLOAD_EMAIL)),
     db: AsyncSession = Depends(get_db),
 ):
-    stream = await enquiry_controller.handle_upload_email_stream(body, db)
+    stream = await enquiry_controller.handle_upload_email_stream(body, db, user)
     return StreamingResponse(
         stream,
         media_type="text/event-stream",
@@ -51,10 +51,10 @@ async def upload_email_stream_route(
 @router.post("/manual/process", response_model=EnquiryResponse)
 async def manual_dropdown_process_route(
     body: ManualDropdownProcessRequest,
-    _user: CurrentUser = Depends(require_permission(Permission.VIEW_QUOTATIONS)),
+    user: CurrentUser = Depends(require_permission(Permission.VIEW_QUOTATIONS)),
     db: AsyncSession = Depends(get_db),
 ):
-    return await enquiry_controller.handle_process_manual_dropdown(body, db)
+    return await enquiry_controller.handle_process_manual_dropdown(body, db, user)
 
 
 @router.get("/", response_model=list[EnquiryListItem])

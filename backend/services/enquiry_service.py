@@ -243,12 +243,19 @@ async def create_enquiry(
     input_type: str = "email",
     db: AsyncSession | None = None,
     mailbox_id: uuid.UUID | None = None,
+    *,
+    created_by_user_id: uuid.UUID | None = None,
+    created_by_name: str | None = None,
 ) -> Enquiry:
     """Create and persist an Enquiry DB record with status='received'."""
     if not email_text or not email_text.strip():
         raise EnquiryParseError("Email text is empty")
 
     email_text, input_type = preprocess_raw_input(email_text, input_type)
+
+    cb_uid = created_by_user_id
+    cb_raw = (created_by_name or "").strip()
+    cb_name = cb_raw[:255] if cb_raw else None
 
     enquiry = Enquiry(
         id=uuid.uuid4(),
@@ -257,6 +264,8 @@ async def create_enquiry(
         input_type=input_type,
         status="received",
         mailbox_id=mailbox_id,
+        created_by_user_id=cb_uid,
+        created_by_name=cb_name,
     )
 
     if db:
@@ -601,7 +610,13 @@ async def process_email_matcher(enquiry_id: str, db: AsyncSession) -> dict:
     return out
 
 
-async def process_manual_dropdown(body: dict, db: AsyncSession) -> dict:
+async def process_manual_dropdown(
+    body: dict,
+    db: AsyncSession,
+    *,
+    created_by_user_id: uuid.UUID | None = None,
+    created_by_name: str | None = None,
+) -> dict:
     """Manual dropdown flow: no parser/matcher/HITL; create enquiry + quote directly."""
     from services.client_service import (
         client_for_export,
@@ -619,6 +634,10 @@ async def process_manual_dropdown(body: dict, db: AsyncSession) -> dict:
     client_json = settings.get_client_json()
     gst_rate = float(client_json.get("default_gst_rate", 18.0))
     pf_rate = float(client_json.get("default_pf_rate", 3.0))
+
+    cb_uid = created_by_user_id
+    cb_raw = (created_by_name or "").strip()
+    cb_name = cb_raw[:255] if cb_raw else None
 
     mode = str(body.get("clientMode") or "").strip().lower()
     selected_client_id = body.get("selectedClientId")
@@ -809,6 +828,8 @@ async def process_manual_dropdown(body: dict, db: AsyncSession) -> dict:
                 **parsed_data_new,
             },
             matched_products=matched_products,
+            created_by_user_id=cb_uid,
+            created_by_name=cb_name,
         )
         if company_id_uuid is not None:
             enquiry.company_id = company_id_uuid
@@ -865,6 +886,8 @@ async def process_manual_dropdown(body: dict, db: AsyncSession) -> dict:
         validity_days=int(client_json.get("quote_validity_days", 15)),
         status="ongoing",
         notes=notes or None,
+        created_by_user_id=cb_uid,
+        created_by_name=cb_name,
     )
     db.add(quotation)
     await db.commit()
