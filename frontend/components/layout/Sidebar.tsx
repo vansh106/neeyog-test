@@ -20,7 +20,6 @@ import {
 
 import { cn } from '@/lib/utils'
 import { useUIStore } from '@/lib/store'
-import { useHealth } from '@/lib/queries'
 import { useEmailStore } from '@/stores/emailStore'
 import { SIDEBAR_MASTER_CATEGORIES } from '@/lib/masterCatalogCategories'
 import { Permissions } from '@/lib/permissions'
@@ -49,9 +48,7 @@ export default function Sidebar() {
   const hasPermission = useAuthStore((s) => s.hasPermission)
   const isAdminOrAbove = useAuthStore((s) => s.isAdminOrAbove())
   const { sidebarCollapsed, toggleSidebar } = useUIStore()
-  const { data: health } = useHealth()
   const unreadCount = useEmailStore((s) => s.unread_count)
-  const isConnected = useEmailStore((s) => s.isConnected)
   const mastersActive = pathname === '/masters' || pathname.startsWith('/masters/')
   const [mastersOpen, setMastersOpen] = React.useState<boolean>(mastersActive)
 
@@ -179,20 +176,6 @@ export default function Sidebar() {
 
       <div className="flex-shrink-0 space-y-3 px-3 pb-4">
         <div className="h-px bg-[#1A4526]" />
-        {!sidebarCollapsed && (
-          <>
-            <div className="flex items-center gap-2 text-[11px]">
-              <span className={cn('w-2 h-2 rounded-full', isConnected ? 'bg-brand-green-400 animate-pulse' : 'bg-[#5a7a5e]')} />
-              <span className="text-[#8AAF8E]">{isConnected ? 'Inbox sync on' : 'Inbox sync reconnecting…'}</span>
-            </div>
-            {health && (
-              <div className="flex items-center gap-2 text-[11px]">
-                <span className="w-2 h-2 rounded-full bg-brand-gold-400" />
-                <span className="text-[#8AAF8E] font-mono text-[10px]">{health.model}</span>
-              </div>
-            )}
-          </>
-        )}
         <button
           type="button"
           onClick={toggleSidebar}

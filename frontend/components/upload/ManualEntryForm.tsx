@@ -400,6 +400,7 @@ export default function ManualEntryForm({
   const [inlineNewEmployeeName, setInlineNewEmployeeName] = useState('')
   const [inlineNewEmployeeEmail, setInlineNewEmployeeEmail] = useState('')
   const [addEmployeeSaving, setAddEmployeeSaving] = useState(false)
+  const [addEmployeeErr, setAddEmployeeErr] = useState<string | null>(null)
   const [newClientQuoteEmployeeName, setNewClientQuoteEmployeeName] = useState('')
   const [newClientQuoteEmployeeEmail, setNewClientQuoteEmployeeEmail] = useState('')
 
@@ -463,6 +464,7 @@ export default function ManualEntryForm({
   useEffect(() => {
     setSelectedClientEmployeeId(null)
     setBranchEmployees([])
+    setAddEmployeeErr(null)
     if (clientMode !== 'existing' || !selectedCompany || !selectedBranchId) return
     if (selectedBranchId.startsWith('dummy-')) return
     let cancelled = false
@@ -485,8 +487,18 @@ export default function ManualEntryForm({
 
   const selectedQuoteEmployee = useMemo((): ClientEmployeeResponse | null => {
     if (!selectedClientEmployeeId) return null
-    return branchEmployees.find((e) => e.id === selectedClientEmployeeId) ?? null
+    const sid = selectedClientEmployeeId.toLowerCase()
+    return branchEmployees.find((e) => e.id.toLowerCase() === sid) ?? null
   }, [branchEmployees, selectedClientEmployeeId])
+
+  const quoteContactSelectLabel = useMemo(() => {
+    if (!selectedClientEmployeeId) return 'Branch primary contact (above)'
+    if (selectedQuoteEmployee) {
+      const n = selectedQuoteEmployee.full_name?.trim() || 'Contact'
+      return selectedQuoteEmployee.email ? `${n} · ${selectedQuoteEmployee.email}` : n
+    }
+    return employeesLoading ? 'Loading…' : 'Saved contact'
+  }, [selectedClientEmployeeId, selectedQuoteEmployee, employeesLoading])
 
   useEffect(() => {
     let cancelled = false
@@ -836,6 +848,19 @@ export default function ManualEntryForm({
         email: newClientQuoteEmployeeEmail.trim() || undefined,
       }
     }
+    const inlineEmpName = inlineNewEmployeeName.trim()
+    if (
+      clientMode === 'existing' &&
+      selectedBranchId &&
+      !selectedBranchId.startsWith('dummy-') &&
+      inlineEmpName &&
+      !selectedClientEmployeeId
+    ) {
+      form.newClientEmployee = {
+        fullName: inlineEmpName,
+        email: inlineNewEmployeeEmail.trim() || undefined,
+      }
+    }
     if (typeof window !== 'undefined' && typeof console !== 'undefined') {
       console.log(
         '[ManualEntryForm] buildEmailText:\n' +
@@ -1139,10 +1164,10 @@ export default function ManualEntryForm({
                           }
                           disabled={employeesLoading}
                         >
-                          <SelectTrigger className="h-10">
-                            <SelectValue
-                              placeholder={employeesLoading ? 'Loading contacts…' : 'Select contact'}
-                            />
+                          <SelectTrigger className="h-10 w-full min-w-0">
+                            <SelectValue placeholder={employeesLoading ? 'Loading contacts…' : 'Select contact'}>
+                              {quoteContactSelectLabel}
+                            </SelectValue>
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value={BRANCH_PRIMARY_CONTACT}>
@@ -1188,6 +1213,7 @@ export default function ManualEntryForm({
                               const name = inlineNewEmployeeName.trim()
                               if (!name || !selectedCompany || selectedBranch.id.startsWith('dummy-')) return
                               setAddEmployeeSaving(true)
+                              setAddEmployeeErr(null)
                               try {
                                 const created = await clientsApi.createBranchEmployee(
                                   selectedCompany.id,
@@ -1205,8 +1231,10 @@ export default function ManualEntryForm({
                                 setSelectedClientEmployeeId(created.id)
                                 setInlineNewEmployeeName('')
                                 setInlineNewEmployeeEmail('')
-                              } catch {
-                                /* toast optional */
+                              } catch (e) {
+                                setAddEmployeeErr(
+                                  e instanceof Error ? e.message : 'Could not save contact — try again or use Process quote to save.',
+                                )
                               } finally {
                                 setAddEmployeeSaving(false)
                               }
@@ -1214,6 +1242,9 @@ export default function ManualEntryForm({
                           >
                             {addEmployeeSaving ? 'Saving…' : 'Save & select for this quote'}
                           </Button>
+                          {addEmployeeErr ? (
+                            <p className="mt-2 text-[12px] text-red-600">{addEmployeeErr}</p>
+                          ) : null}
                         </div>
                       </div>
                     ) : null}

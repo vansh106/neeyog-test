@@ -80,6 +80,9 @@ function TableSkeletonRows() {
             <Skeleton className="h-4 w-16" />
           </td>
           <td className="px-4 py-3">
+            <Skeleton className="h-3 w-24" />
+          </td>
+          <td className="px-4 py-3">
             <div className="flex justify-end gap-2">
               <Skeleton className="h-8 w-8 rounded-md" />
               <Skeleton className="h-8 w-8 rounded-md" />
@@ -242,6 +245,7 @@ export default function EnquiriesPage() {
                   <th className="px-4 py-3">Flow</th>
                   <th className="px-4 py-3">Status</th>
                   <th className="px-4 py-3">Time</th>
+                  <th className="px-4 py-3">Created by</th>
                   <th className="px-4 py-3 text-right">Actions</th>
                 </tr>
               </thead>
@@ -250,7 +254,7 @@ export default function EnquiriesPage() {
               ) : rows.length === 0 ? (
                 <tbody>
                   <tr>
-                    <td colSpan={5} className="p-0">
+                    <td colSpan={6} className="p-0">
                       <EmptyState
                         icon={Inbox}
                         title="No enquiries found"
@@ -279,8 +283,15 @@ export default function EnquiriesPage() {
                         <td className="px-4 py-3">
                           <StatusBadge status={e.status} />
                         </td>
-                        <td className="px-4 py-3 text-surface-muted">
-                          {formatRelativeTime(e.created_at)}
+                        <td className="px-4 py-3 text-surface-muted" title={e.created_at}>
+                          <span className="block text-[13px]">{formatRelativeTime(e.created_at)}</span>
+                        </td>
+                        <td className="px-4 py-3 align-top text-surface-muted">
+                          {e.created_by_name ? (
+                            <span className="block text-[11px] leading-snug text-[#6B7568]">{e.created_by_name}</span>
+                          ) : (
+                            <span className="text-[11px] text-[#6B7568]">—</span>
+                          )}
                         </td>
                         <td className="px-4 py-3">
                           <div className="flex justify-end gap-2">

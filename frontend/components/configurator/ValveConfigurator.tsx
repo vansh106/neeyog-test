@@ -566,7 +566,10 @@ export function ValveConfigurator({
       positioner: 'Positioner',
       bracket: 'Bracket & Coupler',
     }
-    const componentSubtotal = Object.values(componentFinalByKey).reduce((sum, v) => sum + (v ?? 0), 0)
+    const componentSubtotal = Object.values(componentFinalByKey).reduce<number>(
+      (sum, v) => sum + (v ?? 0),
+      0,
+    )
     const productDiscount = Math.max(0, Math.min(100, Number(customerDiscountPct || 0)))
     const discountedUnit = componentSubtotal * (1 - productDiscount / 100)
     return {

@@ -39,6 +39,7 @@ function TableSkeletonRows() {
           </td>
           <td className="px-4 py-3">
             <Skeleton className="h-4 w-28" />
+            <Skeleton className="mt-1 h-3 w-20" />
           </td>
           <td className="px-4 py-3">
             <div className="flex justify-end gap-2">
@@ -228,7 +229,12 @@ export default function QuotationsPage() {
                       <QuotationListStatusEditor q={q} />
                     </td>
                     <td className="px-4 py-3 align-top text-surface-muted" title={q.created_at}>
-                      {formatRelativeTime(q.created_at)}
+                      <span className="block text-[13px]">{formatRelativeTime(q.created_at)}</span>
+                      {q.created_by_name ? (
+                        <span className="mt-0.5 block text-[11px] leading-snug text-[#6B7568]">
+                          {q.created_by_name}
+                        </span>
+                      ) : null}
                     </td>
                     <td className="px-4 py-3 align-top">
                       <div className="flex items-center justify-end gap-2">

@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Building2, ChevronDown, ChevronRight, MapPin, Phone, Star, Mail } from 'lucide-react'
+import { Building2, ChevronDown, ChevronRight, MapPin, Phone, Star, Mail, Users } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -27,6 +27,7 @@ import { clientsApi } from '@/lib/api'
 import {
   CLIENT_INDUSTRY_OPTIONS,
   type BranchResponse,
+  type ClientEmployeeResponse,
   type CompanyResponse,
   type CreateCompanyRequestPayload,
 } from '@/types'
@@ -68,6 +69,15 @@ export default function ClientsTab() {
 
   const [bf, setBf] = useState(emptyBranchForm)
 
+  const [selectedBranchId, setSelectedBranchId] = useState<string | null>(null)
+  const [branchEmployees, setBranchEmployees] = useState<ClientEmployeeResponse[]>([])
+  const [employeesLoading, setEmployeesLoading] = useState(false)
+  const [contactSaving, setContactSaving] = useState(false)
+  const [contactErr, setContactErr] = useState<string | null>(null)
+  const [newContactName, setNewContactName] = useState('')
+  const [newContactEmail, setNewContactEmail] = useState('')
+  const [newContactDesignation, setNewContactDesignation] = useState('')
+
   const loadList = useCallback(async () => {
     setLoading(true)
     setErr(null)
@@ -104,6 +114,44 @@ export default function ClientsTab() {
     }
     void loadDetail(selectedId)
   }, [selectedId, loadDetail])
+
+  useEffect(() => {
+    setSelectedBranchId(null)
+    setBranchEmployees([])
+    setContactErr(null)
+    setNewContactName('')
+    setNewContactEmail('')
+    setNewContactDesignation('')
+  }, [selectedId])
+
+  useEffect(() => {
+    if (!detail?.id || !selectedBranchId) {
+      setBranchEmployees([])
+      return
+    }
+    const br = (detail.branches ?? []).find((b) => b.id === selectedBranchId)
+    if (!br?.is_active) {
+      setBranchEmployees([])
+      return
+    }
+    let cancelled = false
+    setEmployeesLoading(true)
+    setContactErr(null)
+    void clientsApi
+      .listBranchEmployees(detail.id, selectedBranchId)
+      .then((rows) => {
+        if (!cancelled) setBranchEmployees(rows)
+      })
+      .catch(() => {
+        if (!cancelled) setBranchEmployees([])
+      })
+      .finally(() => {
+        if (!cancelled) setEmployeesLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [detail?.id, selectedBranchId])
 
   const filtered = useMemo(() => {
     const s = leftSearch.trim().toLowerCase()
@@ -285,6 +333,35 @@ export default function ClientsTab() {
     }
   }
 
+  async function submitNewContactPerson() {
+    if (!detail || !selectedBranchId) return
+    const name = newContactName.trim()
+    if (!name) return
+    const email = newContactEmail.trim()
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setContactErr('Enter a valid email or leave it blank')
+      return
+    }
+    setContactSaving(true)
+    setContactErr(null)
+    try {
+      await clientsApi.createBranchEmployee(detail.id, selectedBranchId, {
+        full_name: name,
+        email: email || undefined,
+        designation: newContactDesignation.trim() || undefined,
+      })
+      const rows = await clientsApi.listBranchEmployees(detail.id, selectedBranchId)
+      setBranchEmployees(rows)
+      setNewContactName('')
+      setNewContactEmail('')
+      setNewContactDesignation('')
+    } catch (e: unknown) {
+      setContactErr(e instanceof Error ? e.message : 'Could not save contact person')
+    } finally {
+      setContactSaving(false)
+    }
+  }
+
   const activeBranches = (detail?.branches ?? []).filter((b) => b.is_active)
   const inactiveBranches = (detail?.branches ?? []).filter((b) => !b.is_active)
 
@@ -396,13 +473,30 @@ export default function ClientsTab() {
                   + Add Branch
                 </Button>
               </div>
+              <p className="mb-2 text-[12px] text-surface-muted">
+                Select a branch to list or add people used as quote contacts (separate from the branch primary
+                contact above).
+              </p>
               <div className="grid gap-3 sm:grid-cols-2">
                 {[...activeBranches, ...inactiveBranches].map((b) => (
                   <div
                     key={b.id}
+                    role={b.is_active ? 'button' : undefined}
+                    tabIndex={b.is_active ? 0 : undefined}
+                    onClick={() => {
+                      if (b.is_active) setSelectedBranchId(b.id)
+                    }}
+                    onKeyDown={(e) => {
+                      if (!b.is_active) return
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        setSelectedBranchId(b.id)
+                      }
+                    }}
                     className={cn(
-                      'rounded-lg border p-4 text-[13px]',
-                      b.is_active ? 'border-surface-border' : 'border-dashed border-surface-border bg-gray-50 text-surface-muted',
+                      'rounded-lg border p-4 text-[13px] transition-shadow',
+                      b.is_active ? 'border-surface-border hover:border-brand-green-300' : 'border-dashed border-surface-border bg-gray-50 text-surface-muted',
+                      b.is_active && selectedBranchId === b.id && 'ring-2 ring-brand-green-500 ring-offset-2',
                     )}
                   >
                     <div className="flex items-start justify-between gap-2">
@@ -438,7 +532,15 @@ export default function ClientsTab() {
                     <div className="mt-3 flex flex-wrap justify-end gap-2">
                       {b.is_active ? (
                         <>
-                          <Button type="button" variant="ghost" size="sm" onClick={() => openEditBranch(b)}>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              openEditBranch(b)
+                            }}
+                          >
                             Edit
                           </Button>
                           <Button
@@ -446,13 +548,24 @@ export default function ClientsTab() {
                             variant="ghost"
                             size="sm"
                             className="text-red-600"
-                            onClick={() => onDeactivateBranch(b)}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              void onDeactivateBranch(b)
+                            }}
                           >
                             Deactivate
                           </Button>
                         </>
                       ) : (
-                        <Button type="button" variant="outline" size="sm" onClick={() => onReactivateBranch(b)}>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            void onReactivateBranch(b)
+                          }}
+                        >
                           Reactivate
                         </Button>
                       )}
@@ -461,6 +574,84 @@ export default function ClientsTab() {
                 ))}
               </div>
             </div>
+
+            {selectedBranchId && detail ? (
+              <div className="rounded-lg border border-surface-border bg-white p-4 shadow-sm">
+                <div className="mb-3 flex flex-wrap items-center gap-2">
+                  <Users className="size-4 shrink-0 text-brand-navy-500" />
+                  <h3 className="text-[15px] font-semibold text-gray-900">Contact persons</h3>
+                  <span className="text-[12px] text-surface-muted">
+                    {(detail.branches ?? []).find((x) => x.id === selectedBranchId)?.branch_name ?? 'Branch'}
+                  </span>
+                </div>
+                {(() => {
+                  const sel = (detail.branches ?? []).find((x) => x.id === selectedBranchId)
+                  if (!sel?.is_active) {
+                    return (
+                      <p className="text-[13px] text-surface-muted">
+                        Reactivate this branch to add or view quote contact persons.
+                      </p>
+                    )
+                  }
+                  return (
+                    <div className="space-y-4">
+                      {employeesLoading ? (
+                        <p className="text-[13px] text-surface-muted">Loading contacts…</p>
+                      ) : branchEmployees.length === 0 ? (
+                        <p className="text-[13px] text-surface-muted">No saved contact persons for this branch yet.</p>
+                      ) : (
+                        <ul className="divide-y divide-surface-border rounded-md border border-surface-border bg-surface-page/30">
+                          {branchEmployees.map((emp) => (
+                            <li key={emp.id} className="flex flex-col gap-0.5 px-3 py-2.5 text-[13px]">
+                              <span className="font-medium text-gray-900">{emp.full_name}</span>
+                              <span className="text-surface-muted">
+                                {[emp.designation, emp.email, emp.phone].filter(Boolean).join(' · ') || '—'}
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                      <div className="rounded-md border border-dashed border-surface-border bg-surface-page/50 p-3">
+                        <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-[#8A9488]">
+                          Add contact person
+                        </p>
+                        <div className="grid gap-2 sm:grid-cols-3">
+                          <Input
+                            placeholder="Full name *"
+                            value={newContactName}
+                            onChange={(e) => setNewContactName(e.target.value)}
+                            className="h-9"
+                          />
+                          <Input
+                            placeholder="Email (optional)"
+                            type="email"
+                            value={newContactEmail}
+                            onChange={(e) => setNewContactEmail(e.target.value)}
+                            className="h-9"
+                          />
+                          <Input
+                            placeholder="Designation (optional)"
+                            value={newContactDesignation}
+                            onChange={(e) => setNewContactDesignation(e.target.value)}
+                            className="h-9"
+                          />
+                        </div>
+                        {contactErr ? <p className="mt-2 text-[12px] text-red-600">{contactErr}</p> : null}
+                        <Button
+                          type="button"
+                          size="sm"
+                          className="mt-2 bg-brand-green-500 hover:bg-brand-green-600"
+                          disabled={contactSaving || !newContactName.trim()}
+                          onClick={() => void submitNewContactPerson()}
+                        >
+                          {contactSaving ? 'Saving…' : 'Save contact'}
+                        </Button>
+                      </div>
+                    </div>
+                  )
+                })()}
+              </div>
+            ) : null}
 
             {detail.recent_enquiries && detail.recent_enquiries.length > 0 ? (
               <div className="rounded-lg border border-surface-border">

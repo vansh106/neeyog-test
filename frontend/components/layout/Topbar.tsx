@@ -15,7 +15,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { Permissions } from '@/lib/permissions'
-import { useEmailSyncStatus, useHealth, useTriggerEmailSync } from '@/lib/queries'
+import { useEmailSyncStatus, useTriggerEmailSync } from '@/lib/queries'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/authStore'
 
@@ -49,7 +49,6 @@ export default function Topbar() {
   const router = useRouter()
   const user = useAuthStore((s) => s.user)
   const logout = useAuthStore((s) => s.logout)
-  const { data: health } = useHealth()
   const { data: syncStatus } = useEmailSyncStatus()
   const triggerSync = useTriggerEmailSync()
 
@@ -81,63 +80,48 @@ export default function Topbar() {
     <header className="h-12 bg-white border-b border-surface-border flex items-center justify-between px-6 flex-shrink-0">
       <h1 className="text-[16px] font-semibold tracking-[-0.2px]">{title}</h1>
       <div className="flex items-center gap-3">
-        {health && (
-          <>
-            <span className="flex items-center gap-1.5 text-[11px]">
-              <span
-                className={`w-1.5 h-1.5 rounded-full ${health.status === 'ok' ? 'bg-brand-green-400' : 'bg-red-400'}`}
-              />
-              <span className="text-surface-muted">{health.status === 'ok' ? 'API Online' : 'API Offline'}</span>
-            </span>
-
-            <PermissionGate permission={Permissions.EMAIL_SYNC_VIEW}>
-              {syncStatus && (
-                <Tooltip>
-                  <TooltipTrigger
-                    type="button"
-                    className="flex items-center gap-1.5 text-[11px] text-surface-muted outline-none"
-                  >
-                    {syncOn ? (
-                      <>
-                        <span className="relative flex h-2 w-2 shrink-0">
-                          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-brand-green-400 opacity-60" />
-                          <span className="relative inline-flex h-2 w-2 rounded-full bg-brand-green-500" />
-                        </span>
-                        <span className="text-brand-green-700">Inbox sync on</span>
-                      </>
-                    ) : (
-                      <>
-                        <span className="h-2 w-2 shrink-0 rounded-full bg-gray-300" />
-                        <span>Sync off</span>
-                      </>
-                    )}
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom" className="max-w-xs text-xs">
-                    {syncTooltip}
-                  </TooltipContent>
-                </Tooltip>
-              )}
-            </PermissionGate>
-
-            <PermissionGate permission={Permissions.EMAIL_SYNC_TRIGGER}>
-              <Button
+        <PermissionGate permission={Permissions.EMAIL_SYNC_VIEW}>
+          {syncStatus && (
+            <Tooltip>
+              <TooltipTrigger
                 type="button"
-                variant="ghost"
-                size="icon"
-                className="size-8 text-brand-green-600 hover:bg-brand-green-50"
-                disabled={triggerSync.isPending}
-                aria-label="Sync inbox now"
-                onClick={() => triggerSync.mutate()}
+                className="flex items-center gap-1.5 text-[11px] text-surface-muted outline-none"
               >
-                <RefreshCw className={`size-4 ${triggerSync.isPending ? 'animate-spin' : ''}`} />
-              </Button>
-            </PermissionGate>
+                {syncOn ? (
+                  <>
+                    <span className="relative flex h-2 w-2 shrink-0">
+                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-brand-green-400 opacity-60" />
+                      <span className="relative inline-flex h-2 w-2 rounded-full bg-brand-green-500" />
+                    </span>
+                    <span className="text-brand-green-700">Inbox sync on</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="h-2 w-2 shrink-0 rounded-full bg-gray-300" />
+                    <span>Sync off</span>
+                  </>
+                )}
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="max-w-xs text-xs">
+                {syncTooltip}
+              </TooltipContent>
+            </Tooltip>
+          )}
+        </PermissionGate>
 
-            <span className="bg-brand-green-50 text-brand-green-600 text-[11px] font-mono rounded-full px-2 py-0.5">
-              {health.model}
-            </span>
-          </>
-        )}
+        <PermissionGate permission={Permissions.EMAIL_SYNC_TRIGGER}>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="size-8 text-brand-green-600 hover:bg-brand-green-50"
+            disabled={triggerSync.isPending}
+            aria-label="Sync inbox now"
+            onClick={() => triggerSync.mutate()}
+          >
+            <RefreshCw className={`size-4 ${triggerSync.isPending ? 'animate-spin' : ''}`} />
+          </Button>
+        </PermissionGate>
 
         <DropdownMenu>
           <DropdownMenuTrigger

@@ -5,6 +5,8 @@ export interface EnquiryListItem {
   flow_type: string | null
   input_type: string
   created_at: string
+  /** User who created the enquiry (upload / manual); omitted for older rows or inbox sync. */
+  created_by_name?: string | null
   erp_export_available?: boolean
 }
 
@@ -169,6 +171,8 @@ export interface QuotationListItem {
   status: string
   status_remarks?: string | null
   created_at: string
+  /** Logged-in user who created the quotation (manual flow); omitted for older rows or system-generated quotes. */
+  created_by_name?: string | null
 }
 
 export interface Product {
