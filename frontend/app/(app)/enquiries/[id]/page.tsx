@@ -73,10 +73,6 @@ function extractQuoteId(parsed: Record<string, unknown> | null): string | null {
   return null
 }
 
-function isProductRow(x: unknown): x is Record<string, unknown> {
-  return typeof x === 'object' && x !== null
-}
-
 /** Align cascade key order with quote description / masters. */
 const CASCADE_DISPLAY_ORDER: string[] = [
   'variant_type',
@@ -473,12 +469,6 @@ export default function EnquiryDetailPage() {
     return null
   }, [matcher])
 
-  const productsRequested = useMemo(() => {
-    const pr = parsed?.products_requested
-    if (!Array.isArray(pr)) return []
-    return pr.filter(isProductRow)
-  }, [parsed])
-
   const missingList = useMemo(() => {
     const fromParsed = parsed?.missing_fields
     if (Array.isArray(fromParsed)) {
@@ -668,38 +658,6 @@ export default function EnquiryDetailPage() {
                   ))}
                 </div>
                 <ManualLineItemsTable rows={manualLineRows} />
-                {productsRequested.length > 0 && (
-                  <div className="mt-6">
-                    <h3 className="text-[12px] font-semibold uppercase tracking-wide text-[#8A9488]">
-                      Products requested
-                    </h3>
-                    <div className="mt-3 space-y-2">
-                      {productsRequested.map((p, i) => (
-                        <div
-                          key={i}
-                          className="rounded-lg border border-[#E2E6DC] bg-[#F9FAF7] p-3 text-[13px]"
-                        >
-                          {typeof p.product_description === 'string' && (
-                            <p className="font-medium text-gray-900">{p.product_description}</p>
-                          )}
-                          <div className="mt-1 flex flex-wrap gap-3 text-surface-muted">
-                            {(p.size_mm != null || p.size_inch != null) && (
-                              <span>
-                                Size:{' '}
-                                {p.size_mm != null
-                                  ? `${p.size_mm} mm`
-                                  : p.size_inch != null
-                                    ? `${p.size_inch}"`
-                                    : '—'}
-                              </span>
-                            )}
-                            {p.quantity != null && <span>Qty: {String(p.quantity)}</span>}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
               </>
             )}
           </section>

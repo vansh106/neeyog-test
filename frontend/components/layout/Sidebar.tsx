@@ -2,7 +2,7 @@
 
 import React from 'react'
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import {
   LayoutDashboard,
   Upload,
@@ -16,6 +16,7 @@ import {
   ChevronDown,
   ChevronRight,
   Mail,
+  LogOut,
 } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
@@ -45,8 +46,10 @@ const NAV_ITEMS: NavItem[] = [
 
 export default function Sidebar() {
   const pathname = usePathname()
+  const router = useRouter()
   const hasPermission = useAuthStore((s) => s.hasPermission)
   const isAdminOrAbove = useAuthStore((s) => s.isAdminOrAbove())
+  const logout = useAuthStore((s) => s.logout)
   const { sidebarCollapsed, toggleSidebar } = useUIStore()
   const unreadCount = useEmailStore((s) => s.unread_count)
   const mastersActive = pathname === '/masters' || pathname.startsWith('/masters/')
@@ -174,14 +177,30 @@ export default function Sidebar() {
         })}
       </nav>
 
-      <div className="flex-shrink-0 space-y-3 px-3 pb-4">
+      <div className="flex-shrink-0 space-y-2 px-3 pb-4">
         <div className="h-px bg-[#1A4526]" />
         <button
           type="button"
           onClick={toggleSidebar}
           className="w-full flex items-center justify-center py-1 text-[#5a7a5e] hover:text-white transition-colors"
+          aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
         >
           {sidebarCollapsed ? <PanelLeft className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
+        </button>
+        <button
+          type="button"
+          onClick={async () => {
+            await logout()
+            router.push('/login')
+          }}
+          className={cn(
+            'w-full flex items-center gap-3 rounded-md px-3 py-2 text-[13px] text-[#8AAF8E] transition-colors hover:bg-surface-sidebar2 hover:text-white',
+            sidebarCollapsed && 'justify-center px-2',
+          )}
+          aria-label="Log out"
+        >
+          <LogOut className="h-4 w-4 shrink-0" />
+          {!sidebarCollapsed && <span className="truncate">Log out</span>}
         </button>
       </div>
     </aside>
