@@ -668,6 +668,12 @@ export default function ClientsTab() {
                     <ul className="space-y-2 text-[13px]">
                       {detail.recent_enquiries.map((r) => (
                         <li key={r.enquiry_id} className="flex flex-wrap items-center justify-between gap-2">
+                          <Link
+                            href={`/enquiries/${r.enquiry_id}`}
+                            className="font-mono text-[12px] text-brand-green-600 hover:underline"
+                          >
+                            {(r.enquiry_number || '').trim() || r.enquiry_id.slice(0, 8)}
+                          </Link>
                           <span className="text-surface-muted">{r.created_at?.slice(0, 10)}</span>
                           <span>{r.branch_name || '—'}</span>
                           <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px]">{r.status}</span>

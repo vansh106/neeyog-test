@@ -97,6 +97,7 @@ export default function EmailsPage() {
           const mailbox_label = mb ? (mbName || mbEmail).trim() || 'Mailbox' : undefined
           return {
             enquiry_id: x.enquiry_id,
+            enquiry_number: x.enquiry_number != null && x.enquiry_number !== '' ? String(x.enquiry_number) : undefined,
             sender_name: x.sender_name,
             sender_email: x.sender_email,
             company: x.company,

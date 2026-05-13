@@ -36,7 +36,7 @@ import {
 } from '@/lib/quotationPrefillAssembly'
 import { Permissions } from '@/lib/permissions'
 import { useAuthStore } from '@/stores/authStore'
-import { formatCurrency } from '@/lib/utils'
+import { formatCurrency, truncateId } from '@/lib/utils'
 import type {
   AssembledProduct,
   QuotationAuditResponse,
@@ -525,7 +525,8 @@ export default function QuotationDetailPage() {
                     href={`/enquiries/${quotation.enquiry_id}`}
                     className="mt-2 inline-block font-mono text-[13px] text-brand-green-600 hover:underline"
                   >
-                    {quotation.enquiry_id}
+                    {(linkedEnquiry?.enquiry_number || quotation.enquiry_number || '').trim() ||
+                      truncateId(quotation.enquiry_id)}
                   </Link>
                   {linkedEnquiry?.flow_type != null && linkedEnquiry.flow_type !== '' && (
                     <p className="mt-2 text-[12px] text-surface-muted">

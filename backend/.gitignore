@@ -1,3 +1,6 @@
 __pycache__/
 *.pyc
-backend/output/
+*.pyo
+.pytest_cache/
+.mypy_cache/
+*.egg-info/

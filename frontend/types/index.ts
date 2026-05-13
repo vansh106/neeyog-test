@@ -1,5 +1,7 @@
 export interface EnquiryListItem {
   enquiry_id: string
+  /** FY + serial (e.g. 262700089); legacy rows may omit. */
+  enquiry_number?: string | null
   client_org_name?: string
   status: string
   flow_type: string | null
@@ -12,6 +14,7 @@ export interface EnquiryListItem {
 
 export interface EnquiryResponse {
   enquiry_id: string
+  enquiry_number?: string | null
   status: string
   flow_type: 'complete' | 'incomplete' | 'ambiguous' | 'not_found' | null
   message: string
@@ -35,6 +38,7 @@ export interface EnquiryResponse {
 
 export interface EnquiryDetail {
   enquiry_id: string
+  enquiry_number?: string | null
   status: string
   flow_type: string | null
   input_type: string
@@ -86,6 +90,8 @@ export interface QuotationClientEmployee {
 export interface Quotation {
   quotation_id: string
   enquiry_id: string
+  /** Human ref when enquiry has been numbered (FY + serial). */
+  enquiry_number?: string | null
   quote_number: string
   client_name: string
   client_company: string | null
@@ -163,6 +169,7 @@ export interface QuotationAuditResponse {
 export interface QuotationListItem {
   quotation_id: string
   enquiry_id: string
+  enquiry_number?: string | null
   client_employee_id?: string | null
   quote_number: string
   client_name: string
@@ -260,6 +267,7 @@ export interface BranchResponse {
 
 export interface CompanyRecentEnquiry {
   enquiry_id: string
+  enquiry_number?: string | null
   created_at: string
   branch_name: string
   status: string
@@ -448,6 +456,7 @@ export interface AgentEvent {
   status?: string
   data?: Record<string, unknown>
   enquiry_id?: string
+  enquiry_number?: string
   timestamp?: string
   hitl_context?: HITLContext
   cycle?: number

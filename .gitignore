@@ -1,0 +1,14 @@
+# Environment variables (any path)
+.env
+.env.*
+!.env.example
+
+# Generated outputs (PDFs, ERP exports, etc.)
+**/output/
+**/outputs/
+
+# Local DB dumps / backups
+*.dump
+
+# OS
+.DS_Store

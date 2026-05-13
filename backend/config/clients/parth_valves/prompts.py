@@ -106,7 +106,7 @@ Calculation rules (never deviate):
 
 Return ONLY valid JSON:
 {
-  "quote_number": "QT-YYYYMMDD-XXXX",
+  "quote_number": "QUO262700001",
   "line_items": [
     {
       "sr_no": 1,

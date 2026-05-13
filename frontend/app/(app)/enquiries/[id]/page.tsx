@@ -16,7 +16,7 @@ import ManualEntryForm from '@/components/upload/ManualEntryForm'
 import { useEnquiry } from '@/lib/queries'
 import { downloadQuotationPdf, enquiriesApi, erpExportUrl, processManualDropdown } from '@/lib/api'
 import { useQueryClient } from '@tanstack/react-query'
-import { formatCurrency, formatRelativeTime } from '@/lib/utils'
+import { formatCurrency, formatRelativeTime, truncateId } from '@/lib/utils'
 import type {
   ClientSummary,
   ClientVerificationContext,
@@ -612,14 +612,18 @@ export default function EnquiryDetailPage() {
       ? parsed.client_email.trim()
       : ''
 
+  const enquiryRef = (ext.enquiry_number || '').trim() || truncateId(id)
+
   return (
-    <PageShell title={`Enquiry ${id.slice(0, 8)}…`}>
+    <PageShell title={`Enquiry ${enquiryRef}`}>
       <nav className="mb-6 flex flex-wrap items-center gap-2 text-[13px] text-surface-muted">
         <Link href="/enquiries" className="font-medium text-brand-green-600 hover:text-brand-green-700">
           Enquiries
         </Link>
         <ChevronRight className="size-4 opacity-50" />
-        <span className="font-mono text-[12px] text-gray-700">{id}</span>
+        <span className="font-mono text-[12px] text-gray-700" title={id}>
+          {enquiryRef}
+        </span>
       </nav>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-10">

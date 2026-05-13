@@ -131,6 +131,7 @@ async def _company_resp(
             recent.append(
                 {
                     "enquiry_id": str(e.id),
+                    "enquiry_number": (e.enquiry_number or "").strip() or None,
                     "created_at": e.created_at.isoformat() if e.created_at else "",
                     "branch_name": bn,
                     "status": e.status,

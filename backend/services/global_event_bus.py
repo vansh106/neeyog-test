@@ -68,6 +68,7 @@ async def broadcast_new_email(
     input_type: str = "email_sync",
     mailbox_id: str | None = None,
     mailbox_label: str | None = None,
+    enquiry_number: str | None = None,
 ) -> None:
     payload: dict = {
         "type": "new_email_received",
@@ -79,6 +80,8 @@ async def broadcast_new_email(
         "input_type": input_type,
         "status": "received",
     }
+    if enquiry_number:
+        payload["enquiry_number"] = enquiry_number
     if mailbox_id:
         payload["mailbox_id"] = mailbox_id
     if mailbox_label:

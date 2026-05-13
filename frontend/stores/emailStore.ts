@@ -3,6 +3,7 @@ import type { GlobalEvent } from '@/hooks/useGlobalEvents'
 
 export interface EmailInboxItem {
   enquiry_id: string
+  enquiry_number?: string | null
   sender_name: string
   sender_email: string
   company: string
@@ -63,6 +64,7 @@ export const useEmailStore = create<EmailStore>((set, get) => ({
       const dn = (event.sender_name || '').trim() || 'Unknown'
       const newItem: EmailInboxItem = {
         enquiry_id,
+        enquiry_number: event.enquiry_number || undefined,
         sender_name: dn,
         sender_email: event.sender_email || '',
         company: dn,

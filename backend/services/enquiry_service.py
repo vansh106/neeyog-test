@@ -7,7 +7,7 @@ Raises only from core.exceptions.
 import logging
 import uuid
 import json
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 
 from sqlalchemy import and_, desc, false, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,6 +28,7 @@ from db.models import (
 )
 from services.email_display_infer import infer_company_from_email_raw
 from services.email_inbox_filters import raw_input_is_quotation_work_related
+from services.fiscal_numbering import allocate_enquiry_number, allocate_quote_number
 
 logger = logging.getLogger(__name__)
 
@@ -42,10 +43,6 @@ STATUS_MAP = {
     "matcher_failed": "Failed to match products",
     "quote_failed": "Failed to build quotation",
 }
-
-
-def _allocate_quote_number() -> str:
-    return f"QT-{date.today().strftime('%Y%m%d')}-{uuid.uuid4().hex[:8].upper()}"
 
 
 def _clean_float(x: object, default: float = 0.0) -> float:
@@ -257,22 +254,35 @@ async def create_enquiry(
     cb_raw = (created_by_name or "").strip()
     cb_name = cb_raw[:255] if cb_raw else None
 
-    enquiry = Enquiry(
-        id=uuid.uuid4(),
-        client_config="parth_valves",
-        raw_input=email_text.strip(),
-        input_type=input_type,
-        status="received",
-        mailbox_id=mailbox_id,
-        created_by_user_id=cb_uid,
-        created_by_name=cb_name,
-    )
-
     if db:
+        eno = await allocate_enquiry_number(db)
+        enquiry = Enquiry(
+            id=uuid.uuid4(),
+            client_config="parth_valves",
+            raw_input=email_text.strip(),
+            input_type=input_type,
+            status="received",
+            mailbox_id=mailbox_id,
+            created_by_user_id=cb_uid,
+            created_by_name=cb_name,
+            enquiry_number=eno,
+        )
         db.add(enquiry)
         await db.flush()
     else:
         async with async_session_factory() as session:
+            eno = await allocate_enquiry_number(session)
+            enquiry = Enquiry(
+                id=uuid.uuid4(),
+                client_config="parth_valves",
+                raw_input=email_text.strip(),
+                input_type=input_type,
+                status="received",
+                mailbox_id=mailbox_id,
+                created_by_user_id=cb_uid,
+                created_by_name=cb_name,
+                enquiry_number=eno,
+            )
             session.add(enquiry)
             await session.commit()
 
@@ -307,7 +317,6 @@ async def process_enquiry(
     when agents are rebuilt.
     """
     from sqlalchemy import update
-    from datetime import datetime, timezone
 
     # Update status to show processing started
     await db.execute(
@@ -321,6 +330,9 @@ async def process_enquiry(
         )
     )
     await db.commit()
+
+    en_row = await get_enquiry(enquiry_id, db)
+    eno = (en_row.enquiry_number or "").strip() or None
 
     # Emit a stub event so SSE stream
     # doesn't hang silently
@@ -341,6 +353,7 @@ async def process_enquiry(
             "status": "received",
             "data": {
                 "enquiry_id":   enquiry_id,
+                "enquiry_number": eno,
                 "status":       "received",
                 "flow_type":    None,
                 "message":      "Enquiry saved. "
@@ -361,6 +374,7 @@ async def process_enquiry(
 
     return {
         "enquiry_id":   enquiry_id,
+        "enquiry_number": eno,
         "status":       "received",
         "flow_type":    None,
         "message":      "Enquiry saved successfully.",
@@ -588,6 +602,7 @@ async def process_email_matcher(enquiry_id: str, db: AsyncSession) -> dict:
 
     out: dict = {
         "enquiry_id": str(e.id),
+        "enquiry_number": (e.enquiry_number or "").strip() or None,
         "status": e.status,
         "flow_type": e.flow_type,
         "message": msg,
@@ -817,6 +832,7 @@ async def process_manual_dropdown(
         await db.commit()
     else:
         raw_input = json.dumps(raw_payload, ensure_ascii=False)
+        enquiry_no = await allocate_enquiry_number(db)
         enquiry = Enquiry(
             id=enquiry_id,
             client_config="parth_valves",
@@ -830,6 +846,7 @@ async def process_manual_dropdown(
             matched_products=matched_products,
             created_by_user_id=cb_uid,
             created_by_name=cb_name,
+            enquiry_number=enquiry_no,
         )
         if company_id_uuid is not None:
             enquiry.company_id = company_id_uuid
@@ -839,7 +856,7 @@ async def process_manual_dropdown(
         db.add(enquiry)
         await db.commit()
 
-    quote_number = _allocate_quote_number()
+    quote_number = await allocate_quote_number(db)
     quotation_id = uuid.uuid4()
     quotation_data = {
         "quote_number": quote_number,
@@ -858,6 +875,7 @@ async def process_manual_dropdown(
         "professional_notes": notes or "",
         "validity_days": int(client_json.get("quote_validity_days", 15)),
         "enquiry_id": str(enquiry_id),
+        "enquiry_number": (enquiry.enquiry_number or "").strip() or None,
         "enquiry_date": enquiry.created_at.strftime("%d/%m/%Y") if enquiry.created_at else "",
         "quotation_date": datetime.now(timezone.utc).strftime("%d/%m/%Y"),
     }
@@ -986,6 +1004,7 @@ async def process_manual_dropdown(
 
     return {
         "enquiry_id": str(enquiry_id),
+        "enquiry_number": (enquiry.enquiry_number or "").strip() or None,
         "status": "quoted",
         "flow_type": "complete",
         "message": "Manual dropdown processed — quotation generated",
@@ -1149,8 +1168,11 @@ def _format_for_inbox(e: Enquiry) -> dict:
 
     display_name = company if company and company != "Unknown" else (sender_name or "Unknown")
 
+    eno = (getattr(e, "enquiry_number", None) or "").strip() or None
+
     return {
         "enquiry_id": str(e.id),
+        "enquiry_number": eno,
         "sender_name": sender_name or display_name,
         "sender_email": sender_email,
         "company": company,

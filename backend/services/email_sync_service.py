@@ -339,6 +339,7 @@ class EmailSyncService:
                         input_type="email_sync",
                         mailbox_id=str(mailbox_id),
                         mailbox_label=account_email,
+                        enquiry_number=(enquiry.enquiry_number or "").strip() or None,
                     )
                 except Exception:
                     pass

@@ -177,6 +177,9 @@ class Enquiry(Base):
     created_by_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_by_user: Mapped["User | None"] = relationship("User", foreign_keys=[created_by_user_id])
 
+    #: Human-readable ref: FY + 5-digit serial (e.g. ``262700089``); UUID ``id`` remains the primary key.
+    enquiry_number: Mapped[str | None] = mapped_column(String(20), nullable=True, unique=True, index=True)
+
     quotations: Mapped[list["Quotation"]] = relationship(back_populates="enquiry")
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)

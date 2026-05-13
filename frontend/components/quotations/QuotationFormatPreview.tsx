@@ -138,7 +138,9 @@ export default function QuotationFormatPreview({
             </p>
             <p className="break-all">
               <span className="inline-block min-w-[92px] font-semibold">Enquiry No / Date</span>:{' '}
-              <span className="font-mono">{quotation.enquiry_id}</span>
+              <span className="font-mono">
+                {(quotation.enquiry_number || '').trim() || quotation.enquiry_id}
+              </span>
               {enquiryDate !== '—' ? ` / ${enquiryDate}` : ''}
             </p>
           </div>

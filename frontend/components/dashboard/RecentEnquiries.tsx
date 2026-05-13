@@ -28,7 +28,7 @@ export default function RecentEnquiries({ enquiries }: { enquiries: EnquiryListI
         <Table>
           <TableHeader>
             <TableRow className="border-[#E2E6DC] hover:bg-transparent">
-              <TableHead className="text-[11px] font-medium text-surface-muted">ID</TableHead>
+              <TableHead className="text-[11px] font-medium text-surface-muted">Ref</TableHead>
               <TableHead className="text-[11px] font-medium text-surface-muted">Flow</TableHead>
               <TableHead className="text-[11px] font-medium text-surface-muted">Status</TableHead>
               <TableHead className="text-[11px] font-medium text-surface-muted text-right">When</TableHead>
@@ -42,7 +42,9 @@ export default function RecentEnquiries({ enquiries }: { enquiries: EnquiryListI
                     href={`/enquiries/${e.enquiry_id}`}
                     className="grid grid-cols-[minmax(0,1fr)_auto_auto_5.5rem] gap-3 items-center px-2 py-2.5 text-inherit no-underline"
                   >
-                    <span className="font-mono text-[11px] text-surface-muted">{truncateId(e.enquiry_id)}</span>
+                    <span className="font-mono text-[11px] text-surface-muted">
+                      {(e.enquiry_number || '').trim() || truncateId(e.enquiry_id)}
+                    </span>
                     <StatusBadge status={e.flow_type} />
                     <StatusBadge status={e.status} />
                     <span className="text-right text-[12px] text-surface-muted whitespace-nowrap">

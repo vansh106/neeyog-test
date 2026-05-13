@@ -7,6 +7,7 @@ import { useAuthStore } from '@/stores/authStore'
 export interface GlobalEvent {
   type: string
   enquiry_id?: string
+  enquiry_number?: string
   sender_name?: string
   sender_email?: string
   subject?: string

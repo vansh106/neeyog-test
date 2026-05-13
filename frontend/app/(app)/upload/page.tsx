@@ -28,7 +28,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { downloadQuotationPdf, enquiriesApi, processManualDropdown, uploadEmailStream } from '@/lib/api'
 import { Permissions } from '@/lib/permissions'
 import { useEmailSyncStatus, useTriggerEmailSync } from '@/lib/queries'
-import { cn, formatCurrency } from '@/lib/utils'
+import { cn, formatCurrency, truncateId } from '@/lib/utils'
 import type { EnquiryResponse, AgentEvent, HITLContext, HITLHistoryEntry, ClientVerificationContext, ClientVerificationResponse, ManualEnquiryForm } from '@/types'
 
 type InputType = 'email' | 'indiamart' | 'manual'
@@ -389,8 +389,10 @@ function UploadPageInner() {
                   <p className="mt-2 font-mono text-[14px] text-surface-muted">
                     {extended?.quote_number ? (
                       <>Quote #{extended.quote_number}</>
+                    ) : result.enquiry_number ? (
+                      <>Enquiry <span className="text-brand-green-600">{result.enquiry_number}</span></>
                     ) : (
-                      <>Enquiry <span className="text-brand-green-600">{result.enquiry_id}</span></>
+                      <>Enquiry <span className="text-brand-green-600">{truncateId(result.enquiry_id)}</span></>
                     )}
                   </p>
                   {result.message && (

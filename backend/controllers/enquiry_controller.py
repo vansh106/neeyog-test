@@ -31,6 +31,7 @@ class UploadEmailRequest(BaseModel):
 
 class EnquiryResponse(BaseModel):
     enquiry_id: str
+    enquiry_number: str | None = None
     status: str
     flow_type: str | None = None
     message: str
@@ -48,6 +49,7 @@ class EnquiryResponse(BaseModel):
 
 class EnquiryListItem(BaseModel):
     enquiry_id: str
+    enquiry_number: str | None = None
     client_org_name: str = ""
     status: str
     flow_type: str | None = None
@@ -154,6 +156,7 @@ class MatcherProcessResponse(EnquiryResponse):
 
 class EmailInboxItem(BaseModel):
     enquiry_id: str
+    enquiry_number: str | None = None
     sender_name: str
     sender_email: str
     company: str
@@ -241,6 +244,7 @@ async def handle_get_enquiry(
             co = infer_company_from_email_raw(enquiry.raw_input) or "Unknown"
         return {
             "enquiry_id": str(enquiry.id),
+            "enquiry_number": (enquiry.enquiry_number or "").strip() or None,
             "status": enquiry.status,
             "flow_type": enquiry.flow_type,
             "input_type": enquiry.input_type,
@@ -299,6 +303,7 @@ async def handle_list_enquiries(
         return [
             EnquiryListItem(
                 enquiry_id=str(e.id),
+                enquiry_number=(e.enquiry_number or "").strip() or None,
                 client_org_name=_enquiry_client_org_name(e),
                 status=e.status,
                 flow_type=e.flow_type,
@@ -450,6 +455,7 @@ async def handle_upload_email_stream(
         "agent": "system",
         "message": "Enquiry received — starting AI pipeline",
         "enquiry_id": str(enquiry.id),
+        "enquiry_number": (enquiry.enquiry_number or "").strip() or None,
         "status": "running",
     })
 

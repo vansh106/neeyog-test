@@ -30,6 +30,9 @@ def _quotation_api_dict(q: Quotation) -> dict:
     return {
         "quotation_id": str(q.id),
         "enquiry_id": str(q.enquiry_id),
+        "enquiry_number": (
+            (getattr(getattr(q, "enquiry", None), "enquiry_number", None) or "").strip() or None
+        ),
         "quote_number": q.quote_number,
         "client_name": q.client_name,
         "client_company": q.client_company,
@@ -61,6 +64,7 @@ def _quotation_api_dict(q: Quotation) -> dict:
 class QuotationListItem(BaseModel):
     quotation_id: str
     enquiry_id: str
+    enquiry_number: str | None = None
     client_employee_id: str | None = None
     quote_number: str
     client_name: str
@@ -266,6 +270,9 @@ async def handle_list_quotations(
             QuotationListItem(
                 quotation_id=str(q.id),
                 enquiry_id=str(q.enquiry_id),
+                enquiry_number=(
+                    (getattr(getattr(q, "enquiry", None), "enquiry_number", None) or "").strip() or None
+                ),
                 client_employee_id=str(q.client_employee_id) if q.client_employee_id else None,
                 quote_number=q.quote_number,
                 client_name=q.client_name,

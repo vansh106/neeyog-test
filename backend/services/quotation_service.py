@@ -60,6 +60,10 @@ def _quotation_payload_for_pdf(q: Quotation) -> dict:
         enq = getattr(q, "enquiry", None)
         if enq is not None and getattr(enq, "created_at", None):
             out["enquiry_date"] = enq.created_at.strftime("%d/%m/%Y")
+        if enq is not None:
+            eno = (getattr(enq, "enquiry_number", None) or "").strip()
+            if eno:
+                out["enquiry_number"] = eno
     if getattr(q, "created_at", None):
         out["quotation_date"] = q.created_at.strftime("%d/%m/%Y")
     emp = getattr(q, "client_employee", None)
@@ -199,7 +203,7 @@ async def list_quotations(
     date_to: date | None = None,
 ) -> list[Quotation]:
     """Return list of quotations ordered by creation date, with optional filters."""
-    stmt = select(Quotation)
+    stmt = select(Quotation).options(selectinload(Quotation.enquiry))
     conds: list = []
 
     if search and str(search).strip():

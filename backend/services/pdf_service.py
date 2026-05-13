@@ -220,6 +220,7 @@ async def generate_quotation_pdf(
         validity_days = int(quotation_data.get("validity_days", 15))
         valid_until = date.today() + timedelta(days=validity_days)
         enq_id = quotation_data.get("enquiry_id")
+        enq_num = quotation_data.get("enquiry_number")
         enq_date = quotation_data.get("enquiry_date")
 
         left_info = []
@@ -236,8 +237,9 @@ async def generate_quotation_pdf(
             Paragraph(f"<b>Quotation No</b> : {escape(str(quote_number))}", s_meta_val),
             Paragraph(f"<b>Valid Until</b> : {escape(valid_until.strftime('%d/%m/%Y'))}", s_meta_val),
         ]
-        if enq_id:
-            line = f"<b>Enquiry No / Date</b> : {escape(str(enq_id))}"
+        if enq_id or enq_num:
+            ref = enq_num or enq_id
+            line = f"<b>Enquiry No / Date</b> : {escape(str(ref))}"
             if enq_date:
                 line += f" / {escape(str(enq_date))}"
             right_info.append(Paragraph(line, s_meta_val))

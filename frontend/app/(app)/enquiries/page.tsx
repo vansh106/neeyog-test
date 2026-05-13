@@ -18,7 +18,7 @@ import {
 } from '@/components/ui/select'
 import { useEnquiries, useQuotations } from '@/lib/queries'
 import { erpExportUrl } from '@/lib/api'
-import { formatRelativeTime, cn } from '@/lib/utils'
+import { formatRelativeTime, cn, truncateId } from '@/lib/utils'
 import type { EnquiryListItem } from '@/types'
 
 type Pipeline = 'all' | 'complete' | 'incomplete' | 'pending' | 'failed'
@@ -67,6 +67,9 @@ function TableSkeletonRows() {
     <tbody>
       {Array.from({ length: 5 }).map((_, i) => (
         <tr key={i} className="border-b border-[#E2E6DC] bg-white">
+          <td className="px-4 py-3">
+            <Skeleton className="h-4 w-28" />
+          </td>
           <td className="px-4 py-3">
             <Skeleton className="h-4 w-20" />
           </td>
@@ -241,7 +244,8 @@ export default function EnquiriesPage() {
             <table className="w-full border-collapse text-left">
               <thead>
                 <tr className="bg-[#F4F5F0] text-[11px] font-medium uppercase tracking-wide text-[#8A9488]">
-                  <th className="px-4 py-3">Enquiry ID</th>
+                  <th className="px-4 py-3">Client</th>
+                  <th className="px-4 py-3">Ref</th>
                   <th className="px-4 py-3">Flow</th>
                   <th className="px-4 py-3">Status</th>
                   <th className="px-4 py-3">Time</th>
@@ -254,7 +258,7 @@ export default function EnquiriesPage() {
               ) : rows.length === 0 ? (
                 <tbody>
                   <tr>
-                    <td colSpan={6} className="p-0">
+                    <td colSpan={7} className="p-0">
                       <EmptyState
                         icon={Inbox}
                         title="No enquiries found"
@@ -276,6 +280,9 @@ export default function EnquiriesPage() {
                       >
                         <td className="px-4 py-3 text-[13px] text-surface-foreground">
                           {(e.client_org_name ?? '').trim() || '—'}
+                        </td>
+                        <td className="px-4 py-3 font-mono text-[12px] text-surface-foreground">
+                          {(e.enquiry_number || '').trim() || truncateId(e.enquiry_id)}
                         </td>
                         <td className="px-4 py-3">
                           <StatusBadge status={e.flow_type} />
