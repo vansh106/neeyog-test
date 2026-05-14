@@ -72,11 +72,44 @@ export interface QuotationLineItem {
   catalog_row_id?: string | null
 }
 
-/** PDF-only labels for a quotation (does not change catalog rows or pricing math). */
+/** Label + value row (letterhead / client extras). Width fixed in PDF; text wraps vertically. */
+export interface QuotationPdfKvRow {
+  label: string
+  value: string
+}
+
+/** Extra valuation rows after catalog lines (display-only; does not change totals). */
+export interface QuotationPdfValuationSupplementRow {
+  sr?: string
+  description?: string
+  size?: string
+  qty?: string
+  rate?: string
+  disc?: string
+  total?: string
+}
+
+/** PDF-only layout/text (does not change catalog rows or pricing math). */
 export interface QuotationPdfDisplayOverrides {
   lines?: Array<{ description?: string; size?: string; product_name?: string } | null>
   /** When present, replaces quotation notes on the PDF only. */
   notes?: string
+  /** Full left letterhead column (label/value rows). */
+  header_left?: QuotationPdfKvRow[]
+  /** Full right meta column (Date, Quotation No, …). */
+  header_right?: QuotationPdfKvRow[]
+  /** Center banner between header and company box. */
+  thank_you_row?: string
+  /** Extra label/value rows under the company block (left column). */
+  company_left_extra?: QuotationPdfKvRow[]
+  /** Right column text in company section. */
+  company_right_text?: string
+  /** Full terms list (unnumbered strings; PDF adds numbers). */
+  terms_items?: string[]
+  footer_contact?: string
+  footer_thanks?: string
+  footer_disclaimer?: string
+  valuation_supplement_rows?: QuotationPdfValuationSupplementRow[]
 }
 
 export interface QuotationClientEmployee {

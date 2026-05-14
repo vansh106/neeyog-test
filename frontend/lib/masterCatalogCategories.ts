@@ -25,6 +25,11 @@ export const FINAL_PRODUCT_MASTER_CATEGORIES: MasterCatalogCategory[] = [
   { key: 'fp_safety_sv_flanged_150', label: 'Safety — Flanged #150' },
   { key: 'fp_sampling_sv_tc_end', label: 'Sampling — TC end' },
   { key: 'fp_sampling_sv_od_base_weld', label: 'Sampling — OD base weld' },
+  { key: 'fp_sight_glass_double_window', label: 'Sight glass — Double window' },
+  { key: 'fp_sight_glass_inline_ic_casted', label: 'Sight glass — In-line (IC casted)' },
+  { key: 'fp_sight_glass_inline_solid_flange', label: 'Sight glass — In-line (solid flange)' },
+  { key: 'fp_strainer_y_150', label: 'Strainer — Y #150' },
+  { key: 'fp_strainer_y_300', label: 'Strainer — Y #300' },
 ]
 
 const CORE_BEFORE_FP: MasterCatalogCategory[] = [

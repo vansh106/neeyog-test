@@ -1,13 +1,14 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { useQuery } from '@tanstack/react-query'
 import PageShell from '@/components/layout/PageShell'
 import EmptyState from '@/components/ui/EmptyState'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Database } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Database, Download, Loader2 } from 'lucide-react'
 import { useSheetRows } from '@/lib/queries'
 import { suppliersApi } from '@/lib/api'
 import { formatCurrency } from '@/lib/utils'
@@ -19,6 +20,11 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import type { SupplierPriceRow, SupplierResponse } from '@/types'
+import {
+  MASTERS_SHEET_EXPORT_HIDE_COLUMNS,
+  downloadMastersSheetXlsx,
+  fetchAllMastersSheetRows,
+} from '@/lib/mastersSheetExport'
 
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 200] as const
 
@@ -33,6 +39,8 @@ export default function MastersCategoryPage() {
   const [limit, setLimit] = useState<number>(50)
   const [skip, setSkip] = useState<number>(0)
   const [supplierId, setSupplierId] = useState<string>('') // empty = no supplier selected
+  const [exportBusy, setExportBusy] = useState(false)
+  const [exportError, setExportError] = useState<string | null>(null)
 
   const { data, isPending } = useSheetRows(category ?? '', { skip, limit })
 
@@ -70,27 +78,47 @@ export default function MastersCategoryPage() {
   const totalPages = Math.max(1, Math.ceil(total / limit))
 
   const visibleCols = useMemo(() => {
-    // Hide internal / metadata columns from the UI.
-    const HIDE = new Set([
-      'source_file',
-      'row_id',
-      'client_id',
-      'created_at',
-      'updated_at',
-      'price_inr',
-    ])
-    return columns.filter((c) => !HIDE.has(String(c)))
+    return columns.filter((c) => !MASTERS_SHEET_EXPORT_HIDE_COLUMNS.has(String(c)))
   }, [columns])
 
+  const handleExportXlsx = useCallback(async () => {
+    if (!category || exportBusy) return
+    setExportBusy(true)
+    setExportError(null)
+    try {
+      const { columns: allCols, items } = await fetchAllMastersSheetRows(category)
+      downloadMastersSheetXlsx(category, allCols, items)
+    } catch (e) {
+      setExportError(e instanceof Error ? e.message : 'Export failed')
+    } finally {
+      setExportBusy(false)
+    }
+  }, [category, exportBusy])
+
   return (
-    <PageShell title={`Masters / ${category}`}>
+    <PageShell
+      title={`Masters / ${category}`}
+      actions={
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-9 shrink-0 gap-1.5"
+          disabled={!category || exportBusy}
+          onClick={() => void handleExportXlsx()}
+        >
+          {exportBusy ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />}
+          Export XLSX
+        </Button>
+      }
+    >
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="text-[14px] text-surface-muted">
           <span className="font-medium text-gray-900">{total}</span> row{total === 1 ? '' : 's'}
           <span className="text-surface-muted"> • Page {page} of {totalPages}</span>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {category && (
             <Link
               href={`/masters?tab=edit&category=${encodeURIComponent(category)}`}
@@ -99,6 +127,10 @@ export default function MastersCategoryPage() {
               Edit prices
             </Link>
           )}
+
+          {exportError ? (
+            <span className="w-full text-[12px] text-red-600 sm:w-auto">{exportError}</span>
+          ) : null}
 
           <span className="ml-2 text-[12px] text-[#8A9488]">Supplier</span>
           <Select

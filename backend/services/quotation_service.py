@@ -22,6 +22,25 @@ from services.pdf_service import generate_quotation_pdf
 QUOTATION_CRM_STATUSES: frozenset[str] = frozenset({"po_received", "lost", "hold", "ongoing"})
 
 
+def _trim_str(s: object, max_len: int) -> str:
+    t = str(s) if s is not None else ""
+    return t[:max_len]
+
+
+def _trim_kv_rows(rows: object, *, max_items: int, max_label: int, max_value: int) -> list | None:
+    if not isinstance(rows, list):
+        return None
+    out: list = []
+    for row in rows[:max_items]:
+        if not isinstance(row, dict):
+            continue
+        lab = _trim_str(row.get("label"), max_label)
+        val = _trim_str(row.get("value"), max_value)
+        if lab or val:
+            out.append({"label": lab, "value": val})
+    return out or None
+
+
 def _trim_pdf_display_overrides(overrides: dict | None, line_count: int) -> dict | None:
     if overrides is None:
         return None
@@ -31,6 +50,45 @@ def _trim_pdf_display_overrides(overrides: dict | None, line_count: int) -> dict
     lines = out.get("lines")
     if isinstance(lines, list):
         out["lines"] = lines[: max(0, line_count)]
+    for key in ("header_left", "header_right", "company_left_extra"):
+        trimmed = _trim_kv_rows(out.get(key), max_items=24, max_label=200, max_value=2000)
+        if trimmed is None:
+            out.pop(key, None)
+        else:
+            out[key] = trimmed
+    for sk in ("thank_you_row", "company_right_text", "footer_contact", "footer_thanks", "footer_disclaimer"):
+        if sk in out and out[sk] is not None:
+            out[sk] = _trim_str(out[sk], 4000)
+    ti = out.get("terms_items")
+    if isinstance(ti, list):
+        out["terms_items"] = [_trim_str(x, 1500) for x in ti[:30] if str(x).strip()]
+        if not out["terms_items"]:
+            out.pop("terms_items", None)
+    vs = out.get("valuation_supplement_rows")
+    if isinstance(vs, list):
+        rows_o = []
+        for row in vs[:20]:
+            if not isinstance(row, dict):
+                continue
+            rows_o.append(
+                {
+                    "sr": _trim_str(row.get("sr"), 40),
+                    "description": _trim_str(row.get("description"), 2500),
+                    "size": _trim_str(row.get("size"), 500),
+                    "qty": _trim_str(row.get("qty"), 80),
+                    "rate": _trim_str(row.get("rate"), 80),
+                    "disc": _trim_str(row.get("disc"), 80),
+                    "total": _trim_str(row.get("total"), 80),
+                }
+            )
+        if rows_o:
+            out["valuation_supplement_rows"] = rows_o
+        else:
+            out.pop("valuation_supplement_rows", None)
+    if "notes" in out and out["notes"] is not None:
+        out["notes"] = _trim_str(out["notes"], 20000)
+    if not out:
+        return None
     return out
 
 

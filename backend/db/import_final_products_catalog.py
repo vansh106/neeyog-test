@@ -75,6 +75,11 @@ def _specs() -> list[tuple[type, str, str, dict[str, Any]]]:
         (fpm.CatalogFpSafetySvFlanged150Row, "Safety_Valve_Products.xlsx", "SV – Flanged (ASA #150)", {}),
         (fpm.CatalogFpSamplingSvTcEndRow, "Sampling_Valve_Products.xlsx", "SV – TC End", {}),
         (fpm.CatalogFpSamplingSvOdBaseWeldRow, "Sampling_Valve_Products.xlsx", "SV – OD Base Weld End", {}),
+        (fpm.CatalogFpSightGlassDoubleWindowRow, "Sight_Glass_Products.xlsx", "Double Window Sight Glass", {}),
+        (fpm.CatalogFpSightGlassInlineIcCastedRow, "Sight_Glass_Products.xlsx", "In-Line SG – IC Casted", {}),
+        (fpm.CatalogFpSightGlassInlineSolidFlangeRow, "Sight_Glass_Products.xlsx", "In-Line SG – Solid Flange", {}),
+        (fpm.CatalogFpStrainerY150Row, "Strainer_Products.xlsx", "Y Strainer – #150", {}),
+        (fpm.CatalogFpStrainerY300Row, "Strainer_Products.xlsx", "Y Strainer – #300", {}),
     ]
 
 
@@ -98,6 +103,8 @@ def _field_aliases(model: type) -> dict[str, str]:
         aliases["disc"] = "ball_disc"
     if "ball" in cols:
         aliases["ball"] = "ball"
+    if "valve_size" in cols:
+        aliases["size"] = "valve_size"
     if "set_pressure" in cols and "set_pressure_range" not in cols:
         aliases["set_pressure"] = "set_pressure"
     return aliases

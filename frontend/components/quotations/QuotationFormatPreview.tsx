@@ -2,15 +2,25 @@
 
 import { Info } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { effectiveLinePdfDisplay, formatDateDdMmYyyy } from '@/lib/quotationLineDisplay'
+import { effectiveLinePdfDisplay } from '@/lib/quotationLineDisplay'
+import {
+  buildDefaultFooterContact,
+  buildDefaultHeaderLeft,
+  buildDefaultHeaderRight,
+  buildDefaultTerms,
+  defaultCompanyRightBlurb,
+  defaultFooterDisclaimer,
+  defaultFooterThanks,
+  defaultThankYouBanner,
+} from '@/lib/quotationPdfDefaults'
 import { cn, formatCurrency } from '@/lib/utils'
-import type { ClientConfig, Quotation, QuotationLineItem, QuotationPdfDisplayOverrides } from '@/types'
+import type { ClientConfig, EnquiryDetail, Quotation, QuotationLineItem, QuotationPdfDisplayOverrides } from '@/types'
 
 const NAVY = '#1a2744'
 const MAROON = '#7b1f2a'
 const GREEN = '#1f4d2e'
 
-type EnquiryLite = { created_at?: string | null } | null | undefined
+type EnquiryLite = EnquiryDetail | { created_at?: string | null } | null | undefined
 
 type Props = {
   quotation: Quotation
@@ -19,14 +29,6 @@ type Props = {
   pdfOverrides: QuotationPdfDisplayOverrides | null | undefined
   notesPreviewText: string | null
   onOpenHistory: (line: QuotationLineItem) => void
-}
-
-function validUntilIso(createdAt: string | null, validityDays: number): string {
-  if (!createdAt) return ''
-  const d = new Date(createdAt)
-  if (Number.isNaN(d.getTime())) return ''
-  d.setDate(d.getDate() + Math.max(0, validityDays))
-  return d.toISOString()
 }
 
 export default function QuotationFormatPreview({
@@ -38,19 +40,8 @@ export default function QuotationFormatPreview({
   onOpenHistory,
 }: Props) {
   const company = (clientConfig?.company_name || 'PARTH VALVES AND HOSES LLP').toUpperCase()
-  const address = clientConfig?.address || ''
-  const website = (clientConfig?.website as string | undefined) || ''
-  const salesEmail = (clientConfig?.sales_email as string | undefined) || clientConfig?.email || ''
-  const letterEmail = salesEmail
-  const gst = clientConfig?.gst_number || ''
-  const phone = clientConfig?.phone || ''
-  const preparedBy = (clientConfig?.prepared_by as string | undefined) || 'Sales Team'
 
   const lineItems = quotation.line_items ?? []
-  const quoteDate = formatDateDdMmYyyy(quotation.created_at)
-  const validUntil = formatDateDdMmYyyy(validUntilIso(quotation.created_at, quotation.validity_days))
-  const enquiryDate = formatDateDdMmYyyy(linkedEnquiry?.created_at)
-
   const custCompany = (quotation.client_company || quotation.client_name || 'Customer').trim()
 
   let concernDisplay: string | null = null
@@ -63,26 +54,33 @@ export default function QuotationFormatPreview({
     if (n && n.toLowerCase() !== custCompany.toLowerCase()) concernDisplay = n
   }
 
+  const ov = pdfOverrides
+  const headerLeft =
+    ov?.header_left && ov.header_left.length > 0 ? ov.header_left : buildDefaultHeaderLeft(clientConfig)
+  const headerRight =
+    ov?.header_right && ov.header_right.length > 0
+      ? ov.header_right
+      : buildDefaultHeaderRight(quotation, linkedEnquiry as EnquiryDetail | null | undefined)
+
+  const thankYouText = (ov?.thank_you_row || '').trim() || defaultThankYouBanner()
+  const companyRightBlurb = (ov?.company_right_text || '').trim() || defaultCompanyRightBlurb()
+  const termsList =
+    ov?.terms_items && ov.terms_items.length > 0 ? ov.terms_items : buildDefaultTerms(quotation)
+  const footerContact = (ov?.footer_contact || '').trim() || buildDefaultFooterContact(clientConfig)
+  const footerThanks = (ov?.footer_thanks || '').trim() || defaultFooterThanks()
+  const footerDisclaimer = (ov?.footer_disclaimer || '').trim() || defaultFooterDisclaimer()
+  const supplementRows = ov?.valuation_supplement_rows?.length ? ov.valuation_supplement_rows : []
+
   const gstRate = quotation.gst_rate
   const splitGst = Math.abs(gstRate - 18) < 0.01 && quotation.gst_amount > 0
   const cgst = splitGst ? Math.round((quotation.gst_amount / 2) * 100) / 100 : 0
   const sgst = splitGst ? Math.round((quotation.gst_amount - cgst) * 100) / 100 : 0
 
-  const terms = [
-    'Any modification to agreed specifications may attract additional commercial charges.',
-    "Third party inspection, if required — extra at actual and in customer's scope.",
-    `Freight — ${quotation.freight_note || 'Extra at actual'}.`,
-    `GST @ ${gstRate}% — included in valuation total as shown below.`,
-    `P & F @ ${quotation.pf_rate}% — included in valuation total as shown below.`,
-    `Offer validity — ${quotation.validity_days} days from date of issue.`,
-    'Subject to Pune jurisdiction only.',
-  ]
-
   const notesBody =
     notesPreviewText !== null ? notesPreviewText : quotation.notes ? String(quotation.notes) : ''
 
   return (
-    <div className="rounded-md border-2 border-[#333] bg-white text-[13px] leading-snug text-gray-900">
+    <>
       <section className="border-b border-[#333] p-3 sm:p-4">
         <div className="grid grid-cols-1 gap-3 border border-[#333] sm:grid-cols-[96px_1fr]">
           <div className="flex items-center justify-center border-b border-[#333] p-2 sm:border-b-0 sm:border-r">
@@ -106,43 +104,25 @@ export default function QuotationFormatPreview({
 
         <div className="mt-2 grid grid-cols-1 gap-3 border border-[#333] p-2 text-[11px] sm:grid-cols-2 sm:p-3">
           <div className="space-y-0.5">
-            {address && (
-              <p>
-                <span className="inline-block min-w-[68px] font-semibold">Address</span>: {address}
+            {headerLeft.map((row, i) => (
+              <p key={`hl-${i}`}>
+                <span className="inline-block min-w-[68px] font-semibold">{row.label}</span>: {row.value}
               </p>
-            )}
-            {website && (
-              <p>
-                <span className="inline-block min-w-[68px] font-semibold">Website</span>: {website}
-              </p>
-            )}
-            {letterEmail && (
-              <p>
-                <span className="inline-block min-w-[68px] font-semibold">E-Mail</span>: {letterEmail}
-              </p>
-            )}
-            <p>
-              <span className="inline-block min-w-[68px] font-semibold">Prepared By</span>: {preparedBy}
-            </p>
+            ))}
           </div>
           <div className="space-y-0.5">
-            <p>
-              <span className="inline-block min-w-[92px] font-semibold">Date</span>: {quoteDate}
-            </p>
-            <p>
-              <span className="inline-block min-w-[92px] font-semibold">Quotation No</span>:{' '}
-              <span className="font-mono">{quotation.quote_number}</span>
-            </p>
-            <p>
-              <span className="inline-block min-w-[92px] font-semibold">Valid Until</span>: {validUntil}
-            </p>
-            <p className="break-all">
-              <span className="inline-block min-w-[92px] font-semibold">Enquiry No / Date</span>:{' '}
-              <span className="font-mono">
-                {(quotation.enquiry_number || '').trim() || quotation.enquiry_id}
-              </span>
-              {enquiryDate !== '—' ? ` / ${enquiryDate}` : ''}
-            </p>
+            {headerRight.map((row, i) => (
+              <p key={`hr-${i}`} className={row.label.includes('Enquiry') ? 'break-all' : ''}>
+                <span className="inline-block min-w-[92px] font-semibold">{row.label}</span>
+                {row.label === 'Quotation No' ? (
+                  <>
+                    : <span className="font-mono">{row.value}</span>
+                  </>
+                ) : (
+                  <> : {row.value}</>
+                )}
+              </p>
+            ))}
           </div>
         </div>
       </section>
@@ -169,13 +149,20 @@ export default function QuotationFormatPreview({
                 <span className="font-semibold">E-Mail</span>: {quotation.client_email}
               </p>
             )}
+            {(ov?.company_left_extra || []).map((row, i) => (
+              <p key={`cex-${i}`} className="mt-1 whitespace-pre-line">
+                <span className="font-semibold">{row.label}</span>: {row.value}
+              </p>
+            ))}
           </div>
           <div className="p-2">
-            <p className="text-[11px] text-[#6b7280] sm:mt-5">
-              Thank you for your enquiry and for considering us as a supplier.
-            </p>
+            <p className="whitespace-pre-line text-[11px] text-[#6b7280] sm:mt-5">{companyRightBlurb}</p>
           </div>
         </div>
+      </section>
+
+      <section className="border-b border-[#333] px-2 py-2 text-center text-[11px] text-gray-800">
+        <p className="border border-[#333] bg-white px-2 py-2">{thankYouText}</p>
       </section>
 
       <section className="border-b border-[#333] p-2">
@@ -242,6 +229,30 @@ export default function QuotationFormatPreview({
                 </tr>
               )
             })}
+            {supplementRows.map((srow, j) => {
+              const idx = lineItems.length + j
+              const sr = (srow.sr || '').trim() || '—'
+              const c = (v: string | undefined) => (v && v.trim() ? v.trim() : '—')
+              return (
+                <tr
+                  key={`sup-${j}`}
+                  className={cn(
+                    'border-b border-[#333] align-top',
+                    idx % 2 === 1 ? 'bg-[#f0f2ee]' : 'bg-white',
+                  )}
+                >
+                  <td className="px-2 py-2 align-top font-mono tabular-nums">{sr}</td>
+                  <td className="max-w-[280px] whitespace-pre-line px-2 py-2 align-top text-gray-900">
+                    {c(srow.description)}
+                  </td>
+                  <td className="whitespace-pre-line px-2 py-2 align-top text-gray-700">{c(srow.size)}</td>
+                  <td className="px-2 py-2 text-right font-mono align-top">{c(srow.qty)}</td>
+                  <td className="px-2 py-2 text-right font-mono align-top">{c(srow.rate)}</td>
+                  <td className="px-2 py-2 text-right font-mono align-top">{c(srow.disc)}</td>
+                  <td className="px-2 py-2 text-right font-mono align-top">{c(srow.total)}</td>
+                </tr>
+              )
+            })}
           </tbody>
         </table>
       </div>
@@ -254,7 +265,7 @@ export default function QuotationFormatPreview({
               TERMS AND CONDITIONS
             </p>
             <ol className="list-decimal space-y-1 pl-5 text-[11px] leading-relaxed text-gray-800">
-              {terms.map((t, i) => (
+              {termsList.map((t, i) => (
                 <li key={i}>{t}</li>
               ))}
             </ol>
@@ -334,18 +345,12 @@ export default function QuotationFormatPreview({
       ) : null}
 
       <section className="p-3">
-        <p className="text-[11px] text-gray-800">
-          If you have any questions about this quote, please contact {preparedBy}
-          {phone ? `, ${phone}` : ''}
-          {letterEmail ? `, ${letterEmail}` : ''}.
-        </p>
+        <p className="whitespace-pre-line text-[11px] text-gray-800">{footerContact}</p>
         <p className="mt-3 text-center text-[13px] font-bold" style={{ color: GREEN }}>
-          Thank You For Your Business !
+          {footerThanks}
         </p>
-        <p className="mt-4 text-center text-[10px] italic text-[#6b7280]">
-          This quotation was prepared with AI assistance and reviewed by our team.
-        </p>
+        <p className="mt-4 text-center text-[10px] italic text-[#6b7280]">{footerDisclaimer}</p>
       </section>
-    </div>
+    </>
   )
 }

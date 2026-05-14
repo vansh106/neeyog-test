@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import logging
 import os
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from xml.sax.saxutils import escape
 
@@ -63,6 +63,34 @@ def _line_pdf_override(pdf_display_overrides: object, idx_zero_based: int) -> di
     key = str(idx_zero_based)
     row = pdf_display_overrides.get(key)
     return row if isinstance(row, dict) else {}
+
+
+def _flow_from_kv_rows(rows: object, style: ParagraphStyle) -> list:
+    """Build stacked Paragraphs from [{label, value}, …] for letterhead / client extras."""
+    out: list = []
+    if not isinstance(rows, list):
+        return out
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        lab = str(row.get("label") or "").strip()
+        val = str(row.get("value") or "").strip()
+        if not lab and not val:
+            continue
+        if lab:
+            out.append(Paragraph(f"<b>{escape(lab)}</b> : {escape(val)}", style))
+        else:
+            out.append(Paragraph(escape(val), style))
+    return out
+
+
+def _pdf_ov_list(pdf_ov: object, key: str) -> list | None:
+    if not isinstance(pdf_ov, dict):
+        return None
+    v = pdf_ov.get(key)
+    if isinstance(v, list) and len(v) > 0:
+        return v
+    return None
 
 
 def _logo_flowable(max_w: float, max_h: float) -> RLImage | None:
@@ -216,33 +244,47 @@ async def generate_quotation_pdf(
             )
         )
 
+        pdf_ov = quotation_data.get("pdf_display_overrides")
+
         q_date_str = quotation_data.get("quotation_date") or date.today().strftime("%d/%m/%Y")
         validity_days = int(quotation_data.get("validity_days", 15))
-        valid_until = date.today() + timedelta(days=validity_days)
+        try:
+            base_d = datetime.strptime(str(q_date_str).strip(), "%d/%m/%Y").date()
+        except (ValueError, TypeError):
+            base_d = date.today()
+        valid_until = base_d + timedelta(days=validity_days)
         enq_id = quotation_data.get("enquiry_id")
         enq_num = quotation_data.get("enquiry_number")
         enq_date = quotation_data.get("enquiry_date")
 
-        left_info = []
-        if address:
-            left_info.append(Paragraph(f"<b>Address</b> : {escape(str(address))}", s_addr))
-        if website:
-            left_info.append(Paragraph(f"<b>Website</b> : {escape(str(website))}", s_addr))
-        if sales_email:
-            left_info.append(Paragraph(f"<b>E-Mail</b> : {escape(str(sales_email))}", s_addr))
-        left_info.append(Paragraph(f"<b>Prepared By</b> : {escape(str(prepared))}", s_addr))
+        hl = _pdf_ov_list(pdf_ov, "header_left")
+        hr = _pdf_ov_list(pdf_ov, "header_right")
+        if hl is not None:
+            left_info = _flow_from_kv_rows(hl, s_addr)
+        else:
+            left_info = []
+            if address:
+                left_info.append(Paragraph(f"<b>Address</b> : {escape(str(address))}", s_addr))
+            if website:
+                left_info.append(Paragraph(f"<b>Website</b> : {escape(str(website))}", s_addr))
+            if sales_email:
+                left_info.append(Paragraph(f"<b>E-Mail</b> : {escape(str(sales_email))}", s_addr))
+            left_info.append(Paragraph(f"<b>Prepared By</b> : {escape(str(prepared))}", s_addr))
 
-        right_info = [
-            Paragraph(f"<b>Date</b> : {escape(str(q_date_str))}", s_meta_val),
-            Paragraph(f"<b>Quotation No</b> : {escape(str(quote_number))}", s_meta_val),
-            Paragraph(f"<b>Valid Until</b> : {escape(valid_until.strftime('%d/%m/%Y'))}", s_meta_val),
-        ]
-        if enq_id or enq_num:
-            ref = enq_num or enq_id
-            line = f"<b>Enquiry No / Date</b> : {escape(str(ref))}"
-            if enq_date:
-                line += f" / {escape(str(enq_date))}"
-            right_info.append(Paragraph(line, s_meta_val))
+        if hr is not None:
+            right_info = _flow_from_kv_rows(hr, s_meta_val)
+        else:
+            right_info = [
+                Paragraph(f"<b>Date</b> : {escape(str(q_date_str))}", s_meta_val),
+                Paragraph(f"<b>Quotation No</b> : {escape(str(quote_number))}", s_meta_val),
+                Paragraph(f"<b>Valid Until</b> : {escape(valid_until.strftime('%d/%m/%Y'))}", s_meta_val),
+            ]
+            if enq_id or enq_num:
+                ref = enq_num or enq_id
+                line = f"<b>Enquiry No / Date</b> : {escape(str(ref))}"
+                if enq_date:
+                    line += f" / {escape(str(enq_date))}"
+                right_info.append(Paragraph(line, s_meta_val))
 
         header_info = Table(
             [[left_info, right_info]],
@@ -285,6 +327,9 @@ async def generate_quotation_pdf(
         cust_left: list = [Paragraph("<b>COMPANY</b>", s_section)]
         co_display = (client_company or client_name or "Customer").strip()
         cust_left.append(Paragraph(escape(co_display), s_cust_co))
+        extra_co = _pdf_ov_list(pdf_ov, "company_left_extra")
+        if extra_co is not None:
+            cust_left.extend(_flow_from_kv_rows(extra_co, s_addr))
         concern_text = ""
         emp_pdf = quotation_data.get("quotation_client_employee")
         if isinstance(emp_pdf, dict):
@@ -296,6 +341,11 @@ async def generate_quotation_pdf(
             concern_text = escape(client_name.strip())
 
         cust_right: list = []
+        cr_blurb = ""
+        if isinstance(pdf_ov, dict) and pdf_ov.get("company_right_text"):
+            cr_blurb = str(pdf_ov.get("company_right_text") or "").strip()
+        if cr_blurb:
+            cust_right.append(Paragraph(escape(cr_blurb), s_addr))
         if concern_text:
             cust_right.append(Paragraph(f"<b>Concern Person</b> : {concern_text}", s_addr))
         if client_phone:
@@ -320,8 +370,11 @@ async def generate_quotation_pdf(
         el.append(Spacer(1, 1.5 * mm))
 
         # Centered thanks row
+        thank_txt = "Thank you for Your Enquiry considering us as faithful Supplier"
+        if isinstance(pdf_ov, dict) and str(pdf_ov.get("thank_you_row") or "").strip():
+            thank_txt = str(pdf_ov.get("thank_you_row") or "").strip()
         thank_row = Table(
-            [[Paragraph("Thank you for Your Enquiry considering us as faithful Supplier", ParagraphStyle("CenterThanks", parent=s_normal, alignment=1, fontSize=10))]],
+            [[Paragraph(escape(thank_txt), ParagraphStyle("CenterThanks", parent=s_normal, alignment=1, fontSize=10))]],
             colWidths=[doc.width],
         )
         thank_row.setStyle(
@@ -352,8 +405,6 @@ async def generate_quotation_pdf(
         el.append(
             Spacer(1, 0.5 * mm)
         )
-        line_items = quotation_data.get("line_items", [])
-        pdf_ov = quotation_data.get("pdf_display_overrides")
 
         header = [
             Paragraph("<b>Sr.No</b>", s_cell_head),
@@ -400,6 +451,30 @@ async def generate_quotation_pdf(
                     Paragraph(f"{total:,.2f}", s_cell),
                 ]
             )
+
+        sup_rows = _pdf_ov_list(pdf_ov, "valuation_supplement_rows")
+        if sup_rows:
+            for j, srow in enumerate(sup_rows):
+                if not isinstance(srow, dict):
+                    continue
+                sr = str(srow.get("sr") or "").strip() or "—"
+                desc = str(srow.get("description") or "").strip() or "—"
+                size = str(srow.get("size") or "").strip() or "—"
+                qty = str(srow.get("qty") or "").strip() or "—"
+                rate = str(srow.get("rate") or "").strip() or "—"
+                disc = str(srow.get("disc") or "").strip() or "—"
+                tot = str(srow.get("total") or "").strip() or "—"
+                table_data.append(
+                    [
+                        Paragraph(escape(sr), s_cell),
+                        Paragraph(escape(desc), s_cell),
+                        Paragraph(escape(size), s_cell),
+                        Paragraph(escape(qty), s_cell),
+                        Paragraph(escape(rate), s_cell),
+                        Paragraph(escape(disc), s_cell),
+                        Paragraph(escape(tot), s_cell),
+                    ]
+                )
 
         if len(table_data) > 1:
             col_w = [22 * mm, 72 * mm, 22 * mm, 24 * mm, 26 * mm, 18 * mm, 28 * mm]
@@ -458,18 +533,24 @@ async def generate_quotation_pdf(
             total_amount = round(subtotal + gst_amount + pf_amount, 2)
 
         # ── Terms + Financial summary side-by-side ────────────────
-        terms = [
-            "1. Any modification to agreed specifications may attract additional commercial charges.",
-            "2. Third party inspection, if required — extra at actual and in customer's scope.",
-            f"3. Freight — {escape(str(freight))}.",
-            f"4. GST @ {gst_pct:g}% — included in valuation total as shown below.",
-            f"5. P &amp; F @ {pf_pct:g}% — included in valuation total as shown below.",
-            f"6. Offer validity — {validity_days} days from date of issue.",
-            "7. Subject to Pune jurisdiction only.",
-        ]
+        ti = None
+        if isinstance(pdf_ov, dict):
+            ti = pdf_ov.get("terms_items")
+        if isinstance(ti, list) and ti:
+            terms_body = [str(x).strip() for x in ti if str(x).strip()]
+        else:
+            terms_body = [
+                "Any modification to agreed specifications may attract additional commercial charges.",
+                "Third party inspection, if required — extra at actual and in customer's scope.",
+                f"Freight — {str(freight)}.",
+                f"GST @ {gst_pct:g}% — included in valuation total as shown below.",
+                f"P &amp; F @ {pf_pct:g}% — included in valuation total as shown below.",
+                f"Offer validity — {validity_days} days from date of issue.",
+                "Subject to Pune jurisdiction only.",
+            ]
         terms_flow: list = [Paragraph("<b>TERMS AND CONDITIONS</b>", s_section)]
-        for t in terms:
-            terms_flow.append(Paragraph(t, s_terms))
+        for i, tb in enumerate(terms_body, 1):
+            terms_flow.append(Paragraph(f"{i}. {escape(tb)}", s_terms))
 
         fin_rows: list[list] = [
             [Paragraph("<b>SUB TOTAL</b>", s_cell_head), Paragraph(f"₹{subtotal:,.2f}", s_cell)],
@@ -563,13 +644,22 @@ async def generate_quotation_pdf(
             contact_line += f", {escape(str(phone))}"
         if sales_email:
             contact_line += f", {escape(str(sales_email))}"
-        el.append(Paragraph(contact_line + ".", ParagraphStyle("Contact", parent=s_normal, fontSize=8.5)))
+        contact_line += "."
+        if isinstance(pdf_ov, dict) and str(pdf_ov.get("footer_contact") or "").strip():
+            contact_line = escape(str(pdf_ov.get("footer_contact") or "").strip())
+        el.append(Paragraph(contact_line, ParagraphStyle("Contact", parent=s_normal, fontSize=8.5)))
         el.append(Spacer(1, 4 * mm))
-        el.append(Paragraph("<b>Thank You For Your Business !</b>", s_thanks))
+        thanks_line = "Thank You For Your Business !"
+        if isinstance(pdf_ov, dict) and str(pdf_ov.get("footer_thanks") or "").strip():
+            thanks_line = str(pdf_ov.get("footer_thanks") or "").strip()
+        el.append(Paragraph(f"<b>{escape(thanks_line)}</b>", s_thanks))
         el.append(Spacer(1, 8 * mm))
+        disc_line = "This quotation was prepared with AI assistance and reviewed by our team."
+        if isinstance(pdf_ov, dict) and str(pdf_ov.get("footer_disclaimer") or "").strip():
+            disc_line = str(pdf_ov.get("footer_disclaimer") or "").strip()
         el.append(
             Paragraph(
-                "<i>This quotation was prepared with AI assistance and reviewed by our team.</i>",
+                f"<i>{escape(disc_line)}</i>",
                 ParagraphStyle("AI", parent=s_normal, fontSize=7, textColor=_MID_GRAY, alignment=1),
             )
         )

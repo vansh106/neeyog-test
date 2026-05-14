@@ -352,6 +352,75 @@ class CatalogFpSamplingSvOdBaseWeldRow(FinalProductSheetMarker, _FinalCatalogBas
     source_file: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
+class CatalogFpSightGlassDoubleWindowRow(FinalProductSheetMarker, _FinalCatalogBase):
+    __tablename__ = "catalog_fp_sight_glass_double_window"
+
+    sr_no: Mapped[float | None] = mapped_column(Float, nullable=True)
+    variant_type: Mapped[str | None] = mapped_column(Text, nullable=True)
+    valve_size: Mapped[str | None] = mapped_column(Text, nullable=True)
+    end_connection: Mapped[str | None] = mapped_column(Text, nullable=True)
+    pressure: Mapped[str | None] = mapped_column(Text, nullable=True)
+    body: Mapped[str | None] = mapped_column(Text, nullable=True)
+    packing: Mapped[str | None] = mapped_column(Text, nullable=True)
+    glass: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_file: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class CatalogFpSightGlassInlineIcCastedRow(FinalProductSheetMarker, _FinalCatalogBase):
+    __tablename__ = "catalog_fp_sight_glass_inline_ic_casted"
+
+    sr_no: Mapped[float | None] = mapped_column(Float, nullable=True)
+    variant_type: Mapped[str | None] = mapped_column(Text, nullable=True)
+    valve_size: Mapped[str | None] = mapped_column(Text, nullable=True)
+    length: Mapped[str | None] = mapped_column(Text, nullable=True)
+    end_connection: Mapped[str | None] = mapped_column(Text, nullable=True)
+    pressure: Mapped[str | None] = mapped_column(Text, nullable=True)
+    flange: Mapped[str | None] = mapped_column(Text, nullable=True)
+    packing: Mapped[str | None] = mapped_column(Text, nullable=True)
+    glass: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_file: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class CatalogFpSightGlassInlineSolidFlangeRow(FinalProductSheetMarker, _FinalCatalogBase):
+    __tablename__ = "catalog_fp_sight_glass_inline_solid_flange"
+
+    sr_no: Mapped[float | None] = mapped_column(Float, nullable=True)
+    variant_type: Mapped[str | None] = mapped_column(Text, nullable=True)
+    valve_size: Mapped[str | None] = mapped_column(Text, nullable=True)
+    end_connection: Mapped[str | None] = mapped_column(Text, nullable=True)
+    pressure: Mapped[str | None] = mapped_column(Text, nullable=True)
+    flange: Mapped[str | None] = mapped_column(Text, nullable=True)
+    packing: Mapped[str | None] = mapped_column(Text, nullable=True)
+    glass: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_file: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class CatalogFpStrainerY150Row(FinalProductSheetMarker, _FinalCatalogBase):
+    __tablename__ = "catalog_fp_strainer_y_150"
+
+    sr_no: Mapped[float | None] = mapped_column(Float, nullable=True)
+    variant_type: Mapped[str | None] = mapped_column(Text, nullable=True)
+    valve_size: Mapped[str | None] = mapped_column(Text, nullable=True)
+    end_connection: Mapped[str | None] = mapped_column(Text, nullable=True)
+    pressure: Mapped[str | None] = mapped_column(Text, nullable=True)
+    body: Mapped[str | None] = mapped_column(Text, nullable=True)
+    mesh: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_file: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class CatalogFpStrainerY300Row(FinalProductSheetMarker, _FinalCatalogBase):
+    __tablename__ = "catalog_fp_strainer_y_300"
+
+    sr_no: Mapped[float | None] = mapped_column(Float, nullable=True)
+    variant_type: Mapped[str | None] = mapped_column(Text, nullable=True)
+    valve_size: Mapped[str | None] = mapped_column(Text, nullable=True)
+    end_connection: Mapped[str | None] = mapped_column(Text, nullable=True)
+    pressure: Mapped[str | None] = mapped_column(Text, nullable=True)
+    body: Mapped[str | None] = mapped_column(Text, nullable=True)
+    mesh: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_file: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
 FINAL_PRODUCT_SHEET_MODELS: list[tuple[str, type]] = [
     ("fp_mascon_manual_tc_end", CatalogFpMasconManualTcEndRow),
     ("fp_mascon_manual_butt_weld", CatalogFpMasconManualButtWeldRow),
@@ -375,23 +444,28 @@ FINAL_PRODUCT_SHEET_MODELS: list[tuple[str, type]] = [
     ("fp_safety_sv_flanged_150", CatalogFpSafetySvFlanged150Row),
     ("fp_sampling_sv_tc_end", CatalogFpSamplingSvTcEndRow),
     ("fp_sampling_sv_od_base_weld", CatalogFpSamplingSvOdBaseWeldRow),
+    ("fp_sight_glass_double_window", CatalogFpSightGlassDoubleWindowRow),
+    ("fp_sight_glass_inline_ic_casted", CatalogFpSightGlassInlineIcCastedRow),
+    ("fp_sight_glass_inline_solid_flange", CatalogFpSightGlassInlineSolidFlangeRow),
+    ("fp_strainer_y_150", CatalogFpStrainerY150Row),
+    ("fp_strainer_y_300", CatalogFpStrainerY300Row),
 ]
 
 # Masters sidebar + cascade (ordered fields = DB column names; exclude sr_no / source_file).
 FINAL_PRODUCT_LABEL_BY_KEY: dict[str, str] = {
-    "fp_mascon_manual_tc_end": "Manual (TC end)",
-    "fp_mascon_manual_butt_weld": "Manual (butt weld)",
-    "fp_mascon_pneumatic_tc_end": "Pneumatic (TC end)",
-    "fp_mascon_pneumatic_butt_weld": "Pneumatic (butt weld)",
-    "fp_mascon_zdvm_l_type": "ZDV-M L type",
-    "fp_mascon_zdvm_j_type": "ZDV-M J type",
-    "fp_mascon_zdvp_l_type": "ZDV-P L type",
-    "fp_mascon_zdvp_j_type": "ZDV-P J type",
-    "fp_mascon_prv": "PRV",
-    "fp_mascon_angle_sc_flanged": "Angle (screwed & flanged)",
-    "fp_mascon_angle_butt_weld": "Angle (butt weld)",
-    "fp_mascon_angle_tc_end": "Angle (TC end)",
-    "fp_mascon_spare_diaphragm": "Spare diaphragm",
+    "fp_mascon_manual_tc_end": "Mascon — Manual (TC end)",
+    "fp_mascon_manual_butt_weld": "Mascon — Manual (butt weld)",
+    "fp_mascon_pneumatic_tc_end": "Mascon — Pneumatic (TC end)",
+    "fp_mascon_pneumatic_butt_weld": "Mascon — Pneumatic (butt weld)",
+    "fp_mascon_zdvm_l_type": "Mascon — ZDV-M L type",
+    "fp_mascon_zdvm_j_type": "Mascon — ZDV-M J type",
+    "fp_mascon_zdvp_l_type": "Mascon — ZDV-P L type",
+    "fp_mascon_zdvp_j_type": "Mascon — ZDV-P J type",
+    "fp_mascon_prv": "Mascon — PRV",
+    "fp_mascon_angle_sc_flanged": "Mascon — Angle (screwed & flanged)",
+    "fp_mascon_angle_butt_weld": "Mascon — Angle (butt weld)",
+    "fp_mascon_angle_tc_end": "Mascon — Angle (TC end)",
+    "fp_mascon_spare_diaphragm": "Mascon — Spare diaphragm",
     "fp_needle_valve": "Needle valve",
     "fp_nrv_inline_check": "NRV — In-line check",
     "fp_nrv_wafer_check": "NRV — Wafer check",
@@ -401,6 +475,11 @@ FINAL_PRODUCT_LABEL_BY_KEY: dict[str, str] = {
     "fp_safety_sv_flanged_150": "Safety valve — Flanged #150",
     "fp_sampling_sv_tc_end": "Sampling valve — TC end",
     "fp_sampling_sv_od_base_weld": "Sampling valve — OD base weld",
+    "fp_sight_glass_double_window": "Sight glass — Double window",
+    "fp_sight_glass_inline_ic_casted": "Sight glass — In-line (IC casted)",
+    "fp_sight_glass_inline_solid_flange": "Sight glass — In-line (solid flange)",
+    "fp_strainer_y_150": "Strainer — Y #150",
+    "fp_strainer_y_300": "Strainer — Y #300",
 }
 
 FINAL_PRODUCT_CASCADE_STEPS: dict[str, list[str]] = {
@@ -579,4 +658,34 @@ FINAL_PRODUCT_CASCADE_STEPS: dict[str, list[str]] = {
         "body",
         "seat",
     ],
+    "fp_sight_glass_double_window": [
+        "variant_type",
+        "valve_size",
+        "end_connection",
+        "pressure",
+        "body",
+        "packing",
+        "glass",
+    ],
+    "fp_sight_glass_inline_ic_casted": [
+        "variant_type",
+        "valve_size",
+        "length",
+        "end_connection",
+        "pressure",
+        "flange",
+        "packing",
+        "glass",
+    ],
+    "fp_sight_glass_inline_solid_flange": [
+        "variant_type",
+        "valve_size",
+        "end_connection",
+        "pressure",
+        "flange",
+        "packing",
+        "glass",
+    ],
+    "fp_strainer_y_150": ["variant_type", "valve_size", "end_connection", "pressure", "body", "mesh"],
+    "fp_strainer_y_300": ["variant_type", "valve_size", "end_connection", "pressure", "body", "mesh"],
 }
