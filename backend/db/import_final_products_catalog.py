@@ -53,19 +53,19 @@ def _specs() -> list[tuple[type, str, str, dict[str, Any]]]:
             "FBV – Y Type",
             {"product_sheet": "FBV – Y Type"},
         ),
-        (fpm.CatalogFpMasconManualTcEndRow, "Mascon_Valve_Products (1) - F.xlsx", "Manual – TC End", {}),
-        (fpm.CatalogFpMasconManualButtWeldRow, "Mascon_Valve_Products (1) - F.xlsx", "Manual – Butt Weld", {}),
-        (fpm.CatalogFpMasconPneumaticTcEndRow, "Mascon_Valve_Products (1) - F.xlsx", "Pneumatic – TC End", {}),
-        (fpm.CatalogFpMasconPneumaticButtWeldRow, "Mascon_Valve_Products (1) - F.xlsx", "Pneumatic – Butt Weld", {}),
-        (fpm.CatalogFpMasconZdvmLTypeRow, "Mascon_Valve_Products (1) - F.xlsx", "ZDV-M – L Type", {}),
-        (fpm.CatalogFpMasconZdvmJTypeRow, "Mascon_Valve_Products (1) - F.xlsx", "ZDV-M – J Type", {}),
-        (fpm.CatalogFpMasconZdvpLTypeRow, "Mascon_Valve_Products (1) - F.xlsx", "ZDV-P – L Type", {}),
-        (fpm.CatalogFpMasconZdvpJTypeRow, "Mascon_Valve_Products (1) - F.xlsx", "ZDV-P – J Type", {}),
-        (fpm.CatalogFpMasconPrvRow, "Mascon_Valve_Products (1) - F.xlsx", "PRV", {}),
-        (fpm.CatalogFpMasconAngleScFlangedRow, "Mascon_Valve_Products (1) - F.xlsx", "Angle – Screwed & Flanged", {}),
-        (fpm.CatalogFpMasconAngleButtWeldRow, "Mascon_Valve_Products (1) - F.xlsx", "Angle – Butt Weld", {}),
-        (fpm.CatalogFpMasconAngleTcEndRow, "Mascon_Valve_Products (1) - F.xlsx", "Angle – TC End", {}),
-        (fpm.CatalogFpMasconSpareDiaphragmRow, "Mascon_Valve_Products (1) - F.xlsx", "Spare Diaphragm", {}),
+        (fpm.CatalogFpMasconManualTcEndRow, "Mascon_Valve_Products (1) - F (1).xlsx", "Manual – TC End", {}),
+        (fpm.CatalogFpMasconManualButtWeldRow, "Mascon_Valve_Products (1) - F (1).xlsx", "Manual – Butt Weld", {}),
+        (fpm.CatalogFpMasconPneumaticTcEndRow, "Mascon_Valve_Products (1) - F (1).xlsx", "Pneumatic – TC End", {}),
+        (fpm.CatalogFpMasconPneumaticButtWeldRow, "Mascon_Valve_Products (1) - F (1).xlsx", "Pneumatic – Butt Weld", {}),
+        (fpm.CatalogFpMasconZdvmLTypeRow, "Mascon_Valve_Products (1) - F (1).xlsx", "ZDV-M – L Type", {}),
+        (fpm.CatalogFpMasconZdvmJTypeRow, "Mascon_Valve_Products (1) - F (1).xlsx", "ZDV-M – J Type", {}),
+        (fpm.CatalogFpMasconZdvpLTypeRow, "Mascon_Valve_Products (1) - F (1).xlsx", "ZDV-P – L Type", {}),
+        (fpm.CatalogFpMasconZdvpJTypeRow, "Mascon_Valve_Products (1) - F (1).xlsx", "ZDV-P – J Type", {}),
+        (fpm.CatalogFpMasconPrvRow, "Mascon_Valve_Products (1) - F (1).xlsx", "PRV", {}),
+        (fpm.CatalogFpMasconAngleScFlangedRow, "Mascon_Valve_Products (1) - F (1).xlsx", "Angle – Screwed & Flanged", {}),
+        (fpm.CatalogFpMasconAngleButtWeldRow, "Mascon_Valve_Products (1) - F (1).xlsx", "Angle – Butt Weld", {}),
+        (fpm.CatalogFpMasconAngleTcEndRow, "Mascon_Valve_Products (1) - F (1).xlsx", "Angle – TC End", {}),
+        (fpm.CatalogFpMasconSpareDiaphragmRow, "Mascon_Valve_Products (1) - F (1).xlsx", "Spare Diaphragm", {}),
         (fpm.CatalogFpNeedleValveRow, "Needle_Valve_Products.xlsx", "Needle Valve", {}),
         (fpm.CatalogFpNrvInlineCheckRow, "Non_Return_Valve_Products.xlsx", "In Line Check Valve", {}),
         (fpm.CatalogFpNrvWaferCheckRow, "Non_Return_Valve_Products.xlsx", "Wafer Check Valve", {}),
@@ -80,6 +80,12 @@ def _specs() -> list[tuple[type, str, str, dict[str, Any]]]:
         (fpm.CatalogFpSightGlassInlineSolidFlangeRow, "Sight_Glass_Products.xlsx", "In-Line SG – Solid Flange", {}),
         (fpm.CatalogFpStrainerY150Row, "Strainer_Products.xlsx", "Y Strainer – #150", {}),
         (fpm.CatalogFpStrainerY300Row, "Strainer_Products.xlsx", "Y Strainer – #300", {}),
+        (fpm.CatalogFpHoseTuderRow, "Hoses_Products.xlsx", "Tuder Hose", {}),
+        (fpm.CatalogFpHoseThunderRow, "Hoses_Products.xlsx", "Thunder Hose", {}),
+        (fpm.CatalogFpHosePvcNylonNonToxicRow, "Hoses_Products.xlsx", "PVC Nylon Braided – Non-Toxic", {}),
+        (fpm.CatalogFpHosePvcNylonFoodGradeRow, "Hoses_Products.xlsx", "PVC Nylon Braided – Food Grade", {}),
+        (fpm.CatalogFpHoseRedSiliconRow, "Hoses_Products.xlsx", "Red Silicon Hose", {}),
+        (fpm.CatalogFpHosePuRow, "Hoses_Products.xlsx", "PU Hose", {}),
     ]
 
 
@@ -105,6 +111,10 @@ def _field_aliases(model: type) -> dict[str, str]:
         aliases["ball"] = "ball"
     if "valve_size" in cols:
         aliases["size"] = "valve_size"
+    if "diaphragm" in cols:
+        aliases["diaphragm_moc"] = "diaphragm"
+    if "actuator_moc" in cols:
+        aliases["actuator_type"] = "actuator_moc"
     if "set_pressure" in cols and "set_pressure_range" not in cols:
         aliases["set_pressure"] = "set_pressure"
     return aliases

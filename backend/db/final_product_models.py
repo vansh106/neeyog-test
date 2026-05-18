@@ -421,6 +421,49 @@ class CatalogFpStrainerY300Row(FinalProductSheetMarker, _FinalCatalogBase):
     source_file: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
+class _CatalogFpHoseStandardColumns:
+    """Shared columns for Hoses_Products.xlsx sheets (except PU)."""
+
+    __abstract__ = True
+
+    sr_no: Mapped[float | None] = mapped_column(Float, nullable=True)
+    variant_type: Mapped[str | None] = mapped_column(Text, nullable=True)
+    size_id_mm: Mapped[str | None] = mapped_column(Text, nullable=True)
+    temperature_range: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_file: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class CatalogFpHoseTuderRow(_CatalogFpHoseStandardColumns, FinalProductSheetMarker, _FinalCatalogBase):
+    __tablename__ = "catalog_fp_hose_tuder"
+
+
+class CatalogFpHoseThunderRow(_CatalogFpHoseStandardColumns, FinalProductSheetMarker, _FinalCatalogBase):
+    __tablename__ = "catalog_fp_hose_thunder"
+
+
+class CatalogFpHosePvcNylonNonToxicRow(_CatalogFpHoseStandardColumns, FinalProductSheetMarker, _FinalCatalogBase):
+    __tablename__ = "catalog_fp_hose_pvc_nylon_non_toxic"
+
+
+class CatalogFpHosePvcNylonFoodGradeRow(_CatalogFpHoseStandardColumns, FinalProductSheetMarker, _FinalCatalogBase):
+    __tablename__ = "catalog_fp_hose_pvc_nylon_food_grade"
+
+
+class CatalogFpHoseRedSiliconRow(_CatalogFpHoseStandardColumns, FinalProductSheetMarker, _FinalCatalogBase):
+    __tablename__ = "catalog_fp_hose_red_silicon"
+
+
+class CatalogFpHosePuRow(FinalProductSheetMarker, _FinalCatalogBase):
+    __tablename__ = "catalog_fp_hose_pu"
+
+    sr_no: Mapped[float | None] = mapped_column(Float, nullable=True)
+    variant_type: Mapped[str | None] = mapped_column(Text, nullable=True)
+    wall_thickness: Mapped[str | None] = mapped_column(Text, nullable=True)
+    size_id_mm: Mapped[str | None] = mapped_column(Text, nullable=True)
+    temperature_range: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_file: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
 FINAL_PRODUCT_SHEET_MODELS: list[tuple[str, type]] = [
     ("fp_mascon_manual_tc_end", CatalogFpMasconManualTcEndRow),
     ("fp_mascon_manual_butt_weld", CatalogFpMasconManualButtWeldRow),
@@ -449,6 +492,12 @@ FINAL_PRODUCT_SHEET_MODELS: list[tuple[str, type]] = [
     ("fp_sight_glass_inline_solid_flange", CatalogFpSightGlassInlineSolidFlangeRow),
     ("fp_strainer_y_150", CatalogFpStrainerY150Row),
     ("fp_strainer_y_300", CatalogFpStrainerY300Row),
+    ("fp_hose_tuder", CatalogFpHoseTuderRow),
+    ("fp_hose_thunder", CatalogFpHoseThunderRow),
+    ("fp_hose_pvc_nylon_non_toxic", CatalogFpHosePvcNylonNonToxicRow),
+    ("fp_hose_pvc_nylon_food_grade", CatalogFpHosePvcNylonFoodGradeRow),
+    ("fp_hose_red_silicon", CatalogFpHoseRedSiliconRow),
+    ("fp_hose_pu", CatalogFpHosePuRow),
 ]
 
 # Masters sidebar + cascade (ordered fields = DB column names; exclude sr_no / source_file).
@@ -480,6 +529,12 @@ FINAL_PRODUCT_LABEL_BY_KEY: dict[str, str] = {
     "fp_sight_glass_inline_solid_flange": "Sight glass — In-line (solid flange)",
     "fp_strainer_y_150": "Strainer — Y #150",
     "fp_strainer_y_300": "Strainer — Y #300",
+    "fp_hose_tuder": "Hose — Tuder",
+    "fp_hose_thunder": "Hose — Thunder",
+    "fp_hose_pvc_nylon_non_toxic": "Hose — PVC nylon (non-toxic)",
+    "fp_hose_pvc_nylon_food_grade": "Hose — PVC nylon (food grade)",
+    "fp_hose_red_silicon": "Hose — Red silicon",
+    "fp_hose_pu": "Hose — PU",
 }
 
 FINAL_PRODUCT_CASCADE_STEPS: dict[str, list[str]] = {
@@ -688,4 +743,10 @@ FINAL_PRODUCT_CASCADE_STEPS: dict[str, list[str]] = {
     ],
     "fp_strainer_y_150": ["variant_type", "valve_size", "end_connection", "pressure", "body", "mesh"],
     "fp_strainer_y_300": ["variant_type", "valve_size", "end_connection", "pressure", "body", "mesh"],
+    "fp_hose_tuder": ["variant_type", "size_id_mm", "temperature_range"],
+    "fp_hose_thunder": ["variant_type", "size_id_mm", "temperature_range"],
+    "fp_hose_pvc_nylon_non_toxic": ["variant_type", "size_id_mm", "temperature_range"],
+    "fp_hose_pvc_nylon_food_grade": ["variant_type", "size_id_mm", "temperature_range"],
+    "fp_hose_red_silicon": ["variant_type", "size_id_mm", "temperature_range"],
+    "fp_hose_pu": ["variant_type", "wall_thickness", "size_id_mm", "temperature_range"],
 }

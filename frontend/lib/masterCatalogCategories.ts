@@ -30,6 +30,12 @@ export const FINAL_PRODUCT_MASTER_CATEGORIES: MasterCatalogCategory[] = [
   { key: 'fp_sight_glass_inline_solid_flange', label: 'Sight glass — In-line (solid flange)' },
   { key: 'fp_strainer_y_150', label: 'Strainer — Y #150' },
   { key: 'fp_strainer_y_300', label: 'Strainer — Y #300' },
+  { key: 'fp_hose_tuder', label: 'Hose — Tuder' },
+  { key: 'fp_hose_thunder', label: 'Hose — Thunder' },
+  { key: 'fp_hose_pvc_nylon_non_toxic', label: 'Hose — PVC nylon (non-toxic)' },
+  { key: 'fp_hose_pvc_nylon_food_grade', label: 'Hose — PVC nylon (food grade)' },
+  { key: 'fp_hose_red_silicon', label: 'Hose — Red silicon' },
+  { key: 'fp_hose_pu', label: 'Hose — PU' },
 ]
 
 const CORE_BEFORE_FP: MasterCatalogCategory[] = [
