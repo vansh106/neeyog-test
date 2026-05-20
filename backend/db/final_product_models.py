@@ -464,6 +464,51 @@ class CatalogFpHosePuRow(FinalProductSheetMarker, _FinalCatalogBase):
     source_file: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
+class _CatalogFpFittingsStandardColumns:
+    """Shared columns for Fittings_Products.xlsx sheets."""
+
+    __abstract__ = True
+
+    sr_no: Mapped[float | None] = mapped_column(Float, nullable=True)
+    variant_type: Mapped[str | None] = mapped_column(Text, nullable=True)
+    end_connection_1: Mapped[str | None] = mapped_column(Text, nullable=True)
+    end_connection_2: Mapped[str | None] = mapped_column(Text, nullable=True)
+    size_mm: Mapped[str | None] = mapped_column(Text, nullable=True)
+    hose_nipple_moc: Mapped[str | None] = mapped_column(Text, nullable=True)
+    hose_cap_moc: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_file: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class CatalogFpFittingsSmsNutRow(_CatalogFpFittingsStandardColumns, FinalProductSheetMarker, _FinalCatalogBase):
+    __tablename__ = "catalog_fp_fittings_sms_nut"
+
+    sms_nut_moc: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class CatalogFpFittingsTriCloverEndRow(_CatalogFpFittingsStandardColumns, FinalProductSheetMarker, _FinalCatalogBase):
+    __tablename__ = "catalog_fp_fittings_tri_clover_end"
+
+    tc_od: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class CatalogFpFittingsDinNut11851Row(_CatalogFpFittingsStandardColumns, FinalProductSheetMarker, _FinalCatalogBase):
+    __tablename__ = "catalog_fp_fittings_din_nut_11851"
+
+    din_nut_moc: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class CatalogFpFittingsSwivelNutRow(_CatalogFpFittingsStandardColumns, FinalProductSheetMarker, _FinalCatalogBase):
+    __tablename__ = "catalog_fp_fittings_swivel_nut"
+
+    swivel_nut_moc: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class CatalogFpFittingsFlange150Row(_CatalogFpFittingsStandardColumns, FinalProductSheetMarker, _FinalCatalogBase):
+    __tablename__ = "catalog_fp_fittings_flange_150"
+
+    flange_nut_moc: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
 FINAL_PRODUCT_SHEET_MODELS: list[tuple[str, type]] = [
     ("fp_mascon_manual_tc_end", CatalogFpMasconManualTcEndRow),
     ("fp_mascon_manual_butt_weld", CatalogFpMasconManualButtWeldRow),
@@ -498,6 +543,11 @@ FINAL_PRODUCT_SHEET_MODELS: list[tuple[str, type]] = [
     ("fp_hose_pvc_nylon_food_grade", CatalogFpHosePvcNylonFoodGradeRow),
     ("fp_hose_red_silicon", CatalogFpHoseRedSiliconRow),
     ("fp_hose_pu", CatalogFpHosePuRow),
+    ("fp_fittings_sms_nut", CatalogFpFittingsSmsNutRow),
+    ("fp_fittings_tri_clover_end", CatalogFpFittingsTriCloverEndRow),
+    ("fp_fittings_din_nut_11851", CatalogFpFittingsDinNut11851Row),
+    ("fp_fittings_swivel_nut", CatalogFpFittingsSwivelNutRow),
+    ("fp_fittings_flange_150", CatalogFpFittingsFlange150Row),
 ]
 
 # Masters sidebar + cascade (ordered fields = DB column names; exclude sr_no / source_file).
@@ -535,6 +585,11 @@ FINAL_PRODUCT_LABEL_BY_KEY: dict[str, str] = {
     "fp_hose_pvc_nylon_food_grade": "Hose — PVC nylon (food grade)",
     "fp_hose_red_silicon": "Hose — Red silicon",
     "fp_hose_pu": "Hose — PU",
+    "fp_fittings_sms_nut": "Fittings — SMS nut",
+    "fp_fittings_tri_clover_end": "Fittings — Tri-Clover end",
+    "fp_fittings_din_nut_11851": "Fittings — DIN nut 11851",
+    "fp_fittings_swivel_nut": "Fittings — Swivel nut",
+    "fp_fittings_flange_150": "Fittings — Flange #150",
 }
 
 FINAL_PRODUCT_CASCADE_STEPS: dict[str, list[str]] = {
@@ -749,4 +804,49 @@ FINAL_PRODUCT_CASCADE_STEPS: dict[str, list[str]] = {
     "fp_hose_pvc_nylon_food_grade": ["variant_type", "size_id_mm", "temperature_range"],
     "fp_hose_red_silicon": ["variant_type", "size_id_mm", "temperature_range"],
     "fp_hose_pu": ["variant_type", "wall_thickness", "size_id_mm", "temperature_range"],
+    "fp_fittings_sms_nut": [
+        "variant_type",
+        "end_connection_1",
+        "end_connection_2",
+        "size_mm",
+        "hose_nipple_moc",
+        "hose_cap_moc",
+        "sms_nut_moc",
+    ],
+    "fp_fittings_tri_clover_end": [
+        "variant_type",
+        "end_connection_1",
+        "end_connection_2",
+        "size_mm",
+        "tc_od",
+        "hose_nipple_moc",
+        "hose_cap_moc",
+    ],
+    "fp_fittings_din_nut_11851": [
+        "variant_type",
+        "end_connection_1",
+        "end_connection_2",
+        "size_mm",
+        "hose_nipple_moc",
+        "hose_cap_moc",
+        "din_nut_moc",
+    ],
+    "fp_fittings_swivel_nut": [
+        "variant_type",
+        "end_connection_1",
+        "end_connection_2",
+        "size_mm",
+        "hose_nipple_moc",
+        "hose_cap_moc",
+        "swivel_nut_moc",
+    ],
+    "fp_fittings_flange_150": [
+        "variant_type",
+        "end_connection_1",
+        "end_connection_2",
+        "size_mm",
+        "hose_nipple_moc",
+        "hose_cap_moc",
+        "flange_nut_moc",
+    ],
 }

@@ -86,6 +86,11 @@ def _specs() -> list[tuple[type, str, str, dict[str, Any]]]:
         (fpm.CatalogFpHosePvcNylonFoodGradeRow, "Hoses_Products.xlsx", "PVC Nylon Braided – Food Grade", {}),
         (fpm.CatalogFpHoseRedSiliconRow, "Hoses_Products.xlsx", "Red Silicon Hose", {}),
         (fpm.CatalogFpHosePuRow, "Hoses_Products.xlsx", "PU Hose", {}),
+        (fpm.CatalogFpFittingsSmsNutRow, "Fittings_Products.xlsx", "SMS Nut", {}),
+        (fpm.CatalogFpFittingsTriCloverEndRow, "Fittings_Products.xlsx", "Tri-Clover End", {}),
+        (fpm.CatalogFpFittingsDinNut11851Row, "Fittings_Products.xlsx", "DIN Nut 11851", {}),
+        (fpm.CatalogFpFittingsSwivelNutRow, "Fittings_Products.xlsx", "Swivel Nut", {}),
+        (fpm.CatalogFpFittingsFlange150Row, "Fittings_Products.xlsx", "Flange #150", {}),
     ]
 
 

@@ -36,6 +36,11 @@ export const FINAL_PRODUCT_MASTER_CATEGORIES: MasterCatalogCategory[] = [
   { key: 'fp_hose_pvc_nylon_food_grade', label: 'Hose — PVC nylon (food grade)' },
   { key: 'fp_hose_red_silicon', label: 'Hose — Red silicon' },
   { key: 'fp_hose_pu', label: 'Hose — PU' },
+  { key: 'fp_fittings_sms_nut', label: 'Fittings — SMS nut' },
+  { key: 'fp_fittings_tri_clover_end', label: 'Fittings — Tri-Clover end' },
+  { key: 'fp_fittings_din_nut_11851', label: 'Fittings — DIN nut 11851' },
+  { key: 'fp_fittings_swivel_nut', label: 'Fittings — Swivel nut' },
+  { key: 'fp_fittings_flange_150', label: 'Fittings — Flange #150' },
 ]
 
 const CORE_BEFORE_FP: MasterCatalogCategory[] = [
