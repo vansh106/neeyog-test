@@ -68,7 +68,6 @@ async def verify() -> None:
             try:
                 from db.models import Enquiry, Quotation, User  # noqa: E402
                 from db.sheet_models import (  # noqa: E402
-                    CatalogBallValveRow,
                     CatalogButterflyValveRow,
                     CatalogOperatorRow,
                 )
@@ -79,7 +78,6 @@ async def verify() -> None:
                 butterfly = await db.scalar(
                     select(func.count(CatalogButterflyValveRow.row_id))
                 )
-                ball = await db.scalar(select(func.count(CatalogBallValveRow.row_id)))
                 operators = await db.scalar(
                     select(func.count(CatalogOperatorRow.row_id))
                 )
@@ -87,7 +85,6 @@ async def verify() -> None:
                 print(f"  Enquiries:      {enquiries}")
                 print(f"  Quotations:     {quotations}")
                 print(f"  Butterfly rows: {butterfly}")
-                print(f"  Ball rows:      {ball}")
                 print(f"  Operators:      {operators}")
             except Exception as exc:
                 print(f"\n  (Row counts skipped — tables not yet migrated: {exc})")

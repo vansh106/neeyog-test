@@ -16,7 +16,6 @@ from db.final_product_models import (
     FinalProductSheetMarker,
 )
 from db.sheet_models import (
-    CatalogBallValveRow,
     CatalogBracketsCouplerRow,
     CatalogButterflyValveRow,
     CatalogLimitSwitchRow,
@@ -49,7 +48,6 @@ INCH_TO_MM: dict[float, float] = {
 
 SHEET_TABLES: list[tuple[str, type]] = [
     ("butterfly_valve", CatalogButterflyValveRow),
-    ("ball_valve", CatalogBallValveRow),
     *FINAL_PRODUCT_SHEET_MODELS,
     ("operator", CatalogOperatorRow),
     ("brackets_coupler", CatalogBracketsCouplerRow),
@@ -67,19 +65,6 @@ _KEYWORD_COLUMNS: dict[str, list[str]] = {
         "pressure",
         "body",
         "ball_disc",
-        "seat",
-        "source_file",
-    ],
-    "ball_valve": [
-        "variant_type",
-        "construction",
-        "valve_size",
-        "bore_type",
-        "end_connection",
-        "pressure",
-        "body",
-        "ball",
-        "stem",
         "seat",
         "source_file",
     ],
@@ -152,20 +137,6 @@ def _row_to_catalog_item(table_key: str, row: object) -> dict:
         material = _join_parts(
             row.body,
             row.ball_disc,
-            getattr(row, "stem", None),
-            row.seat,
-            getattr(row, "fasteners", None),
-        ) or None
-        pressure_rating = row.pressure
-        sub_category = row.variant_type
-    elif isinstance(row, CatalogBallValveRow):
-        name = _join_parts(row.variant_type, row.construction, row.valve_size) or "Ball valve"
-        if getattr(row, "product_sheet", None):
-            name = f"{name} ({row.product_sheet})".strip()
-        size_mm, size_inch = _parse_size_to_mm_inch(row.valve_size)
-        material = _join_parts(
-            row.body,
-            row.ball,
             getattr(row, "stem", None),
             row.seat,
             getattr(row, "fasteners", None),

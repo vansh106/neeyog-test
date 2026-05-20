@@ -1,7 +1,7 @@
 """ORM models for `docs/Final_Products/*.xlsx` — one table per worksheet (except butterfly/ball).
 
-Butterfly and ball flush products use `CatalogButterflyValveRow` / `CatalogBallValveRow` with
-final table names in `sheet_models.py`. All other final sheets use `FinalProductSheetMarker`
+Butterfly products use `CatalogButterflyValveRow` with final table names in
+`sheet_models.py`. All other final sheets use `FinalProductSheetMarker`
 subclasses below.
 """
 
@@ -509,6 +509,112 @@ class CatalogFpFittingsFlange150Row(_CatalogFpFittingsStandardColumns, FinalProd
     flange_nut_moc: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
+class _CatalogFpBallValveStandardColumns:
+    """Shared columns for Ball_Valve_Products.xlsx sheets."""
+
+    __abstract__ = True
+
+    sr_no: Mapped[float | None] = mapped_column(Float, nullable=True)
+    variant_type: Mapped[str | None] = mapped_column(Text, nullable=True)
+    construction: Mapped[str | None] = mapped_column(Text, nullable=True)
+    valve_size: Mapped[str | None] = mapped_column(Text, nullable=True)
+    bore_type: Mapped[str | None] = mapped_column(Text, nullable=True)
+    end_connection: Mapped[str | None] = mapped_column(Text, nullable=True)
+    rating: Mapped[str | None] = mapped_column(Text, nullable=True)
+    body: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ball: Mapped[str | None] = mapped_column(Text, nullable=True)
+    stem: Mapped[str | None] = mapped_column(Text, nullable=True)
+    seat: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_file: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class CatalogFpBallValveCasco1PieceMultiEndRow(
+    _CatalogFpBallValveStandardColumns, FinalProductSheetMarker, _FinalCatalogBase
+):
+    __tablename__ = "catalog_fp_ball_valve_casco_1_piece_multi_end"
+
+
+class CatalogFpBallValveCasco1PieceFlangedRow(
+    _CatalogFpBallValveStandardColumns, FinalProductSheetMarker, _FinalCatalogBase
+):
+    __tablename__ = "catalog_fp_ball_valve_casco_1_piece_flanged"
+
+
+class CatalogFpBallValveCasco2PieceRow(
+    _CatalogFpBallValveStandardColumns, FinalProductSheetMarker, _FinalCatalogBase
+):
+    __tablename__ = "catalog_fp_ball_valve_casco_2_piece"
+
+
+class CatalogFpBallValveCasco3PieceRow(
+    _CatalogFpBallValveStandardColumns, FinalProductSheetMarker, _FinalCatalogBase
+):
+    __tablename__ = "catalog_fp_ball_valve_casco_3_piece"
+
+
+class CatalogFpBallValveCasco3PieceExtStemRow(
+    _CatalogFpBallValveStandardColumns, FinalProductSheetMarker, _FinalCatalogBase
+):
+    __tablename__ = "catalog_fp_ball_valve_casco_3_piece_ext_stem"
+
+
+class CatalogFpBallValveCasco3Piece3WayLPortRow(
+    _CatalogFpBallValveStandardColumns, FinalProductSheetMarker, _FinalCatalogBase
+):
+    __tablename__ = "catalog_fp_ball_valve_casco_3_piece_3_way_l_port"
+
+
+class CatalogFpBallValveUnison1PieceMultiEndRow(
+    _CatalogFpBallValveStandardColumns, FinalProductSheetMarker, _FinalCatalogBase
+):
+    __tablename__ = "catalog_fp_ball_valve_unison_1_piece_multi_end"
+
+
+class CatalogFpBallValveUnison2PieceIsoPadsRow(
+    _CatalogFpBallValveStandardColumns, FinalProductSheetMarker, _FinalCatalogBase
+):
+    __tablename__ = "catalog_fp_ball_valve_unison_2_piece_iso_pads"
+
+
+class CatalogFpBallValveUnison3PieceRow(
+    _CatalogFpBallValveStandardColumns, FinalProductSheetMarker, _FinalCatalogBase
+):
+    __tablename__ = "catalog_fp_ball_valve_unison_3_piece"
+
+
+class CatalogFpBallValveUnison3Piece3WayLPortRow(
+    _CatalogFpBallValveStandardColumns, FinalProductSheetMarker, _FinalCatalogBase
+):
+    __tablename__ = "catalog_fp_ball_valve_unison_3_piece_3_way_l_port"
+
+
+class _CatalogFpFbvStandardColumns:
+    """Shared columns for Flush_Bottom_Valve_Products workbook (Price column → supplier only)."""
+
+    __abstract__ = True
+
+    sr_no: Mapped[float | None] = mapped_column(Float, nullable=True)
+    variant_type: Mapped[str | None] = mapped_column(Text, nullable=True)
+    construction: Mapped[str | None] = mapped_column(Text, nullable=True)
+    valve_size: Mapped[str | None] = mapped_column(Text, nullable=True)
+    bore_type: Mapped[str | None] = mapped_column(Text, nullable=True)
+    end_connection: Mapped[str | None] = mapped_column(Text, nullable=True)
+    pressure: Mapped[str | None] = mapped_column(Text, nullable=True)
+    body: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ball: Mapped[str | None] = mapped_column(Text, nullable=True)
+    stem: Mapped[str | None] = mapped_column(Text, nullable=True)
+    seat: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_file: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class CatalogFpFbvBallTypeRow(_CatalogFpFbvStandardColumns, FinalProductSheetMarker, _FinalCatalogBase):
+    __tablename__ = "catalog_fp_fbv_ball_type"
+
+
+class CatalogFpFbvYTypeRow(_CatalogFpFbvStandardColumns, FinalProductSheetMarker, _FinalCatalogBase):
+    __tablename__ = "catalog_fp_fbv_y_type"
+
+
 FINAL_PRODUCT_SHEET_MODELS: list[tuple[str, type]] = [
     ("fp_mascon_manual_tc_end", CatalogFpMasconManualTcEndRow),
     ("fp_mascon_manual_butt_weld", CatalogFpMasconManualButtWeldRow),
@@ -548,6 +654,18 @@ FINAL_PRODUCT_SHEET_MODELS: list[tuple[str, type]] = [
     ("fp_fittings_din_nut_11851", CatalogFpFittingsDinNut11851Row),
     ("fp_fittings_swivel_nut", CatalogFpFittingsSwivelNutRow),
     ("fp_fittings_flange_150", CatalogFpFittingsFlange150Row),
+    ("fp_ball_valve_casco_1_piece_multi_end", CatalogFpBallValveCasco1PieceMultiEndRow),
+    ("fp_ball_valve_casco_1_piece_flanged", CatalogFpBallValveCasco1PieceFlangedRow),
+    ("fp_ball_valve_casco_2_piece", CatalogFpBallValveCasco2PieceRow),
+    ("fp_ball_valve_casco_3_piece", CatalogFpBallValveCasco3PieceRow),
+    ("fp_ball_valve_casco_3_piece_ext_stem", CatalogFpBallValveCasco3PieceExtStemRow),
+    ("fp_ball_valve_casco_3_piece_3_way_l_port", CatalogFpBallValveCasco3Piece3WayLPortRow),
+    ("fp_ball_valve_unison_1_piece_multi_end", CatalogFpBallValveUnison1PieceMultiEndRow),
+    ("fp_ball_valve_unison_2_piece_iso_pads", CatalogFpBallValveUnison2PieceIsoPadsRow),
+    ("fp_ball_valve_unison_3_piece", CatalogFpBallValveUnison3PieceRow),
+    ("fp_ball_valve_unison_3_piece_3_way_l_port", CatalogFpBallValveUnison3Piece3WayLPortRow),
+    ("fp_fbv_ball_type", CatalogFpFbvBallTypeRow),
+    ("fp_fbv_y_type", CatalogFpFbvYTypeRow),
 ]
 
 # Masters sidebar + cascade (ordered fields = DB column names; exclude sr_no / source_file).
@@ -590,6 +708,18 @@ FINAL_PRODUCT_LABEL_BY_KEY: dict[str, str] = {
     "fp_fittings_din_nut_11851": "Fittings — DIN nut 11851",
     "fp_fittings_swivel_nut": "Fittings — Swivel nut",
     "fp_fittings_flange_150": "Fittings — Flange #150",
+    "fp_ball_valve_casco_1_piece_multi_end": "Ball valve — Casco 1-piece (multi-end)",
+    "fp_ball_valve_casco_1_piece_flanged": "Ball valve — Casco 1-piece (flanged)",
+    "fp_ball_valve_casco_2_piece": "Ball valve — Casco 2-piece",
+    "fp_ball_valve_casco_3_piece": "Ball valve — Casco 3-piece",
+    "fp_ball_valve_casco_3_piece_ext_stem": "Ball valve — Casco 3-piece (ext. stem)",
+    "fp_ball_valve_casco_3_piece_3_way_l_port": "Ball valve — Casco 3-piece (3-way L-port)",
+    "fp_ball_valve_unison_1_piece_multi_end": "Ball valve — Unison 1-piece (multi-end)",
+    "fp_ball_valve_unison_2_piece_iso_pads": "Ball valve — Unison 2-piece (ISO pads)",
+    "fp_ball_valve_unison_3_piece": "Ball valve — Unison 3-piece",
+    "fp_ball_valve_unison_3_piece_3_way_l_port": "Ball valve — Unison 3-piece (3-way L-port)",
+    "fp_fbv_ball_type": "FBV — Ball Type",
+    "fp_fbv_y_type": "FBV — Y Type",
 }
 
 FINAL_PRODUCT_CASCADE_STEPS: dict[str, list[str]] = {
@@ -848,5 +978,149 @@ FINAL_PRODUCT_CASCADE_STEPS: dict[str, list[str]] = {
         "hose_nipple_moc",
         "hose_cap_moc",
         "flange_nut_moc",
+    ],
+    "fp_ball_valve_casco_1_piece_multi_end": [
+        "variant_type",
+        "construction",
+        "valve_size",
+        "bore_type",
+        "end_connection",
+        "rating",
+        "body",
+        "ball",
+        "stem",
+        "seat",
+    ],
+    "fp_ball_valve_casco_1_piece_flanged": [
+        "variant_type",
+        "construction",
+        "valve_size",
+        "bore_type",
+        "end_connection",
+        "rating",
+        "body",
+        "ball",
+        "stem",
+        "seat",
+    ],
+    "fp_ball_valve_casco_2_piece": [
+        "variant_type",
+        "construction",
+        "valve_size",
+        "bore_type",
+        "end_connection",
+        "rating",
+        "body",
+        "ball",
+        "stem",
+        "seat",
+    ],
+    "fp_ball_valve_casco_3_piece": [
+        "variant_type",
+        "construction",
+        "valve_size",
+        "bore_type",
+        "end_connection",
+        "rating",
+        "body",
+        "ball",
+        "stem",
+        "seat",
+    ],
+    "fp_ball_valve_casco_3_piece_ext_stem": [
+        "variant_type",
+        "construction",
+        "valve_size",
+        "bore_type",
+        "end_connection",
+        "rating",
+        "body",
+        "ball",
+        "stem",
+        "seat",
+    ],
+    "fp_ball_valve_casco_3_piece_3_way_l_port": [
+        "variant_type",
+        "construction",
+        "valve_size",
+        "bore_type",
+        "end_connection",
+        "rating",
+        "body",
+        "ball",
+        "stem",
+        "seat",
+    ],
+    "fp_ball_valve_unison_1_piece_multi_end": [
+        "variant_type",
+        "construction",
+        "valve_size",
+        "bore_type",
+        "end_connection",
+        "rating",
+        "body",
+        "ball",
+        "stem",
+        "seat",
+    ],
+    "fp_ball_valve_unison_2_piece_iso_pads": [
+        "variant_type",
+        "construction",
+        "valve_size",
+        "bore_type",
+        "end_connection",
+        "rating",
+        "body",
+        "ball",
+        "stem",
+        "seat",
+    ],
+    "fp_ball_valve_unison_3_piece": [
+        "variant_type",
+        "construction",
+        "valve_size",
+        "bore_type",
+        "end_connection",
+        "rating",
+        "body",
+        "ball",
+        "stem",
+        "seat",
+    ],
+    "fp_ball_valve_unison_3_piece_3_way_l_port": [
+        "variant_type",
+        "construction",
+        "valve_size",
+        "bore_type",
+        "end_connection",
+        "rating",
+        "body",
+        "ball",
+        "stem",
+        "seat",
+    ],
+    "fp_fbv_ball_type": [
+        "variant_type",
+        "construction",
+        "valve_size",
+        "bore_type",
+        "end_connection",
+        "pressure",
+        "body",
+        "ball",
+        "stem",
+        "seat",
+    ],
+    "fp_fbv_y_type": [
+        "variant_type",
+        "construction",
+        "valve_size",
+        "bore_type",
+        "end_connection",
+        "pressure",
+        "body",
+        "ball",
+        "stem",
+        "seat",
     ],
 }

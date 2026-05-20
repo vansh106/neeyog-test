@@ -1,7 +1,7 @@
 """Valve configurator service — cascading selection + assembly pricing.
 
 Powers the ManualEntryForm valve product builder. All reads go against the
-existing `catalog_*` tables (butterfly + ball valves, operators, brackets &
+existing `catalog_*` tables (butterfly valves, operators, brackets &
 couplers, SOV, limit switch box, positioner).
 """
 
@@ -16,7 +16,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import get_settings
 from db.sheet_models import (
-    CatalogBallValveRow,
     CatalogBracketsCouplerRow,
     CatalogButterflyValveRow,
     CatalogLimitSwitchRow,
@@ -43,23 +42,10 @@ VALVE_SPEC_COLUMNS: dict[str, list[str]] = {
         "seat",
         "fasteners",
     ],
-    "Ball Valve": [
-        "construction",
-        "valve_size",
-        "bore_type",
-        "end_connection",
-        "pressure",
-        "body",
-        "ball",
-        "stem",
-        "seat",
-        "fasteners",
-    ],
 }
 
 _VALVE_MODEL_BY_TYPE: dict[str, type] = {
     "Butterfly Valve": CatalogButterflyValveRow,
-    "Ball Valve": CatalogBallValveRow,
 }
 
 # First-step configurator: every sheet-backed product family except accessories / operators.
@@ -85,15 +71,11 @@ def _operator_sheet_filter_for_category(catalog_category: str | None, valve_type
     # If the DB was normalized, this will be 'All valves' for all rows.
     if catalog_category == "butterfly_valve":
         return "Butterfly Valve"
-    if catalog_category == "ball_valve":
-        return "Ball Valve"
     if catalog_category:
         return None
     key = _valve_type_key(valve_type)
     if key == "Butterfly Valve":
         return "Butterfly Valve"
-    if key == "Ball Valve":
-        return "Ball Valve"
     return None
 
 # Human-readable label per valve type for operator_options. Excel stores
@@ -107,8 +89,6 @@ def _valve_type_key(valve_type: str) -> str:
     t = valve_type.strip().lower()
     if "butterfly" in t:
         return "Butterfly Valve"
-    if "ball" in t:
-        return "Ball Valve"
     return valve_type.strip()
 
 
@@ -227,8 +207,6 @@ def _category_from_legacy_valve_display(valve_type: str) -> str | None:
     key = _valve_type_key(valve_type)
     if key == "Butterfly Valve":
         return "butterfly_valve"
-    if key == "Ball Valve":
-        return "ball_valve"
     return None
 
 
@@ -371,9 +349,9 @@ async def get_bracket_for_valve(
     catalog_category: str | None = None,
 ) -> dict | None:
     eff_cat = catalog_category or _category_from_legacy_valve_display(valve_type)
-    if eff_cat not in ("butterfly_valve", "ball_valve"):
+    if eff_cat != "butterfly_valve":
         return None
-    key = "Butterfly Valve" if eff_cat == "butterfly_valve" else "Ball Valve"
+    key = "Butterfly Valve"
     if not valve_size:
         return None
     stmt = select(CatalogBracketsCouplerRow).where(

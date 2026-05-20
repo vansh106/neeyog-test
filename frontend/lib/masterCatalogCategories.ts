@@ -43,9 +43,26 @@ export const FINAL_PRODUCT_MASTER_CATEGORIES: MasterCatalogCategory[] = [
   { key: 'fp_fittings_flange_150', label: 'Fittings — Flange #150' },
 ]
 
+export const FBV_MASTER_CATEGORIES: MasterCatalogCategory[] = [
+  { key: 'fp_fbv_ball_type', label: 'FBV — Ball Type' },
+  { key: 'fp_fbv_y_type', label: 'FBV — Y Type' },
+]
+
+export const BALL_VALVE_MASTER_CATEGORIES: MasterCatalogCategory[] = [
+  { key: 'fp_ball_valve_casco_1_piece_multi_end', label: 'Ball Valve — 1-piece (multi-end)' },
+  { key: 'fp_ball_valve_casco_1_piece_flanged', label: 'Ball Valve — 1-piece (flanged)' },
+  { key: 'fp_ball_valve_casco_2_piece', label: 'Ball Valve — 2-piece' },
+  { key: 'fp_ball_valve_casco_3_piece', label: 'Ball Valve — 3-piece' },
+  { key: 'fp_ball_valve_casco_3_piece_ext_stem', label: 'Ball Valve — 3-piece (ext. stem)' },
+  { key: 'fp_ball_valve_casco_3_piece_3_way_l_port', label: 'Ball Valve — 3-piece (3-way L-port)' },
+  { key: 'fp_ball_valve_unison_1_piece_multi_end', label: 'Ball Valve — 1-piece (multi-end)' },
+  { key: 'fp_ball_valve_unison_2_piece_iso_pads', label: 'Ball Valve — 2-piece (ISO pads)' },
+  { key: 'fp_ball_valve_unison_3_piece', label: 'Ball Valve — 3-piece' },
+  { key: 'fp_ball_valve_unison_3_piece_3_way_l_port', label: 'Ball Valve — 3-piece (3-way L-port)' },
+]
+
 const CORE_BEFORE_FP: MasterCatalogCategory[] = [
   { key: 'butterfly_valve', label: 'Butterfly valve' },
-  { key: 'ball_valve', label: 'Ball valve' },
 ]
 
 const CORE_AFTER_FP: MasterCatalogCategory[] = [
@@ -58,6 +75,8 @@ const CORE_AFTER_FP: MasterCatalogCategory[] = [
 
 export const SIDEBAR_MASTER_CATEGORIES: MasterCatalogCategory[] = [
   ...CORE_BEFORE_FP,
+  ...FBV_MASTER_CATEGORIES,
+  ...BALL_VALVE_MASTER_CATEGORIES,
   ...FINAL_PRODUCT_MASTER_CATEGORIES,
   ...CORE_AFTER_FP,
 ]

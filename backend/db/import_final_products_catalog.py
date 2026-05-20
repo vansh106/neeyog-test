@@ -1,8 +1,8 @@
 """Load ``docs/Final_Products/*.xlsx`` into ``catalog_fp_*`` tables.
 
 Clears prior rows for ``ACTIVE_CLIENT`` on:
-  ``catalog_fp_butterfly_all_products``, ``catalog_fp_ball_flush``, and every
-  final-product sheet table (Mascon / Needle / NRV / Safety / Sampling).
+  ``catalog_fp_butterfly_all_products`` and every final-product sheet table
+  (Mascon / Needle / NRV / Safety / Sampling / Fittings / etc.).
 
 Does **not** touch operator, SOV, limit switch box, brackets, or positioner.
 
@@ -29,7 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from core.config import get_settings  # noqa: E402
 from core.database import async_session_factory, init_db  # noqa: E402
 from db.final_product_models import FINAL_PRODUCT_SHEET_MODELS  # noqa: E402
-from db.sheet_models import CatalogBallValveRow, CatalogButterflyValveRow  # noqa: E402
+from db.sheet_models import CatalogButterflyValveRow  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -41,18 +41,6 @@ def _specs() -> list[tuple[type, str, str, dict[str, Any]]]:
 
     return [
         (CatalogButterflyValveRow, "Butterfly_Valve_All_Combinations.xlsx", "All Products", {}),
-        (
-            CatalogBallValveRow,
-            "Flush_Bottom_Valve_Products - F.xlsx",
-            "FBV – Ball Type",
-            {"product_sheet": "FBV – Ball Type"},
-        ),
-        (
-            CatalogBallValveRow,
-            "Flush_Bottom_Valve_Products - F.xlsx",
-            "FBV – Y Type",
-            {"product_sheet": "FBV – Y Type"},
-        ),
         (fpm.CatalogFpMasconManualTcEndRow, "Mascon_Valve_Products (1) - F (1).xlsx", "Manual – TC End", {}),
         (fpm.CatalogFpMasconManualButtWeldRow, "Mascon_Valve_Products (1) - F (1).xlsx", "Manual – Butt Weld", {}),
         (fpm.CatalogFpMasconPneumaticTcEndRow, "Mascon_Valve_Products (1) - F (1).xlsx", "Pneumatic – TC End", {}),
@@ -91,6 +79,18 @@ def _specs() -> list[tuple[type, str, str, dict[str, Any]]]:
         (fpm.CatalogFpFittingsDinNut11851Row, "Fittings_Products.xlsx", "DIN Nut 11851", {}),
         (fpm.CatalogFpFittingsSwivelNutRow, "Fittings_Products.xlsx", "Swivel Nut", {}),
         (fpm.CatalogFpFittingsFlange150Row, "Fittings_Products.xlsx", "Flange #150", {}),
+        (fpm.CatalogFpBallValveCasco1PieceMultiEndRow, "Ball_Valve_Products.xlsx", "Casco – 1-Piece (Multi-End)", {}),
+        (fpm.CatalogFpBallValveCasco1PieceFlangedRow, "Ball_Valve_Products.xlsx", "Casco – 1-Piece (Flanged)", {}),
+        (fpm.CatalogFpBallValveCasco2PieceRow, "Ball_Valve_Products.xlsx", "Casco – 2-Piece", {}),
+        (fpm.CatalogFpBallValveCasco3PieceRow, "Ball_Valve_Products.xlsx", "Casco – 3-Piece", {}),
+        (fpm.CatalogFpBallValveCasco3PieceExtStemRow, "Ball_Valve_Products.xlsx", "Casco – 3-Piece Ext. Stem", {}),
+        (fpm.CatalogFpBallValveCasco3Piece3WayLPortRow, "Ball_Valve_Products.xlsx", "Casco – 3-Piece 3-Way L-Port", {}),
+        (fpm.CatalogFpBallValveUnison1PieceMultiEndRow, "Ball_Valve_Products.xlsx", "Unison – 1-Piece (Multi-End)", {}),
+        (fpm.CatalogFpBallValveUnison2PieceIsoPadsRow, "Ball_Valve_Products.xlsx", "Unison – 2-Piece ISO Pads", {}),
+        (fpm.CatalogFpBallValveUnison3PieceRow, "Ball_Valve_Products.xlsx", "Unison – 3-Piece", {}),
+        (fpm.CatalogFpBallValveUnison3Piece3WayLPortRow, "Ball_Valve_Products.xlsx", "Unison – 3-Piece 3-Way L-Port", {}),
+        (fpm.CatalogFpFbvBallTypeRow, "Flush_Bottom_Valve_Products - F (1).xlsx", "FBV – Ball Type", {}),
+        (fpm.CatalogFpFbvYTypeRow, "Flush_Bottom_Valve_Products - F (1).xlsx", "FBV – Y Type", {}),
     ]
 
 
@@ -199,7 +199,7 @@ def _normalize_valve_size(raw: object | None) -> str | None:
 
 
 async def _clear_final_tables(session: Any, client_id: str) -> None:
-    models: list[type] = [CatalogButterflyValveRow, CatalogBallValveRow]
+    models: list[type] = [CatalogButterflyValveRow]
     models += [m for _, m in FINAL_PRODUCT_SHEET_MODELS]
     seen: set[type] = set()
     for model in models:
@@ -259,7 +259,7 @@ async def _import_all(dry_run: bool) -> None:
                     raw = data_row[col_idx]
                     if field == "sr_no":
                         kwargs[field] = _cell_float(raw)
-                    elif field == "valve_size" and model in (CatalogButterflyValveRow, CatalogBallValveRow):
+                    elif field == "valve_size" and model is CatalogButterflyValveRow:
                         kwargs[field] = _normalize_valve_size(raw) or _cell_str(raw)
                     else:
                         kwargs[field] = _cell_str(raw)

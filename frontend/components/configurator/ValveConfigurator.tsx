@@ -101,7 +101,7 @@ type ComponentPricingEntry = {
 
 type ComponentPricingState = Record<string, ComponentPricingEntry>
 const UNIT_OPTIONS = ['Nos', 'Pcs', 'Set', 'Pair', 'Meter', 'Kg'] as const
-const ADDON_ENABLED_CATEGORIES = new Set(['butterfly_valve', 'ball_valve'])
+const ADDON_ENABLED_CATEGORIES = new Set(['butterfly_valve'])
 
 function emptySpecs(): ValveSpecSelections {
   return { catalog_category: null, field_values: {} }
@@ -111,7 +111,6 @@ function inferCatalogCategoryFromValve(v: ValveProduct): string | null {
   if (v.catalog_category) return v.catalog_category
   const t = (v.type || '').toLowerCase()
   if (t.includes('butterfly')) return 'butterfly_valve'
-  if (t.includes('ball')) return 'ball_valve'
   return null
 }
 

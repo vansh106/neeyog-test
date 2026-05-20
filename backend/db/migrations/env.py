@@ -22,7 +22,6 @@ from db.models import (  # noqa: F401
     UserPermission,
 )
 from db.sheet_models import (  # noqa: F401
-    CatalogBallValveRow,
     CatalogBracketsCouplerRow,
     CatalogButterflyValveRow,
     CatalogLimitSwitchRow,

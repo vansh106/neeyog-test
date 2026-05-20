@@ -119,10 +119,7 @@ async def step4_verify_data() -> None:
 
     try:
         from db.models import Enquiry, Quotation, User  # noqa: E402
-        from db.sheet_models import (  # noqa: E402
-            CatalogBallValveRow,
-            CatalogButterflyValveRow,
-        )
+        from db.sheet_models import CatalogButterflyValveRow  # noqa: E402
 
         async with async_session_factory() as db:
             users = await db.scalar(select(func.count(User.id)))
@@ -131,13 +128,11 @@ async def step4_verify_data() -> None:
             butterfly = await db.scalar(
                 select(func.count(CatalogButterflyValveRow.row_id))
             )
-            ball = await db.scalar(select(func.count(CatalogBallValveRow.row_id)))
 
         print(f"  Users:          {users}")
         print(f"  Enquiries:      {enquiries}")
         print(f"  Quotations:     {quotations}")
         print(f"  Butterfly rows: {butterfly}")
-        print(f"  Ball rows:      {ball}")
         print("  ✓ Data verified")
     except Exception as exc:
         print(f"  ⚠ Could not verify data: {exc}")

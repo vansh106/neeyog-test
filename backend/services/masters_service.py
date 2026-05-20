@@ -23,7 +23,6 @@ from db.final_product_models import (
     FinalProductSheetMarker,
 )
 from db.sheet_models import (
-    CatalogBallValveRow,
     CatalogBracketsCouplerRow,
     CatalogButterflyValveRow,
     CatalogLimitSwitchRow,
@@ -35,7 +34,6 @@ from db.sheet_models import (
 
 SHEET_MODEL_BY_KEY: dict[str, type] = {
     "butterfly_valve": CatalogButterflyValveRow,
-    "ball_valve": CatalogBallValveRow,
     "operator": CatalogOperatorRow,
     "brackets_coupler": CatalogBracketsCouplerRow,
     "sov": CatalogSovRow,
@@ -46,7 +44,6 @@ SHEET_MODEL_BY_KEY.update(dict(FINAL_PRODUCT_SHEET_MODELS))
 
 # Human-readable names for manual entry / masters UI (keys stay stable for APIs).
 CATEGORY_LABEL_BY_KEY: dict[str, str] = {
-    "ball_valve": "Ball valve",
     "butterfly_valve": "Butterfly valve",
     "operator": "Operator",
     "brackets_coupler": "Brackets and couplers",
@@ -59,7 +56,6 @@ CATEGORY_LABEL_BY_KEY: dict[str, str] = {
 # Distinct-value column used like a sub-category in the Masters UI.
 _SUBCATEGORY_FIELD: dict[str, str] = {
     "butterfly_valve": "variant_type",
-    "ball_valve": "variant_type",
     "operator": "operator_for",
     "brackets_coupler": "bracket_operator",
     "sov": "variant_type",
@@ -85,19 +81,6 @@ CASCADE_STEPS: dict[str, list[str]] = {
         "pressure",
         "body",
         "ball_disc",
-        "seat",
-    ],
-    "ball_valve": [
-        "variant_type",
-        "product_sheet",
-        "construction",
-        "valve_size",
-        "bore_type",
-        "end_connection",
-        "pressure",
-        "body",
-        "ball",
-        "stem",
         "seat",
     ],
     "operator": ["operator_for", "construct", "size_text", "model_name"],
@@ -271,24 +254,6 @@ def catalog_row_to_size_option(category: str, row: object) -> dict:
         material = " / ".join(
             x
             for x in [row.body, row.ball_disc, getattr(row, "stem", None), row.seat, getattr(row, "fasteners", None)]
-            if x
-        )
-    elif isinstance(row, CatalogBallValveRow):
-        name = " ".join(
-            x
-            for x in [
-                (row.variant_type or "").strip(),
-                (row.construction or "").strip(),
-                (row.valve_size or "").strip(),
-            ]
-            if x
-        )
-        if getattr(row, "product_sheet", None):
-            name = f"{name} ({row.product_sheet})".strip()
-        size_mm, size_inch = _parse_size_to_mm_inch(row.valve_size)
-        material = " / ".join(
-            x
-            for x in [row.body, row.ball, getattr(row, "stem", None), row.seat, getattr(row, "fasteners", None)]
             if x
         )
     elif isinstance(row, FinalProductSheetMarker):
@@ -590,7 +555,6 @@ async def list_products(
     # immediately sees all categories (not only the biggest one).
     categories = [
         "butterfly_valve",
-        "ball_valve",
         "operator",
         "brackets_coupler",
         "sov",
