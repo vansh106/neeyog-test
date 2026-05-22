@@ -55,10 +55,15 @@ _CONFIGURATOR_EXCLUDED_CATEGORIES = frozenset(
 
 
 def list_valve_catalog_categories() -> list[dict[str, str]]:
-    """Stable API keys + labels for the manual valve picker (step 1)."""
+    """Stable API keys + labels for the manual valve picker (step 1).
+
+    Fittings (``fp_fittings_*``) are excluded — they are add-ons after qualifying hose sheets.
+    """
     out: list[dict[str, str]] = []
     for key, _model in product_master.SHEET_TABLES:
         if key in _CONFIGURATOR_EXCLUDED_CATEGORIES:
+            continue
+        if key.startswith("fp_fittings_"):
             continue
         label = masters_service.CATEGORY_LABEL_BY_KEY.get(key, key.replace("_", " ").title())
         out.append({"key": key, "label": label})

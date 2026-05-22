@@ -65,6 +65,21 @@ export function useEnquiries(params?: {
   })
 }
 
+/** One fetch for client-side dense filters on the enquiries listing page (API max limit 500). */
+export function useEnquiriesListingDataset(limit: number = 500, companyId?: string) {
+  return useQuery<EnquiryListItem[]>({
+    queryKey: ['enquiries', 'listing_dataset', limit, companyId ?? ''],
+    queryFn: () =>
+      enquiriesApi.listEnquiries<EnquiryListItem[]>({
+        limit,
+        ...(companyId ? { company_id: companyId } : {}),
+      }),
+    staleTime: 60_000,
+    refetchInterval: 30_000,
+    retry: 1,
+  })
+}
+
 export function useEnquiry(id: string) {
   return useQuery<EnquiryDetail>({
     queryKey: ['enquiry', id],

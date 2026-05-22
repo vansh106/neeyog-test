@@ -355,8 +355,10 @@ async def create_branch_employee(
     branch_id: uuid.UUID,
     *,
     full_name: str,
-    email: str | None = None,
+    address_code: str | None = None,
     phone: str | None = None,
+    email: str | None = None,
+    department: str | None = None,
     designation: str | None = None,
     db: AsyncSession,
 ) -> ClientEmployee:
@@ -366,9 +368,11 @@ async def create_branch_employee(
     em = (email or "").strip().lower() or None
     emp = ClientEmployee(
         branch_id=branch_id,
+        address_code=(address_code or "").strip() or None,
         full_name=name,
-        email=em,
         phone=(phone or "").strip() or None,
+        email=em,
+        department=(department or "").strip() or None,
         designation=(designation or "").strip() or None,
         is_active=True,
     )

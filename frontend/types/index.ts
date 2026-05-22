@@ -10,6 +10,12 @@ export interface EnquiryListItem {
   /** User who created the enquiry (upload / manual); omitted for older rows or inbox sync. */
   created_by_name?: string | null
   erp_export_available?: boolean
+  /** Inferred from parsed line items (listing filters). */
+  category?: string | null
+  items_search_text?: string
+  is_non_standard_customer?: boolean
+  series?: string | null
+  is_sales_enquiry?: boolean
 }
 
 export interface EnquiryResponse {
@@ -114,9 +120,11 @@ export interface QuotationPdfDisplayOverrides {
 
 export interface QuotationClientEmployee {
   id: string
+  address_code?: string | null
   full_name: string
-  email?: string | null
   phone?: string | null
+  email?: string | null
+  department?: string | null
   designation?: string | null
 }
 
@@ -274,11 +282,22 @@ export const CLIENT_INDUSTRY_OPTIONS = [
 export interface ClientEmployeeResponse {
   id: string
   branch_id: string
+  address_code?: string | null
   full_name: string
-  email?: string | null
   phone?: string | null
+  email?: string | null
+  department?: string | null
   designation?: string | null
   is_active?: boolean
+}
+
+export interface CreateClientEmployeePayload {
+  address_code?: string | null
+  full_name: string
+  phone?: string | null
+  email?: string | null
+  department?: string | null
+  designation?: string | null
 }
 
 export interface BranchResponse {
@@ -421,7 +440,14 @@ export interface ManualEnquiryForm {
   /** DB client_employees.id — quote is for this contact (must belong to selected branch). */
   clientEmployeeId?: string | null
   /** When creating a new company, optional extra contact stored as branch employee and used for the quote. */
-  newClientEmployee?: { fullName: string; email?: string | null }
+  newClientEmployee?: {
+    addressCode?: string | null
+    fullName: string
+    phone?: string | null
+    email?: string | null
+    department?: string | null
+    designation?: string | null
+  }
   newClient: {
     company_name: string
     gst_number: string
@@ -581,9 +607,18 @@ export interface ValveProduct {
   variant_type?: string | null
   construction: string | null
   valve_size: string | null
+  size_id_mm?: string | null
+  size_mm?: string | null
+  end_connection_1?: string | null
+  end_connection_2?: string | null
+  hose_nipple_moc?: string | null
+  hose_cap_moc?: string | null
   bore_type: string | null
   end_connection: string | null
   pressure: string | null
+  rating?: string | null
+  temperature_range?: string | null
+  wall_thickness?: string | null
   body: string | null
   ball_disc?: string | null
   ball?: string | null
@@ -665,6 +700,8 @@ export interface ValveSpecSelections {
 export interface AssembledProduct {
   id: string
   valve: ValveProduct | null
+  /** Fitting add-on after qualifying hose selection (``fp_hose_tuder`` / thunder / PVC nylon). */
+  fitting?: ValveProduct | null
   operator_key: OperatorKey | null
   operator_model: OperatorModel | null
   /** Supplier selected for this assembled product (per-product supplier selection). */

@@ -57,6 +57,11 @@ class EnquiryListItem(BaseModel):
     created_at: str
     created_by_name: str | None = None
     erp_export_available: bool = False
+    category: str | None = None
+    items_search_text: str = ""
+    is_non_standard_customer: bool = False
+    series: str | None = None
+    is_sales_enquiry: bool = False
 
 
 class ManualSelectedProduct(BaseModel):
@@ -111,8 +116,12 @@ class ManualNewClientEmployeeRequest(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
 
+    address_code: str | None = Field(None, alias="addressCode")
     full_name: str = Field(..., alias="fullName")
+    phone: str | None = None
     email: str | None = None
+    department: str | None = None
+    designation: str | None = None
 
 
 class ManualDropdownProcessRequest(BaseModel):
@@ -193,6 +202,79 @@ def _enquiry_client_org_name(e: Enquiry) -> str:
             if v is not None and str(v).strip():
                 return str(v).strip()
     return ""
+
+
+def _enquiry_list_category(e: Enquiry) -> str | None:
+    parsed = e.parsed_data if isinstance(e.parsed_data, dict) else {}
+    products = parsed.get("products_requested", []) if isinstance(parsed, dict) else []
+    if not isinstance(products, list) or not products:
+        return None
+    first = products[0] if products else {}
+    if not isinstance(first, dict):
+        return None
+    cat = str(first.get("category") or "").strip()
+    if cat:
+        return cat
+    desc_txt = str(first.get("product_description", "") or "").lower()
+    if "hose" in desc_txt:
+        return "Hose"
+    if "valve" in desc_txt or "butterfly" in desc_txt:
+        return "Valve"
+    if "fitting" in desc_txt:
+        return "Fitting"
+    desc = str(first.get("product_description", "") or "").strip()
+    return desc[:40] if desc else None
+
+
+def _enquiry_items_search_text(e: Enquiry) -> str:
+    parts: list[str] = []
+    parsed = e.parsed_data if isinstance(e.parsed_data, dict) else {}
+    products = parsed.get("products_requested", []) if isinstance(parsed, dict) else []
+    if isinstance(products, list):
+        for p in products:
+            if not isinstance(p, dict):
+                continue
+            for key in (
+                "product_description",
+                "description",
+                "item_no",
+                "item_number",
+                "catalog_part",
+                "part_no",
+                "product_name",
+                "category",
+            ):
+                v = p.get(key)
+                if v is not None and str(v).strip():
+                    parts.append(str(v).strip())
+    matched = e.matched_products
+    if isinstance(matched, list):
+        for m in matched:
+            if isinstance(m, dict):
+                for key in ("name", "product_name", "description", "display_label", "catalog_table"):
+                    v = m.get(key)
+                    if v is not None and str(v).strip():
+                        parts.append(str(v).strip())
+    elif isinstance(matched, dict):
+        for key in ("name", "product_name", "description"):
+            v = matched.get(key)
+            if v is not None and str(v).strip():
+                parts.append(str(v).strip())
+    eno = (e.enquiry_number or "").strip()
+    if eno:
+        parts.append(eno)
+    return " ".join(parts).lower()
+
+
+def _enquiry_series(e: Enquiry) -> str | None:
+    eno = (e.enquiry_number or "").strip()
+    if len(eno) >= 2 and eno[:2].isdigit():
+        return eno[:2]
+    return None
+
+
+def _enquiry_is_sales(e: Enquiry) -> bool:
+    return (e.input_type or "").lower() in ("manual", "manual_dropdown")
 
 
 async def handle_upload_email(
@@ -311,6 +393,11 @@ async def handle_list_enquiries(
                 created_at=e.created_at.isoformat() if e.created_at else "",
                 created_by_name=(e.created_by_name or "").strip() or None,
                 erp_export_available=bool(getattr(e, "erp_export_path", None)),
+                category=_enquiry_list_category(e),
+                items_search_text=_enquiry_items_search_text(e),
+                is_non_standard_customer=e.company_id is None,
+                series=_enquiry_series(e),
+                is_sales_enquiry=_enquiry_is_sales(e),
             )
             for e in enquiries
         ]

@@ -215,8 +215,8 @@ export default function MastersEditor({ initialCategory }: { initialCategory?: s
   const supplierPriceByRowId = useMemo(() => {
     const m = new Map<string, SupplierPriceRow>()
     for (const r of supplierPrices ?? []) {
-      if (!r?.catalog_row_id) continue
-      m.set(String(r.catalog_row_id), r)
+      const id = String(r.catalog_row_id ?? '').trim().toLowerCase()
+      if (id) m.set(id, r)
     }
     return m
   }, [supplierPrices])
@@ -445,9 +445,10 @@ export default function MastersEditor({ initialCategory }: { initialCategory?: s
                 </tr>
               ) : (
                 filteredRows.items.map((row, idx) => {
-                  const rid = String((row as any).row_id ?? idx)
+                  const rid = String((row as Record<string, unknown>).row_id ?? idx).trim()
+                  const ridKey = rid.toLowerCase()
                   const isEditing = editingRowId === rid
-                  const supplierPrice = supplierPriceByRowId.get(rid) ?? null
+                  const supplierPrice = supplierPriceByRowId.get(ridKey) ?? null
                   const currentPrice = supplierPrice?.list_price_inr ?? null
 
                   return (

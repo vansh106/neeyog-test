@@ -74,8 +74,11 @@ export default function ClientsTab() {
   const [employeesLoading, setEmployeesLoading] = useState(false)
   const [contactSaving, setContactSaving] = useState(false)
   const [contactErr, setContactErr] = useState<string | null>(null)
+  const [newContactAddressCode, setNewContactAddressCode] = useState('')
   const [newContactName, setNewContactName] = useState('')
+  const [newContactPhone, setNewContactPhone] = useState('')
   const [newContactEmail, setNewContactEmail] = useState('')
+  const [newContactDepartment, setNewContactDepartment] = useState('')
   const [newContactDesignation, setNewContactDesignation] = useState('')
 
   const loadList = useCallback(async () => {
@@ -346,14 +349,20 @@ export default function ClientsTab() {
     setContactErr(null)
     try {
       await clientsApi.createBranchEmployee(detail.id, selectedBranchId, {
+        address_code: newContactAddressCode.trim() || undefined,
         full_name: name,
+        phone: newContactPhone.trim() || undefined,
         email: email || undefined,
+        department: newContactDepartment.trim() || undefined,
         designation: newContactDesignation.trim() || undefined,
       })
       const rows = await clientsApi.listBranchEmployees(detail.id, selectedBranchId)
       setBranchEmployees(rows)
+      setNewContactAddressCode('')
       setNewContactName('')
+      setNewContactPhone('')
       setNewContactEmail('')
+      setNewContactDepartment('')
       setNewContactDesignation('')
     } catch (e: unknown) {
       setContactErr(e instanceof Error ? e.message : 'Could not save contact person')
@@ -605,7 +614,15 @@ export default function ClientsTab() {
                             <li key={emp.id} className="flex flex-col gap-0.5 px-3 py-2.5 text-[13px]">
                               <span className="font-medium text-gray-900">{emp.full_name}</span>
                               <span className="text-surface-muted">
-                                {[emp.designation, emp.email, emp.phone].filter(Boolean).join(' · ') || '—'}
+                                {[
+                                  emp.address_code ? `Code: ${emp.address_code}` : null,
+                                  emp.department,
+                                  emp.designation,
+                                  emp.phone ? `Tel: ${emp.phone}` : null,
+                                  emp.email,
+                                ]
+                                  .filter(Boolean)
+                                  .join(' · ') || '—'}
                               </span>
                             </li>
                           ))}
@@ -615,22 +632,40 @@ export default function ClientsTab() {
                         <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-[#8A9488]">
                           Add contact person
                         </p>
-                        <div className="grid gap-2 sm:grid-cols-3">
+                        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                           <Input
-                            placeholder="Full name *"
+                            placeholder="Address Code"
+                            value={newContactAddressCode}
+                            onChange={(e) => setNewContactAddressCode(e.target.value)}
+                            className="h-9"
+                          />
+                          <Input
+                            placeholder="Person Name *"
                             value={newContactName}
                             onChange={(e) => setNewContactName(e.target.value)}
                             className="h-9"
                           />
                           <Input
-                            placeholder="Email (optional)"
+                            placeholder="Contact No."
+                            value={newContactPhone}
+                            onChange={(e) => setNewContactPhone(e.target.value)}
+                            className="h-9"
+                          />
+                          <Input
+                            placeholder="Email"
                             type="email"
                             value={newContactEmail}
                             onChange={(e) => setNewContactEmail(e.target.value)}
                             className="h-9"
                           />
                           <Input
-                            placeholder="Designation (optional)"
+                            placeholder="Department"
+                            value={newContactDepartment}
+                            onChange={(e) => setNewContactDepartment(e.target.value)}
+                            className="h-9"
+                          />
+                          <Input
+                            placeholder="Designation"
                             value={newContactDesignation}
                             onChange={(e) => setNewContactDesignation(e.target.value)}
                             className="h-9"

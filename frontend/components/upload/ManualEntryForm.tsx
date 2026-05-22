@@ -158,6 +158,8 @@ function buildEmailText(
   let phone = ''
   let email = ''
   let address = ''
+  let address_code = ''
+  let department = ''
 
   if (form.clientMode === 'existing' && existingCompany && existingBranch) {
     company_name = existingCompany.company_name
@@ -176,6 +178,8 @@ function buildEmailText(
       designation = quoteEmployee.designation || ''
       phone = quoteEmployee.phone || phone
       email = quoteEmployee.email || email
+      address_code = quoteEmployee.address_code || ''
+      department = quoteEmployee.department || ''
     }
   } else if (form.clientMode === 'new') {
     const nc = form.newClient
@@ -193,7 +197,11 @@ function buildEmailText(
     const ne = form.newClientEmployee
     if (ne?.fullName?.trim()) {
       contact_name = ne.fullName.trim()
+      if (ne.phone?.trim()) phone = ne.phone.trim()
       if (ne.email?.trim()) email = ne.email.trim()
+      if (ne.designation?.trim()) designation = ne.designation.trim()
+      address_code = ne.addressCode?.trim() || ''
+      department = ne.department?.trim() || ''
     }
   }
 
@@ -209,6 +217,8 @@ function buildEmailText(
     lines.push(`Industry: ${industry}`)
   }
   if (contact_name) lines.push(`Contact: ${contact_name}`)
+  if (address_code) lines.push(`Address Code: ${address_code}`)
+  if (department) lines.push(`Department: ${department}`)
   if (designation) lines.push(`Designation: ${designation}`)
   if (phone) lines.push(`Phone: ${phone}`)
   if (email) lines.push(`Email: ${email}`)
@@ -397,12 +407,20 @@ export default function ManualEntryForm({
   const [branchEmployees, setBranchEmployees] = useState<ClientEmployeeResponse[]>([])
   const [employeesLoading, setEmployeesLoading] = useState(false)
   const [selectedClientEmployeeId, setSelectedClientEmployeeId] = useState<string | null>(null)
+  const [inlineNewEmployeeAddressCode, setInlineNewEmployeeAddressCode] = useState('')
   const [inlineNewEmployeeName, setInlineNewEmployeeName] = useState('')
+  const [inlineNewEmployeePhone, setInlineNewEmployeePhone] = useState('')
   const [inlineNewEmployeeEmail, setInlineNewEmployeeEmail] = useState('')
+  const [inlineNewEmployeeDepartment, setInlineNewEmployeeDepartment] = useState('')
+  const [inlineNewEmployeeDesignation, setInlineNewEmployeeDesignation] = useState('')
   const [addEmployeeSaving, setAddEmployeeSaving] = useState(false)
   const [addEmployeeErr, setAddEmployeeErr] = useState<string | null>(null)
+  const [newClientQuoteEmployeeAddressCode, setNewClientQuoteEmployeeAddressCode] = useState('')
   const [newClientQuoteEmployeeName, setNewClientQuoteEmployeeName] = useState('')
+  const [newClientQuoteEmployeePhone, setNewClientQuoteEmployeePhone] = useState('')
   const [newClientQuoteEmployeeEmail, setNewClientQuoteEmployeeEmail] = useState('')
+  const [newClientQuoteEmployeeDepartment, setNewClientQuoteEmployeeDepartment] = useState('')
+  const [newClientQuoteEmployeeDesignation, setNewClientQuoteEmployeeDesignation] = useState('')
 
   const [suppliers, setSuppliers] = useState<SupplierResponse[]>([])
   const [productCalcs, setProductCalcs] = useState<ProductPricingCalc[]>([])
@@ -844,8 +862,12 @@ export default function ManualEntryForm({
     const nqName = newClientQuoteEmployeeName.trim()
     if (clientMode === 'new' && nqName) {
       form.newClientEmployee = {
+        addressCode: newClientQuoteEmployeeAddressCode.trim() || undefined,
         fullName: nqName,
+        phone: newClientQuoteEmployeePhone.trim() || undefined,
         email: newClientQuoteEmployeeEmail.trim() || undefined,
+        department: newClientQuoteEmployeeDepartment.trim() || undefined,
+        designation: newClientQuoteEmployeeDesignation.trim() || undefined,
       }
     }
     const inlineEmpName = inlineNewEmployeeName.trim()
@@ -857,8 +879,12 @@ export default function ManualEntryForm({
       !selectedClientEmployeeId
     ) {
       form.newClientEmployee = {
+        addressCode: inlineNewEmployeeAddressCode.trim() || undefined,
         fullName: inlineEmpName,
+        phone: inlineNewEmployeePhone.trim() || undefined,
         email: inlineNewEmployeeEmail.trim() || undefined,
+        department: inlineNewEmployeeDepartment.trim() || undefined,
+        designation: inlineNewEmployeeDesignation.trim() || undefined,
       }
     }
     if (typeof window !== 'undefined' && typeof console !== 'undefined') {
@@ -1183,18 +1209,42 @@ export default function ManualEntryForm({
                         </Select>
                         <div className="rounded-md bg-surface-page p-3">
                           <p className="mb-2 text-[11px] font-medium text-gray-800">Add contact to this branch</p>
-                          <div className="grid gap-2 sm:grid-cols-2">
+                          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                            <Input
+                              value={inlineNewEmployeeAddressCode}
+                              onChange={(e) => setInlineNewEmployeeAddressCode(e.target.value)}
+                              placeholder="Address Code"
+                              className="h-9 text-[13px]"
+                            />
                             <Input
                               value={inlineNewEmployeeName}
                               onChange={(e) => setInlineNewEmployeeName(e.target.value)}
-                              placeholder="Full name *"
+                              placeholder="Person Name *"
+                              className="h-9 text-[13px]"
+                            />
+                            <Input
+                              value={inlineNewEmployeePhone}
+                              onChange={(e) => setInlineNewEmployeePhone(e.target.value)}
+                              placeholder="Contact No."
                               className="h-9 text-[13px]"
                             />
                             <Input
                               value={inlineNewEmployeeEmail}
                               onChange={(e) => setInlineNewEmployeeEmail(e.target.value)}
-                              placeholder="Email (optional)"
+                              placeholder="Email"
                               type="email"
+                              className="h-9 text-[13px]"
+                            />
+                            <Input
+                              value={inlineNewEmployeeDepartment}
+                              onChange={(e) => setInlineNewEmployeeDepartment(e.target.value)}
+                              placeholder="Department"
+                              className="h-9 text-[13px]"
+                            />
+                            <Input
+                              value={inlineNewEmployeeDesignation}
+                              onChange={(e) => setInlineNewEmployeeDesignation(e.target.value)}
+                              placeholder="Designation"
                               className="h-9 text-[13px]"
                             />
                           </div>
@@ -1219,8 +1269,12 @@ export default function ManualEntryForm({
                                   selectedCompany.id,
                                   selectedBranch.id,
                                   {
+                                    address_code: inlineNewEmployeeAddressCode.trim() || undefined,
                                     full_name: name,
+                                    phone: inlineNewEmployeePhone.trim() || undefined,
                                     email: inlineNewEmployeeEmail.trim() || undefined,
+                                    department: inlineNewEmployeeDepartment.trim() || undefined,
+                                    designation: inlineNewEmployeeDesignation.trim() || undefined,
                                   },
                                 )
                                 const rows = await clientsApi.listBranchEmployees(
@@ -1229,8 +1283,12 @@ export default function ManualEntryForm({
                                 )
                                 setBranchEmployees(rows)
                                 setSelectedClientEmployeeId(created.id)
+                                setInlineNewEmployeeAddressCode('')
                                 setInlineNewEmployeeName('')
+                                setInlineNewEmployeePhone('')
                                 setInlineNewEmployeeEmail('')
+                                setInlineNewEmployeeDepartment('')
+                                setInlineNewEmployeeDesignation('')
                               } catch (e) {
                                 setAddEmployeeErr(
                                   e instanceof Error ? e.message : 'Could not save contact — try again or use Process quote to save.',
@@ -1371,19 +1429,43 @@ export default function ManualEntryForm({
                     Saves as a branch contact person and uses them on this quotation. Leave blank to use the branch
                     contact above.
                   </p>
-                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                    <Input
+                      value={newClientQuoteEmployeeAddressCode}
+                      onChange={(e) => setNewClientQuoteEmployeeAddressCode(e.target.value)}
+                      className="h-9 text-[13px]"
+                      placeholder="Address Code"
+                    />
                     <Input
                       value={newClientQuoteEmployeeName}
                       onChange={(e) => setNewClientQuoteEmployeeName(e.target.value)}
                       className="h-9 text-[13px]"
-                      placeholder="Employee full name"
+                      placeholder="Person Name"
+                    />
+                    <Input
+                      value={newClientQuoteEmployeePhone}
+                      onChange={(e) => setNewClientQuoteEmployeePhone(e.target.value)}
+                      className="h-9 text-[13px]"
+                      placeholder="Contact No."
                     />
                     <Input
                       value={newClientQuoteEmployeeEmail}
                       onChange={(e) => setNewClientQuoteEmployeeEmail(e.target.value)}
                       className="h-9 text-[13px]"
-                      placeholder="Email (optional)"
+                      placeholder="Email"
                       type="email"
+                    />
+                    <Input
+                      value={newClientQuoteEmployeeDepartment}
+                      onChange={(e) => setNewClientQuoteEmployeeDepartment(e.target.value)}
+                      className="h-9 text-[13px]"
+                      placeholder="Department"
+                    />
+                    <Input
+                      value={newClientQuoteEmployeeDesignation}
+                      onChange={(e) => setNewClientQuoteEmployeeDesignation(e.target.value)}
+                      className="h-9 text-[13px]"
+                      placeholder="Designation"
                     />
                   </div>
                 </div>

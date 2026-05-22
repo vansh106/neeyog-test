@@ -81,17 +81,21 @@ class AddBranchRequest(BaseModel):
 class ClientEmployeeResponse(BaseModel):
     id: str
     branch_id: str
+    address_code: str | None = None
     full_name: str
-    email: str | None = None
     phone: str | None = None
+    email: str | None = None
+    department: str | None = None
     designation: str | None = None
     is_active: bool = True
 
 
 class CreateClientEmployeeRequest(BaseModel):
+    address_code: str | None = None
     full_name: str
-    email: str | None = None
     phone: str | None = None
+    email: str | None = None
+    department: str | None = None
     designation: str | None = None
 
 
@@ -162,9 +166,11 @@ def _employee_resp(e: ClientEmployee) -> ClientEmployeeResponse:
     return ClientEmployeeResponse(
         id=str(e.id),
         branch_id=str(e.branch_id),
+        address_code=e.address_code,
         full_name=e.full_name,
-        email=e.email,
         phone=e.phone,
+        email=e.email,
+        department=e.department,
         designation=e.designation,
         is_active=bool(e.is_active),
     )
@@ -207,8 +213,10 @@ async def handle_create_branch_employee(
         emp = await client_service.create_branch_employee(
             bid,
             full_name=body.full_name.strip(),
-            email=body.email,
+            address_code=body.address_code,
             phone=body.phone,
+            email=body.email,
+            department=body.department,
             designation=body.designation,
             db=db,
         )

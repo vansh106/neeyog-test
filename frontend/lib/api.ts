@@ -355,7 +355,7 @@ export const clientsApi = {
   createBranchEmployee: (
     companyId: string,
     branchId: string,
-    data: { full_name: string; email?: string | null; phone?: string | null; designation?: string | null },
+    data: import('@/types').CreateClientEmployeePayload,
   ) =>
     post<import('@/types').ClientEmployeeResponse>(
       `/api/clients/${companyId}/branches/${branchId}/employees`,

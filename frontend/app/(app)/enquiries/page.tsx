@@ -16,27 +16,22 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { useEnquiries, useQuotations } from '@/lib/queries'
+import EnquiryListingFilters from '@/components/enquiries/EnquiryListingFilters'
+import { useEnquiriesListingDataset, useQuotations } from '@/lib/queries'
 import { erpExportUrl } from '@/lib/api'
+import {
+  collectEnquiryFilterOptions,
+  defaultEnquiryListingDraft,
+  filterEnquiriesLocal,
+  INITIAL_APPLIED_ENQUIRY_FILTERS,
+  type EnquiryListingFilters,
+} from '@/lib/filterEnquiriesLocal'
 import { formatRelativeTime, cn, truncateId } from '@/lib/utils'
 import type { EnquiryListItem } from '@/types'
 
 type Pipeline = 'all' | 'complete' | 'incomplete' | 'pending' | 'failed'
 
 const PENDING_STATUSES = ['received', 'parsing', 'matching', 'quoting'] as const
-
-const STATUS_OPTIONS = [
-  { value: 'all', label: 'All statuses' },
-  { value: 'received', label: 'Received' },
-  { value: 'parsing', label: 'Parsing' },
-  { value: 'matching', label: 'Matching' },
-  { value: 'quoting', label: 'Quoting' },
-  { value: 'awaiting_info', label: 'Awaiting info' },
-  { value: 'pending_approval', label: 'Pending approval' },
-  { value: 'pending_human_review', label: 'Pending review' },
-  { value: 'approved', label: 'Approved' },
-  { value: 'failed', label: 'Failed' },
-]
 
 const FLOW_OPTIONS = [
   { value: 'all', label: 'All flows' },
@@ -46,21 +41,8 @@ const FLOW_OPTIONS = [
   { value: 'not_found', label: 'Not found' },
 ]
 
-function buildTableParams(
-  pipeline: Pipeline,
-  statusSelect: string,
-  flowSelect: string,
-): { status?: string; flow_type?: string; limit?: number } {
-  const p: { status?: string; flow_type?: string; limit?: number } = { limit: 200 }
-  if (statusSelect !== 'all') p.status = statusSelect
-  else if (pipeline === 'failed') p.status = 'failed'
-
-  if (flowSelect !== 'all') p.flow_type = flowSelect
-  else if (pipeline === 'complete') p.flow_type = 'complete'
-  else if (pipeline === 'incomplete') p.flow_type = 'incomplete'
-
-  return p
-}
+/** Backend validates `limit` ≤ 500 on GET /api/enquiries/ */
+const LISTING_FETCH_LIMIT = 500
 
 function TableSkeletonRows() {
   return (
@@ -101,49 +83,48 @@ export default function EnquiriesPage() {
   const searchParams = useSearchParams()
   const companyFilter = searchParams.get('company_id') || undefined
 
+  const [filterDraft, setFilterDraft] = useState<EnquiryListingFilters>(defaultEnquiryListingDraft)
+  const [appliedFilters, setAppliedFilters] =
+    useState<EnquiryListingFilters>(INITIAL_APPLIED_ENQUIRY_FILTERS)
+  const [showSearchOptions, setShowSearchOptions] = useState(false)
   const [pipeline, setPipeline] = useState<Pipeline>('all')
-  const [statusSelect, setStatusSelect] = useState('all')
   const [flowSelect, setFlowSelect] = useState('all')
 
-  const { data: countsData = [] } = useEnquiries({ limit: 500 })
+  const {
+    data: scopedRows = [],
+    isPending,
+    isError,
+    error,
+    refetch,
+  } = useEnquiriesListingDataset(LISTING_FETCH_LIMIT, companyFilter)
 
-  const tableParams = useMemo(
-    () => ({
-      ...buildTableParams(pipeline, statusSelect, flowSelect),
-      ...(companyFilter ? { company_id: companyFilter } : {}),
-    }),
-    [pipeline, statusSelect, flowSelect, companyFilter],
-  )
-
-  const { data: tableRaw, isPending } = useEnquiries(
-    pipeline === 'pending'
-      ? { limit: 300, ...(companyFilter ? { company_id: companyFilter } : {}) }
-      : tableParams,
-  )
+  const filterOptions = useMemo(() => collectEnquiryFilterOptions(scopedRows), [scopedRows])
 
   const rows = useMemo(() => {
-    let list = tableRaw ?? []
-    if (pipeline === 'pending') {
-      list = list.filter((e) =>
-        (PENDING_STATUSES as readonly string[]).includes(e.status),
-      )
-      if (statusSelect !== 'all') list = list.filter((e) => e.status === statusSelect)
-      if (flowSelect !== 'all') list = list.filter((e) => e.flow_type === flowSelect)
-    }
+    let list = filterEnquiriesLocal(scopedRows, appliedFilters)
+
+    if (pipeline === 'complete') list = list.filter((e) => e.flow_type === 'complete')
+    else if (pipeline === 'incomplete') list = list.filter((e) => e.flow_type === 'incomplete')
+    else if (pipeline === 'pending') {
+      list = list.filter((e) => (PENDING_STATUSES as readonly string[]).includes(e.status))
+    } else if (pipeline === 'failed') list = list.filter((e) => e.status === 'failed')
+
+    if (flowSelect !== 'all') list = list.filter((e) => e.flow_type === flowSelect)
+
     return list
-  }, [tableRaw, pipeline, statusSelect, flowSelect])
+  }, [scopedRows, appliedFilters, pipeline, flowSelect])
 
   const chipCounts = useMemo(
     () => ({
-      all: countsData.length,
-      complete: countsData.filter((e) => e.flow_type === 'complete').length,
-      incomplete: countsData.filter((e) => e.flow_type === 'incomplete').length,
-      pending: countsData.filter((e) =>
+      all: scopedRows.length,
+      complete: scopedRows.filter((e) => e.flow_type === 'complete').length,
+      incomplete: scopedRows.filter((e) => e.flow_type === 'incomplete').length,
+      pending: scopedRows.filter((e) =>
         (PENDING_STATUSES as readonly string[]).includes(e.status),
       ).length,
-      failed: countsData.filter((e) => e.status === 'failed').length,
+      failed: scopedRows.filter((e) => e.status === 'failed').length,
     }),
-    [countsData],
+    [scopedRows],
   )
 
   const { data: quotationRows = [] } = useQuotations({ limit: 100 })
@@ -164,80 +145,83 @@ export default function EnquiriesPage() {
     { key: 'failed', label: 'Failed' },
   ]
 
-  const totalBadge = countsData.length
+  const searchOptionsPanel = (
+    <div className="flex flex-wrap items-center gap-3">
+      <div className="flex flex-wrap gap-2">
+        {chips.map(({ key, label }) => {
+          const active = pipeline === key
+          const count = chipCounts[key]
+          return (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setPipeline(key)}
+              className={cn(
+                'rounded-full px-3 py-1 text-[12px] font-medium transition-colors',
+                active
+                  ? 'bg-brand-green-500 text-white'
+                  : 'border border-[#E2E6DC] bg-white text-gray-600',
+              )}
+            >
+              {label}: {count}
+            </button>
+          )
+        })}
+      </div>
+      <div className="min-w-[140px]">
+        <span className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-[#8A9488]">
+          Flow type
+        </span>
+        <Select value={flowSelect} onValueChange={(v) => setFlowSelect(v ?? 'all')}>
+          <SelectTrigger className="h-8 w-full border-[#E2E6DC] bg-white text-[12px]">
+            <SelectValue placeholder="Flow" />
+          </SelectTrigger>
+          <SelectContent>
+            {FLOW_OPTIONS.map((o) => (
+              <SelectItem key={o.value} value={o.value}>
+                {o.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+    </div>
+  )
 
   return (
     <PageShell
       title="Enquiries"
       actions={
         <span className="rounded-full bg-brand-green-500/15 px-2.5 py-1 text-[12px] font-semibold text-brand-green-600 tabular-nums">
-          {totalBadge}
+          {rows.length}
+          {rows.length !== scopedRows.length ? ` / ${scopedRows.length}` : ''}
         </span>
       }
     >
-      <div className="space-y-4">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex flex-wrap gap-2">
-            {chips.map(({ key, label }) => {
-              const active = pipeline === key
-              const count = chipCounts[key]
-              return (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() => setPipeline(key)}
-                  className={cn(
-                    'rounded-full px-3 py-1 text-[12px] font-medium transition-colors',
-                    active
-                      ? 'bg-brand-green-500 text-white'
-                      : 'border border-[#E2E6DC] bg-white text-gray-600',
-                  )}
-                >
-                  {label}: {count}
-                </button>
-              )
-            })}
+      <div className="space-y-3">
+        {isError ? (
+          <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-[13px] text-red-800">
+            Could not load enquiries
+            {error instanceof Error && error.message ? `: ${error.message}` : ''}.{' '}
+            <button
+              type="button"
+              className="font-medium underline"
+              onClick={() => void refetch()}
+            >
+              Retry
+            </button>
           </div>
-
-          <div className="flex flex-wrap gap-3">
-            <div className="space-y-1.5 min-w-[160px]">
-              <span className="text-[11px] font-medium text-surface-muted">Status</span>
-              <Select
-                value={statusSelect}
-                onValueChange={(v) => setStatusSelect(v ?? 'all')}
-              >
-                <SelectTrigger className="h-9 w-full rounded-lg border border-[#E2E6DC] bg-white text-[13px]">
-                  <SelectValue placeholder="Status" />
-                </SelectTrigger>
-                <SelectContent>
-                  {STATUS_OPTIONS.map((o) => (
-                    <SelectItem key={o.value} value={o.value}>
-                      {o.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1.5 min-w-[160px]">
-              <span className="text-[11px] font-medium text-surface-muted">Flow type</span>
-              <Select
-                value={flowSelect}
-                onValueChange={(v) => setFlowSelect(v ?? 'all')}
-              >
-                <SelectTrigger className="h-9 w-full rounded-lg border border-[#E2E6DC] bg-white text-[13px]">
-                  <SelectValue placeholder="Flow" />
-                </SelectTrigger>
-                <SelectContent>
-                  {FLOW_OPTIONS.map((o) => (
-                    <SelectItem key={o.value} value={o.value}>
-                      {o.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-        </div>
+        ) : null}
+        <EnquiryListingFilters
+          draft={filterDraft}
+          onDraftChange={setFilterDraft}
+          categoryOptions={filterOptions.categories}
+          seriesOptions={filterOptions.series}
+          showSearchOptions={showSearchOptions}
+          onToggleSearchOptions={() => setShowSearchOptions((v) => !v)}
+          onSearch={() => setAppliedFilters({ ...filterDraft })}
+          extraOptions={searchOptionsPanel}
+        />
 
         <div className="overflow-hidden rounded-xl border border-surface-border bg-white shadow-sm">
           <div className="overflow-x-auto">
@@ -262,7 +246,11 @@ export default function EnquiriesPage() {
                       <EmptyState
                         icon={Inbox}
                         title="No enquiries found"
-                        description="Try changing the filter or upload a new email"
+                        description={
+                          scopedRows.length > 0
+                            ? 'No rows match the current filters — clear date checkboxes or click Search with broader criteria'
+                            : 'No enquiries in the system yet, or adjust filters and click Search'
+                        }
                       />
                     </td>
                   </tr>
@@ -295,7 +283,9 @@ export default function EnquiriesPage() {
                         </td>
                         <td className="px-4 py-3 align-top text-surface-muted">
                           {e.created_by_name ? (
-                            <span className="block text-[11px] leading-snug text-[#6B7568]">{e.created_by_name}</span>
+                            <span className="block text-[11px] leading-snug text-[#6B7568]">
+                              {e.created_by_name}
+                            </span>
                           ) : (
                             <span className="text-[11px] text-[#6B7568]">—</span>
                           )}

@@ -69,7 +69,8 @@ export default function MastersCategoryPage() {
   const supplierPriceByRowId = useMemo(() => {
     const map = new Map<string, SupplierPriceRow>()
     for (const r of supplierPrices) {
-      map.set(String(r.catalog_row_id), r)
+      const id = String(r.catalog_row_id ?? '').trim().toLowerCase()
+      if (id) map.set(id, r)
     }
     return map
   }, [supplierPrices])
@@ -234,8 +235,10 @@ export default function MastersCategoryPage() {
             ) : (
               <tbody>
                 {items.map((row, idx) => {
-                  const rowId = String((row as any).row_id ?? '')
-                  const priceRow = supplierPricingEnabled ? supplierPriceByRowId.get(rowId) : undefined
+                  const rowId = String((row as Record<string, unknown>).row_id ?? '').trim().toLowerCase()
+                  const priceRow = supplierPricingEnabled && rowId
+                    ? supplierPriceByRowId.get(rowId)
+                    : undefined
                   return (
                     <tr
                       key={rowId || String(idx)}

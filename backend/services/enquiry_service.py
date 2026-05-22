@@ -741,10 +741,18 @@ async def process_manual_dropdown(
             em_raw = new_emp_body.get("email")
             em_val = str(em_raw).strip() if em_raw is not None and str(em_raw).strip() else None
             if fn:
+                ph_raw = new_emp_body.get("phone")
+                dept_raw = new_emp_body.get("department")
+                des_raw = new_emp_body.get("designation")
+                ac_raw = new_emp_body.get("addressCode") or new_emp_body.get("address_code")
                 employee_for_quote = await create_branch_employee(
                     branch_id_uuid,
                     full_name=fn,
+                    address_code=str(ac_raw).strip() if ac_raw is not None and str(ac_raw).strip() else None,
+                    phone=str(ph_raw).strip() if ph_raw is not None and str(ph_raw).strip() else None,
                     email=em_val,
+                    department=str(dept_raw).strip() if dept_raw is not None and str(dept_raw).strip() else None,
+                    designation=str(des_raw).strip() if des_raw is not None and str(des_raw).strip() else None,
                     db=db,
                 )
         if employee_for_quote is None:
@@ -882,6 +890,10 @@ async def process_manual_dropdown(
     if employee_for_quote is not None:
         quotation_data["quotation_client_employee"] = {
             "full_name": str(employee_for_quote.full_name or "").strip(),
+            "address_code": str(getattr(employee_for_quote, "address_code", None) or "").strip(),
+            "phone": str(getattr(employee_for_quote, "phone", None) or "").strip(),
+            "email": str(getattr(employee_for_quote, "email", None) or "").strip(),
+            "department": str(getattr(employee_for_quote, "department", None) or "").strip(),
             "designation": str(getattr(employee_for_quote, "designation", None) or "").strip(),
         }
 

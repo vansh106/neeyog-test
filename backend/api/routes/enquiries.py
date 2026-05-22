@@ -63,7 +63,7 @@ async def list_enquiries_route(
     status: str | None = Query(None),
     flow_type: str | None = Query(None),
     company_id: str | None = Query(None),
-    limit: int = Query(50, le=500),
+    limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0),
     db: AsyncSession = Depends(get_db),
 ):

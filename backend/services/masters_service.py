@@ -529,6 +529,8 @@ async def get_product_materials(category: str, db: AsyncSession) -> list[str]:
 def _jsonable(v: Any) -> Any:
     if isinstance(v, (datetime, date)):
         return v.isoformat()
+    if isinstance(v, uuid.UUID):
+        return str(v)
     return v
 
 

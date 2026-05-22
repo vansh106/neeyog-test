@@ -104,9 +104,11 @@ class ClientEmployee(Base):
         index=True,
     )
 
+    address_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
     full_name: Mapped[str] = mapped_column(String(255), nullable=False)
-    email: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    department: Mapped[str | None] = mapped_column(String(100), nullable=True)
     designation: Mapped[str | None] = mapped_column(String(100), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 

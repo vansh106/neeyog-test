@@ -55,7 +55,15 @@ export function catalogPartsForAssembly(p: AssembledProduct): CatalogPart[] {
   const v = p.valve
   if (v?.id) {
     const ct = valveCatalogTable(v)
-    if (ct) parts.push({ label: 'Valve', catalog_table: ct, catalog_row_id: v.id })
+    if (ct) parts.push({ label: 'Hose', catalog_table: ct, catalog_row_id: v.id })
+  }
+  const f = p.fitting
+  if (f?.id && f.catalog_category) {
+    parts.push({
+      label: 'Fitting',
+      catalog_table: f.catalog_category,
+      catalog_row_id: f.id,
+    })
   }
   if ((p.operator_key === 'da' || p.operator_key === 'sa') && p.operator_model?.id) {
     parts.push({ label: 'Operator', catalog_table: 'operator', catalog_row_id: p.operator_model.id })
@@ -83,8 +91,16 @@ export function catalogPartsForAssembly(p: AssembledProduct): CatalogPart[] {
 
 export function assemblyLabel(p: AssembledProduct): string {
   const v = p.valve
-  if (!v) return 'Assembly'
-  return [v.type, v.construction, v.valve_size].filter(Boolean).join(' — ')
+  const f = p.fitting
+  if (!v && !f) return 'Assembly'
+  const hosePart = v
+    ? [v.type, v.construction, v.valve_size ?? v.size_id_mm].filter(Boolean).join(' — ')
+    : ''
+  const fitPart = f
+    ? [f.type, f.variant_type, f.size_mm as string | undefined].filter(Boolean).join(' — ')
+    : ''
+  if (hosePart && fitPart) return `${hosePart} + ${fitPart}`
+  return hosePart || fitPart || 'Assembly'
 }
 
 /** Parse leading inch size like `2"` or `1 1/2"` from valve_size text. */
@@ -119,9 +135,18 @@ export function assembledToLineItem(
     ? [v.body, v.ball_disc ?? v.ball, v.stem, v.seat, v.fasteners].filter(Boolean)
     : []
   const material = materialParts.join(' / ') || ''
-  const name = v
+  const hoseName = v
     ? [v.type, v.construction, v.valve_size].filter(Boolean).join(' — ')
-    : 'Valve Assembly'
+    : ''
+  const fittingName = p.fitting
+    ? [p.fitting.variant_type, p.fitting.size_mm, p.fitting.end_connection_1]
+        .filter(Boolean)
+        .join(' — ')
+    : ''
+  const name =
+    hoseName && fittingName
+      ? `${hoseName} + ${fittingName}`
+      : hoseName || fittingName || 'Assembly'
 
   const catalogTable = v ? valveCatalogTable(v) : null
   const rawCatalogId = v?.id ?? uuidv4()
@@ -159,6 +184,15 @@ export function assembledToLineItem(
     if (v.stem) cascade.stem = v.stem
     if (v.seat) cascade.seat = v.seat
     if (v.fasteners) cascade.fasteners = v.fasteners
+  }
+  const fit = p.fitting
+  if (fit) {
+    if (fit.variant_type) cascade.fitting_variant_type = fit.variant_type
+    if (fit.end_connection_1) cascade.fitting_end_connection_1 = fit.end_connection_1
+    if (fit.end_connection_2) cascade.fitting_end_connection_2 = fit.end_connection_2
+    if (fit.size_mm) cascade.fitting_size_mm = fit.size_mm
+    if (fit.hose_nipple_moc) cascade.hose_nipple_moc = fit.hose_nipple_moc
+    if (fit.hose_cap_moc) cascade.hose_cap_moc = fit.hose_cap_moc
   }
   cascade.operator = operatorLabel(p.operator_key)
   if (p.operator_model) {

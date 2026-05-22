@@ -128,6 +128,10 @@ def _quotation_payload_for_pdf(q: Quotation) -> dict:
     if emp is not None and getattr(emp, "full_name", None):
         out["quotation_client_employee"] = {
             "full_name": str(emp.full_name).strip(),
+            "address_code": str(getattr(emp, "address_code", None) or "").strip(),
+            "phone": str(getattr(emp, "phone", None) or "").strip(),
+            "email": str(getattr(emp, "email", None) or "").strip(),
+            "department": str(getattr(emp, "department", None) or "").strip(),
             "designation": str(emp.designation).strip() if getattr(emp, "designation", None) else "",
         }
     return out

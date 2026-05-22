@@ -22,9 +22,11 @@ def _quotation_api_dict(q: Quotation) -> dict:
     if emp is not None:
         client_employee_payload = {
             "id": str(emp.id),
+            "address_code": emp.address_code,
             "full_name": emp.full_name,
-            "email": emp.email,
             "phone": emp.phone,
+            "email": emp.email,
+            "department": emp.department,
             "designation": emp.designation,
         }
     return {
