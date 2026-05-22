@@ -10,6 +10,11 @@ import { cn, formatCurrency } from '@/lib/utils'
 import { useValveCatalog, type CatalogRow, computeDistinctOptions } from '@/hooks/useValveCatalog'
 import { configuratorApi, mastersApi } from '@/lib/api'
 import {
+  catalogPartForSupplierPrice,
+  fetchSupplierListPriceInr,
+  type SupplierPriceComponentKey,
+} from '@/lib/supplierCatalogPrice'
+import {
   FITTING_CATALOG_OPTIONS,
   hoseRequiresFittings,
 } from '@/lib/configuratorProductFlow'
@@ -381,6 +386,10 @@ export function ValveConfigurator({
   }, [supplierId, suppliers])
 
   const [componentPricing, setComponentPricing] = useState<ComponentPricingState>({})
+  /** List prices from ``supplier_product_prices`` when catalog rows have no ``price_inr``. */
+  const [supplierListPrices, setSupplierListPrices] = useState<
+    Partial<Record<SupplierPriceComponentKey, number>>
+  >({})
 
   const categoryDisplayLabel = useMemo(() => {
     if (!specs.catalog_category) return ''
@@ -531,17 +540,108 @@ export function ValveConfigurator({
     )
   }, [fittingSpecs, fittingCatalog, resolveFitting, fittingCascadeSteps, fittingCategoryLabel])
 
+  const pricingCtx = useMemo(
+    () => ({
+      resolvedValve,
+      resolvedFitting,
+      operatorModel,
+      operatorKey,
+      sov,
+      lsb,
+      positioner,
+    }),
+    [resolvedValve, resolvedFitting, operatorModel, operatorKey, sov, lsb, positioner],
+  )
+
+  const supplierPriceFetchSig = useMemo(() => {
+    const keys: SupplierPriceComponentKey[] = [
+      'valve',
+      'fitting',
+      'operator',
+      'sov',
+      'lsb',
+      'positioner',
+    ]
+    const sig: Record<string, string | null> = {}
+    for (const key of keys) {
+      const cfg = componentPricing[key]
+      if (!cfg?.enabled) {
+        sig[key] = null
+        continue
+      }
+      const sid = (cfg.supplier_id ?? supplierId ?? '').trim()
+      const part = catalogPartForSupplierPrice(key, pricingCtx)
+      sig[key] = sid && part ? `${sid}|${part.catalog_table}|${part.catalog_row_id}` : null
+    }
+    return JSON.stringify(sig)
+  }, [componentPricing, supplierId, pricingCtx])
+
+  useEffect(() => {
+    let cancelled = false
+    const keys: SupplierPriceComponentKey[] = [
+      'valve',
+      'fitting',
+      'operator',
+      'sov',
+      'lsb',
+      'positioner',
+    ]
+    ;(async () => {
+      const nextPrices: Partial<Record<SupplierPriceComponentKey, number>> = {}
+      for (const key of keys) {
+        const cfg = componentPricing[key]
+        if (!cfg?.enabled) continue
+        const sid = (cfg.supplier_id ?? supplierId ?? '').trim()
+        const part = catalogPartForSupplierPrice(key, pricingCtx)
+        if (!sid || !part) continue
+        const inr = await fetchSupplierListPriceInr(sid, part.catalog_table, part.catalog_row_id)
+        if (cancelled) return
+        if (inr != null) {
+          nextPrices[key] = inr
+          setComponentPricing((prev) => {
+            const cur = prev[key]
+            if (!cur) return prev
+            const existing = (cur.temp_price ?? '').trim()
+            if (existing && Number(existing) > 0) return prev
+            return { ...prev, [key]: { ...cur, temp_price: String(inr) } }
+          })
+        }
+      }
+      if (!cancelled) setSupplierListPrices((prev) => ({ ...prev, ...nextPrices }))
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [supplierPriceFetchSig, pricingCtx])
+
+  const componentListPrice = useCallback(
+    (key: SupplierPriceComponentKey, catalogBase: number | null | undefined): number | null => {
+      if (catalogBase != null && Number.isFinite(catalogBase)) return catalogBase
+      const fromSupplier = supplierListPrices[key]
+      return fromSupplier != null && Number.isFinite(fromSupplier) ? fromSupplier : null
+    },
+    [supplierListPrices],
+  )
+
   useEffect(() => {
     const activeSupplier = supplierId
       ? (suppliers ?? []).find((s) => s.id === supplierId) ?? null
       : null
+    const masconSupplier =
+      (suppliers ?? []).find((s) => s.is_active && s.name.toLowerCase().includes('mascon')) ?? null
+    const defaultForCatalog =
+      specs.catalog_category?.startsWith('fp_mascon') && masconSupplier
+        ? masconSupplier
+        : activeSupplier
     setComponentPricing((prev) => {
       const mk = (key: string, enabled: boolean): ComponentPricingEntry => {
         const p = prev[key]
+        const defaultSupplier =
+          key === 'valve' || key === 'fitting' ? defaultForCatalog : activeSupplier
         return {
           enabled,
-          supplier_id: p?.supplier_id ?? activeSupplier?.id ?? null,
-          supplier_name: p?.supplier_name ?? activeSupplier?.name ?? null,
+          supplier_id: p?.supplier_id ?? defaultSupplier?.id ?? null,
+          supplier_name: p?.supplier_name ?? defaultSupplier?.name ?? null,
           temp_price: p?.temp_price != null ? String(p.temp_price) : '',
         }
       }
@@ -557,7 +657,17 @@ export function ValveConfigurator({
         fitting: mk('fitting', !!resolvedFitting),
       }
     })
-  }, [resolvedValve, resolvedFitting, operatorKey, sov, lsb, positioner, supplierId, suppliers])
+  }, [
+    resolvedValve,
+    resolvedFitting,
+    operatorKey,
+    sov,
+    lsb,
+    positioner,
+    supplierId,
+    suppliers,
+    specs.catalog_category,
+  ])
 
   useEffect(() => {
     if (catalogLoading || !specs.catalog_category || catalog.length === 0 || cascadeSteps.length === 0) return
@@ -614,8 +724,8 @@ export function ValveConfigurator({
 
   // ── Derived: running unit price (pure on frontend) ────────────────────
   const priceInfo = useMemo(() => {
-    const valvePrice = resolvedValve?.base_price ?? null
-    const opPrice = operatorModel?.base_price ?? null
+    const valvePrice = componentListPrice('valve', resolvedValve?.base_price)
+    const opPrice = componentListPrice('operator', operatorModel?.base_price)
     const sovPrice = sov?.price ?? null
     const lsbPrice = lsb?.price ?? null
     const posPrice = positioner?.price ?? null
@@ -637,7 +747,7 @@ export function ValveConfigurator({
     }
     if (resolvedFitting) {
       const fitLabel = [fittingCategoryLabel, resolvedFitting.size_mm].filter(Boolean).join(' ')
-      push(fitLabel || 'Fitting', resolvedFitting.base_price ?? null)
+      push(fitLabel || 'Fitting', componentListPrice('fitting', resolvedFitting.base_price))
     }
     if (operatorKey === 'da' || operatorKey === 'sa') {
       const label =
@@ -652,14 +762,14 @@ export function ValveConfigurator({
     if (lsb) push('Limit switch box', lsbPrice)
     if (positioner) push('Positioner', posPrice)
 
-    const fittingPrice = resolvedFitting?.base_price ?? null
+    const fittingPrice = componentListPrice('fitting', resolvedFitting?.base_price)
     const componentBaseByKey: Record<string, number | null> = {
       valve: valvePrice,
       fitting: fittingPrice,
       operator: operatorKey === 'da' || operatorKey === 'sa' ? opPrice : null,
-      sov: sovPrice,
-      lsb: lsbPrice,
-      positioner: posPrice,
+      sov: componentListPrice('sov', sovPrice),
+      lsb: componentListPrice('lsb', lsbPrice),
+      positioner: componentListPrice('positioner', posPrice),
       bracket: null,
     }
     const parseTemp = (x: string): number | null => {
@@ -725,6 +835,7 @@ export function ValveConfigurator({
     lsb,
     positioner,
     componentPricing,
+    componentListPrice,
     customerDiscountPct,
   ])
 
@@ -778,10 +889,30 @@ export function ValveConfigurator({
     setSpecs({ ...specs, field_values: nextFv })
   }
 
+  const valveForAssembly = useMemo((): ValveProduct | null => {
+    if (!resolvedValve) return null
+    const price = componentListPrice('valve', resolvedValve.base_price)
+    return {
+      ...resolvedValve,
+      base_price: price,
+      has_price: price != null,
+    }
+  }, [resolvedValve, componentListPrice])
+
+  const fittingForAssembly = useMemo((): ValveProduct | null => {
+    if (!resolvedFitting) return null
+    const price = componentListPrice('fitting', resolvedFitting.base_price)
+    return {
+      ...resolvedFitting,
+      base_price: price,
+      has_price: price != null,
+    }
+  }, [resolvedFitting, componentListPrice])
+
   const buildAssembled = (): AssembledProduct => ({
     id: initialProduct?.id ?? crypto.randomUUID(),
-    valve: resolvedValve,
-    fitting: requiresFittingsAddon ? resolvedFitting : null,
+    valve: valveForAssembly,
+    fitting: requiresFittingsAddon ? fittingForAssembly : null,
     operator_key: operatorKey,
     operator_model:
       operatorKey === 'da' || operatorKey === 'sa' ? operatorModel : null,
@@ -847,17 +978,33 @@ export function ValveConfigurator({
         <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
           <Select
             value={toSelectValue(cfg.supplier_id ?? '')}
-            onValueChange={(raw) =>
+            onValueChange={(raw) => {
+              const newId = fromSelectValue(raw) || null
+              const newName = (suppliers ?? []).find((s) => s.id === newId)?.name ?? null
               setComponentPricing((prev) => ({
                 ...prev,
                 [key]: {
                   ...prev[key],
-                  supplier_id: fromSelectValue(raw) || null,
-                  supplier_name:
-                    (suppliers ?? []).find((s) => s.id === fromSelectValue(raw))?.name ?? null,
+                  supplier_id: newId,
+                  supplier_name: newName,
+                  temp_price: '',
                 },
               }))
-            }
+              const part = catalogPartForSupplierPrice(key as SupplierPriceComponentKey, pricingCtx)
+              if (newId && part) {
+                void fetchSupplierListPriceInr(newId, part.catalog_table, part.catalog_row_id).then(
+                  (inr) => {
+                    if (inr == null) return
+                    setSupplierListPrices((prev) => ({ ...prev, [key]: inr }))
+                    setComponentPricing((prev) => {
+                      const cur = prev[key]
+                      if (!cur || cur.supplier_id !== newId) return prev
+                      return { ...prev, [key]: { ...cur, temp_price: String(inr) } }
+                    })
+                  },
+                )
+              }
+            }}
           >
             <SelectTrigger className="h-10 w-full">
               <SelectValue placeholder="Select supplier">
@@ -1080,7 +1227,7 @@ export function ValveConfigurator({
                 {[resolvedValve.end_connection, resolvedValve.pressure].filter(Boolean).join(' | ') || '—'}
               </p>
               <p className="mt-2 font-mono text-[13px] text-brand-green-700">
-                Base Price: {priceText(resolvedValve.base_price)}
+                Base Price: {priceText(componentListPrice('valve', resolvedValve.base_price))}
               </p>
             </div>
           )}
@@ -1224,7 +1371,7 @@ export function ValveConfigurator({
                   .join(' / ') || '—'}
               </p>
               <p className="mt-2 font-mono text-[13px] text-brand-green-700">
-                Base Price: {priceText(resolvedFitting.base_price)}
+                Base Price: {priceText(componentListPrice('fitting', resolvedFitting.base_price))}
               </p>
             </div>
           )}
@@ -1395,7 +1542,9 @@ export function ValveConfigurator({
                   <SelectItem key={m.id} value={m.id}>
                     {m.model_name}
                     {m.size ? ` — ${m.size}` : ''} —{' '}
-                    {m.base_price != null ? formatCurrency(m.base_price) : '₹TBD'}
+                    {componentListPrice('operator', m.base_price) != null
+                      ? formatCurrency(componentListPrice('operator', m.base_price)!)
+                      : '₹TBD'}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -1410,8 +1559,8 @@ export function ValveConfigurator({
                 {operatorModel.size ? ` — ${operatorModel.size}` : ''}
               </p>
               <p className="mt-1 font-mono text-brand-green-700">
-                {operatorModel.base_price != null
-                  ? `${formatCurrency(operatorModel.base_price)} added`
+                {componentListPrice('operator', operatorModel.base_price) != null
+                  ? `${formatCurrency(componentListPrice('operator', operatorModel.base_price)!)} added`
                   : '₹TBD'}
               </p>
             </div>
