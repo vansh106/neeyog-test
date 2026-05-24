@@ -16,7 +16,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import EnquiryListingFilters from '@/components/enquiries/EnquiryListingFilters'
+import EnquiryListingFiltersPanel from '@/components/enquiries/EnquiryListingFilters'
 import { useEnquiriesListingDataset, useQuotations } from '@/lib/queries'
 import { erpExportUrl } from '@/lib/api'
 import {
@@ -212,7 +212,7 @@ export default function EnquiriesPage() {
             </button>
           </div>
         ) : null}
-        <EnquiryListingFilters
+        <EnquiryListingFiltersPanel
           draft={filterDraft}
           onDraftChange={setFilterDraft}
           categoryOptions={filterOptions.categories}
