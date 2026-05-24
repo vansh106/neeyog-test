@@ -22,9 +22,9 @@ import {
 import { cn } from '@/lib/utils'
 import { useUIStore } from '@/lib/store'
 import { useEmailStore } from '@/stores/emailStore'
-import { SIDEBAR_MASTER_CATEGORIES } from '@/lib/masterCatalogCategories'
 import { Permissions } from '@/lib/permissions'
 import { useAuthStore } from '@/stores/authStore'
+import MastersSidebarNav from '@/components/layout/MastersSidebarNav'
 
 type NavIcon = typeof LayoutDashboard
 
@@ -126,24 +126,7 @@ export default function Sidebar() {
                     >
                       <span className="truncate">Edit Masters</span>
                     </Link>
-                    {SIDEBAR_MASTER_CATEGORIES.map(({ key, label }) => {
-                      const href = `/masters/${key}`
-                      const active = pathname === href
-                      return (
-                        <Link
-                          key={key}
-                          href={href}
-                          className={cn(
-                            'flex items-center gap-3 px-3 py-2 rounded-md text-[12px] transition-colors',
-                            active
-                              ? 'bg-surface-sidebar2 text-white'
-                              : 'text-[#8AAF8E] hover:bg-surface-sidebar2 hover:text-white',
-                          )}
-                        >
-                          <span className="truncate">{label}</span>
-                        </Link>
-                      )
-                    })}
+                    <MastersSidebarNav pathname={pathname} />
                   </div>
                 )}
               </div>

@@ -1,5 +1,7 @@
 /** Masters sidebar + supplier UI: catalog keys after Final_Products import. */
 
+import { flattenMasterNavLeaves } from '@/lib/masterSidebarNav'
+
 export type MasterCatalogCategory = { key: string; label: string }
 
 export const FINAL_PRODUCT_MASTER_CATEGORIES: MasterCatalogCategory[] = [
@@ -61,22 +63,5 @@ export const BALL_VALVE_MASTER_CATEGORIES: MasterCatalogCategory[] = [
   { key: 'fp_ball_valve_unison_3_piece_3_way_l_port', label: 'Ball Valve — 3-piece (3-way L-port)' },
 ]
 
-const CORE_BEFORE_FP: MasterCatalogCategory[] = [
-  { key: 'butterfly_valve', label: 'Butterfly valve' },
-]
-
-const CORE_AFTER_FP: MasterCatalogCategory[] = [
-  { key: 'operator', label: 'Operator' },
-  { key: 'brackets_coupler', label: 'Brackets & couplers' },
-  { key: 'sov', label: 'SOV' },
-  { key: 'limit_switch_box', label: 'Limit switch box' },
-  { key: 'positioner', label: 'Positioner' },
-]
-
-export const SIDEBAR_MASTER_CATEGORIES: MasterCatalogCategory[] = [
-  ...CORE_BEFORE_FP,
-  ...FBV_MASTER_CATEGORIES,
-  ...BALL_VALVE_MASTER_CATEGORIES,
-  ...FINAL_PRODUCT_MASTER_CATEGORIES,
-  ...CORE_AFTER_FP,
-]
+/** Flat list derived from hierarchical sidebar nav (dropdowns in Sidebar). */
+export const SIDEBAR_MASTER_CATEGORIES: MasterCatalogCategory[] = flattenMasterNavLeaves()
