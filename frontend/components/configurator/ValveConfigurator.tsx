@@ -14,11 +14,14 @@ import {
   fetchSupplierListPriceInr,
   type SupplierPriceComponentKey,
 } from '@/lib/supplierCatalogPrice'
+import ConfiguratorCategoryPicker from '@/components/configurator/ConfiguratorCategoryPicker'
 import {
+  configuratorLeafLabel,
   FITTING_CATALOG_OPTIONS,
   hoseRequiresFittings,
+  isHoseCatalogCategory,
 } from '@/lib/configuratorProductFlow'
-import { useConfiguratorAccessories, useConfiguratorValveTypes } from '@/lib/queries'
+import { useConfiguratorAccessories } from '@/lib/queries'
 import type {
   Accessories,
   AccessoryItem,
@@ -344,7 +347,6 @@ export function ValveConfigurator({
   })
   const [fittingCascadeSteps, setFittingCascadeSteps] = useState<CascadeStep[]>([])
 
-  const { data: valveCategories = [], isPending: valveCategoriesPending } = useConfiguratorValveTypes()
   const requiresFittingsAddon = hoseRequiresFittings(specs.catalog_category)
   const [operatorOptions, setOperatorOptions] = useState<OperatorOption[]>([])
   const [daOps, setDaOps] = useState<OperatorModel[]>([])
@@ -393,9 +395,8 @@ export function ValveConfigurator({
 
   const categoryDisplayLabel = useMemo(() => {
     if (!specs.catalog_category) return ''
-    const raw = valveCategories.find((c) => c.key === specs.catalog_category)?.label ?? specs.catalog_category
-    return stripMasconPrefix(raw)
-  }, [specs.catalog_category, valveCategories])
+    return stripMasconPrefix(configuratorLeafLabel(specs.catalog_category))
+  }, [specs.catalog_category])
 
   const {
     catalog,
@@ -855,6 +856,11 @@ export function ValveConfigurator({
   }, [supportsOperatorAccessoryFlow, stage])
 
   // ── Handlers ──────────────────────────────────────────────────────────
+  const clearCatalogSelection = () => {
+    setCascadeSteps([])
+    setSpecs(emptySpecs())
+  }
+
   const pickCatalogCategory = (key: string) => {
     setCascadeSteps([])
     setFittingSpecs(emptySpecs())
@@ -1065,7 +1071,11 @@ export function ValveConfigurator({
                   : totalSteps
   const stageTitle =
     stage === 'valve_specs'
-      ? `Step 1 of ${totalSteps} — Select ${requiresFittingsAddon ? 'Hose' : 'Product'} Specifications`
+      ? `Step 1 of ${totalSteps} — Select ${
+          specs.catalog_category && isHoseCatalogCategory(specs.catalog_category)
+            ? 'Hose'
+            : 'Product'
+        } specifications`
       : stage === 'fittings'
         ? `Step 2 of ${totalSteps} — Select Fitting`
         : !supportsOperatorAccessoryFlow
@@ -1126,35 +1136,11 @@ export function ValveConfigurator({
       {/* ── STAGE 1 ─────────────────────────────────────────────────── */}
       {stage === 'valve_specs' && (
         <div className="mt-4 space-y-4">
-          {valveCategoriesPending && (
-            <div className="flex items-center gap-2 text-[12px] text-surface-muted">
-              <Loader2 className="size-4 animate-spin" />
-              Loading valve categories…
-            </div>
-          )}
-
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3 max-h-[280px] overflow-y-auto pr-1">
-            {valveCategories.map((c) => {
-              const active = specs.catalog_category === c.key
-              return (
-                <button
-                  key={c.key}
-                  type="button"
-                  onClick={() => pickCatalogCategory(c.key)}
-                  className={cn(
-                    'rounded-xl border p-3 text-left transition',
-                    active
-                      ? 'border-2 border-brand-green-500 bg-brand-green-50'
-                      : 'border-surface-border bg-white hover:bg-surface-page',
-                  )}
-                >
-                  <p className="text-[13px] font-semibold text-gray-900 leading-snug">
-                    {stripMasconPrefix(c.label)}
-                  </p>
-                </button>
-              )
-            })}
-          </div>
+          <ConfiguratorCategoryPicker
+            selectedKey={specs.catalog_category}
+            onSelect={pickCatalogCategory}
+            onClearSelection={clearCatalogSelection}
+          />
 
           {specs.catalog_category && catalogError && (
             <p className="text-[12px] text-red-600">{catalogError}</p>
@@ -1237,7 +1223,7 @@ export function ValveConfigurator({
             <span className="text-[12px] text-surface-muted">
               {specs.catalog_category
                 ? 'Pick each spec to narrow down.'
-                : 'Pick a valve category to begin.'}
+                : 'Choose Valves or Hoses, then product type and sheet.'}
             </span>
             <Button
               type="button"
