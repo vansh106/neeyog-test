@@ -1,7 +1,7 @@
 'use client'
 
-import { useCallback, useMemo, useState } from 'react'
-import { useParams } from 'next/navigation'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useParams, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { useQuery } from '@tanstack/react-query'
 import PageShell from '@/components/layout/PageShell'
@@ -25,6 +25,10 @@ import {
   downloadMastersSheetXlsx,
   fetchAllMastersSheetRows,
 } from '@/lib/mastersSheetExport'
+import {
+  findMasterNavLeafBySlug,
+  flattenMasterNavLeaves,
+} from '@/lib/masterSidebarNav'
 
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 200] as const
 
@@ -34,7 +38,24 @@ function prettifyHeader(key: string) {
 
 export default function MastersCategoryPage() {
   const params = useParams<{ category: string }>()
+  const searchParams = useSearchParams()
   const category = params?.category
+  const variantTypeFilter = searchParams.get('variant_type')?.trim() || undefined
+  const navSlug = searchParams.get('nav')?.trim() || undefined
+
+  const sheetDisplayName = useMemo(() => {
+    if (navSlug) {
+      const leaf = findMasterNavLeafBySlug(navSlug)
+      if (leaf) return leaf.label
+    }
+    if (variantTypeFilter && category) {
+      const leaf = flattenMasterNavLeaves().find(
+        (l) => l.key === category && l.variantType === variantTypeFilter && !l.navSlug,
+      )
+      if (leaf) return leaf.label
+    }
+    return category?.replace(/_/g, ' ') ?? ''
+  }, [category, navSlug, variantTypeFilter])
 
   const [limit, setLimit] = useState<number>(50)
   const [skip, setSkip] = useState<number>(0)
@@ -42,7 +63,15 @@ export default function MastersCategoryPage() {
   const [exportBusy, setExportBusy] = useState(false)
   const [exportError, setExportError] = useState<string | null>(null)
 
-  const { data, isPending } = useSheetRows(category ?? '', { skip, limit })
+  const { data, isPending } = useSheetRows(category ?? '', {
+    skip,
+    limit,
+    variant_type: variantTypeFilter,
+  })
+
+  useEffect(() => {
+    setSkip(0)
+  }, [category, variantTypeFilter, navSlug])
 
   const columns = data?.columns ?? []
   const items = data?.items ?? []
@@ -87,18 +116,21 @@ export default function MastersCategoryPage() {
     setExportBusy(true)
     setExportError(null)
     try {
-      const { columns: allCols, items } = await fetchAllMastersSheetRows(category)
+      const { columns: allCols, items } = await fetchAllMastersSheetRows(
+        category,
+        variantTypeFilter,
+      )
       downloadMastersSheetXlsx(category, allCols, items)
     } catch (e) {
       setExportError(e instanceof Error ? e.message : 'Export failed')
     } finally {
       setExportBusy(false)
     }
-  }, [category, exportBusy])
+  }, [category, exportBusy, variantTypeFilter])
 
   return (
     <PageShell
-      title={`Masters / ${category}`}
+      title={`Masters / ${sheetDisplayName || category}`}
       actions={
         <Button
           type="button"

@@ -136,7 +136,10 @@ export function useProducts(params?: { category?: string }) {
   })
 }
 
-export function useSheetRows(sheet: string, params?: { skip?: number; limit?: number }) {
+export function useSheetRows(
+  sheet: string,
+  params?: { skip?: number; limit?: number; variant_type?: string },
+) {
   return useQuery<{
     sheet: string
     columns: string[]

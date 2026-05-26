@@ -140,10 +140,13 @@ async def list_sheet_rows_route(
     sheet: str,
     skip: int = 0,
     limit: int = 50,
+    variant_type: str | None = Query(None, description="Filter rows by variant_type column"),
     db: AsyncSession = Depends(get_db),
     _user: CurrentUser = Depends(require_permission(Permission.MASTERS_VIEW)),
 ):
-    return await masters_controller.handle_list_sheet_rows(db, sheet=sheet, skip=skip, limit=limit)
+    return await masters_controller.handle_list_sheet_rows(
+        db, sheet=sheet, skip=skip, limit=limit, variant_type=variant_type
+    )
 
 
 @router.get("/clients")

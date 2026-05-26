@@ -302,8 +302,10 @@ export const mastersApi = {
   listProducts: <T = unknown>(params?: { category?: string }) =>
     get<T>('/api/masters/products', params as Record<string, unknown>),
   getClientConfig: <T = unknown>() => get<T>('/api/masters/client-config'),
-  listSheetRows: <T = unknown>(sheet: string, params?: { skip?: number; limit?: number }) =>
-    get<T>(`/api/masters/sheets/${sheet}/rows`, params as Record<string, unknown>),
+  listSheetRows: <T = unknown>(
+    sheet: string,
+    params?: { skip?: number; limit?: number; variant_type?: string },
+  ) => get<T>(`/api/masters/sheets/${sheet}/rows`, params as Record<string, unknown>),
   getClientsForDropdown: <T = unknown>(search?: string) =>
     get<T>('/api/masters/clients', search ? { search } : undefined),
   /** Prefer /api/masters/categories — avoids /products/{id} route shadowing on older API builds. */

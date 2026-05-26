@@ -44,9 +44,12 @@ async def handle_list_sheet_rows(
     sheet: str,
     skip: int = 0,
     limit: int = 50,
+    variant_type: str | None = None,
 ) -> dict:
     try:
-        return await masters_service.list_sheet_rows(db, sheet=sheet, skip=skip, limit=limit)
+        return await masters_service.list_sheet_rows(
+            db, sheet=sheet, skip=skip, limit=limit, variant_type=variant_type
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:

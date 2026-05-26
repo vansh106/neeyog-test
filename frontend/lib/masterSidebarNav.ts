@@ -1,8 +1,37 @@
 /** Hierarchical Masters sidebar navigation (Product → Type → Sub-type → sheet). */
 
-export type MasterNavLeaf = { kind: 'leaf'; key: string; label: string }
+export type MasterNavLeaf = {
+  kind: 'leaf'
+  key: string
+  label: string
+  /** When set, masters table filters rows by this ``variant_type`` (same catalog key). */
+  variantType?: string
+  /** Disambiguates active link when several leaves share key + variantType. */
+  navSlug?: string
+}
+
 export type MasterNavGroup = { kind: 'group'; label: string; children: MasterNavNode[] }
 export type MasterNavNode = MasterNavLeaf | MasterNavGroup
+
+export function masterNavLeafHref(leaf: MasterNavLeaf): string {
+  const params = new URLSearchParams()
+  if (leaf.variantType) params.set('variant_type', leaf.variantType)
+  if (leaf.navSlug) params.set('nav', leaf.navSlug)
+  const q = params.toString()
+  return `/masters/${leaf.key}${q ? `?${q}` : ''}`
+}
+
+export function isMasterNavLeafActive(
+  leaf: MasterNavLeaf,
+  categoryKey: string | null,
+  variantType: string | null,
+  navSlug: string | null,
+): boolean {
+  if (!categoryKey || leaf.key !== categoryKey) return false
+  if (leaf.navSlug) return navSlug === leaf.navSlug
+  if (leaf.variantType) return variantType === leaf.variantType && !navSlug
+  return !variantType && !navSlug
+}
 
 export const MASTER_SIDEBAR_NAV: MasterNavNode[] = [
   {
@@ -12,7 +41,61 @@ export const MASTER_SIDEBAR_NAV: MasterNavNode[] = [
       {
         kind: 'group',
         label: 'Butterfly Valve',
-        children: [{ kind: 'leaf', key: 'butterfly_valve', label: 'Butterfly valve' }],
+        children: [
+          {
+            kind: 'group',
+            label: 'Hygienic Butterfly Valve',
+            children: [
+              {
+                kind: 'leaf',
+                key: 'butterfly_valve',
+                label: 'Hygienic Butterfly Valve Alfa Laval Make',
+                variantType: 'Hygienic Butterfly Valve',
+                navSlug: 'hygienic-alfa-laval',
+              },
+              {
+                kind: 'leaf',
+                key: 'butterfly_valve',
+                label: 'Hygienic Butterfly Valve PVH Make',
+                variantType: 'Hygienic Butterfly Valve',
+                navSlug: 'hygienic-pvh',
+              },
+            ],
+          },
+          {
+            kind: 'group',
+            label: 'Aluminium Butterfly Valve',
+            children: [
+              {
+                kind: 'leaf',
+                key: 'butterfly_valve',
+                label: 'Aluminium Butterfly Valve PVH Make',
+                variantType: 'Aluminium Butterfly Valve',
+                navSlug: 'aluminium-pvh',
+              },
+            ],
+          },
+          {
+            kind: 'group',
+            label: 'Industrial Butterfly Valve',
+            children: [
+              {
+                kind: 'leaf',
+                key: 'butterfly_valve',
+                label: 'Industrial Butterfly Valve Omval Make',
+                variantType: 'Industrial Butterfly Valve',
+                navSlug: 'industrial-omval',
+              },
+              {
+                kind: 'leaf',
+                key: 'butterfly_valve',
+                label: 'Industrial Butterfly Valve Delval Make',
+                variantType: 'Industrial Butterfly Valve',
+                navSlug: 'industrial-delval',
+              },
+            ],
+          },
+        ],
       },
       {
         kind: 'group',
@@ -22,28 +105,56 @@ export const MASTER_SIDEBAR_NAV: MasterNavNode[] = [
             kind: 'group',
             label: '1-Piece Ball Valve',
             children: [
-              { kind: 'leaf', key: 'fp_ball_valve_casco_1_piece_multi_end', label: '1-Piece — Casco (multi end)' },
-              { kind: 'leaf', key: 'fp_ball_valve_casco_1_piece_flanged', label: '1-Piece — Casco (flanged)' },
-              { kind: 'leaf', key: 'fp_ball_valve_unison_1_piece_multi_end', label: '1-Piece — Unison (multi end)' },
+              {
+                kind: 'leaf',
+                key: 'fp_ball_valve_casco_1_piece_multi_end',
+                label: '1-Piece Ball Valve Casco Make',
+              },
+              {
+                kind: 'leaf',
+                key: 'fp_ball_valve_casco_1_piece_flanged',
+                label: '1-Piece Ball Valve Casco Make (flanged)',
+              },
+              {
+                kind: 'leaf',
+                key: 'fp_ball_valve_unison_1_piece_multi_end',
+                label: '1-Piece Ball Valve Unison Make',
+              },
             ],
           },
           {
             kind: 'group',
             label: '2-Piece Ball Valve',
             children: [
-              { kind: 'leaf', key: 'fp_ball_valve_casco_2_piece', label: '2-Piece — Casco' },
-              { kind: 'leaf', key: 'fp_ball_valve_unison_2_piece_iso_pads', label: '2-Piece — Unison (ISO pads)' },
+              { kind: 'leaf', key: 'fp_ball_valve_casco_2_piece', label: '2-Piece Ball Valve Casco Make' },
+              {
+                kind: 'leaf',
+                key: 'fp_ball_valve_unison_2_piece_iso_pads',
+                label: '2-Piece Ball Valve Unison Make',
+              },
             ],
           },
           {
             kind: 'group',
             label: '3-Piece Ball Valve',
             children: [
-              { kind: 'leaf', key: 'fp_ball_valve_casco_3_piece', label: '3-Piece — Casco' },
-              { kind: 'leaf', key: 'fp_ball_valve_casco_3_piece_ext_stem', label: '3-Piece — Extended stem (Casco)' },
-              { kind: 'leaf', key: 'fp_ball_valve_casco_3_piece_3_way_l_port', label: '3-Piece 3-Way L-Port — Casco' },
-              { kind: 'leaf', key: 'fp_ball_valve_unison_3_piece', label: '3-Piece — Unison' },
-              { kind: 'leaf', key: 'fp_ball_valve_unison_3_piece_3_way_l_port', label: '3-Piece 3-Way L-Port — Unison' },
+              { kind: 'leaf', key: 'fp_ball_valve_casco_3_piece', label: '3-Piece Ball Valve Casco Make' },
+              {
+                kind: 'leaf',
+                key: 'fp_ball_valve_casco_3_piece_ext_stem',
+                label: '3-Piece Extended Stem Ball Valve Casco Make',
+              },
+              {
+                kind: 'leaf',
+                key: 'fp_ball_valve_casco_3_piece_3_way_l_port',
+                label: '3-Piece 3-Way L-Port Casco Make',
+              },
+              { kind: 'leaf', key: 'fp_ball_valve_unison_3_piece', label: '3-Piece Ball Valve Unison Make' },
+              {
+                kind: 'leaf',
+                key: 'fp_ball_valve_unison_3_piece_3_way_l_port',
+                label: '3-Piece 3-Way L-Port Unison Make',
+              },
             ],
           },
         ],
@@ -52,39 +163,99 @@ export const MASTER_SIDEBAR_NAV: MasterNavNode[] = [
         kind: 'group',
         label: 'Flush Bottom Valve',
         children: [
-          { kind: 'leaf', key: 'fp_fbv_ball_type', label: 'FBV — Ball Type' },
-          { kind: 'leaf', key: 'fp_fbv_y_type', label: 'FBV — Y Type' },
+          {
+            kind: 'group',
+            label: 'FBV – Ball Type',
+            children: [
+              { kind: 'leaf', key: 'fp_fbv_ball_type', label: 'FBV – Ball Type Casco Make' },
+            ],
+          },
+          {
+            kind: 'group',
+            label: 'FBV – Y Type',
+            children: [{ kind: 'leaf', key: 'fp_fbv_y_type', label: 'FBV – Y Type Casco Make' }],
+          },
         ],
       },
       {
         kind: 'group',
         label: 'Needle Valve',
-        children: [{ kind: 'leaf', key: 'fp_needle_valve', label: 'Needle valve' }],
+        children: [{ kind: 'leaf', key: 'fp_needle_valve', label: 'Needle Valve Aster Make' }],
       },
       {
         kind: 'group',
         label: 'Non Return Valve / Check Valve',
         children: [
-          { kind: 'leaf', key: 'fp_nrv_inline_check', label: 'In-line check valve' },
-          { kind: 'leaf', key: 'fp_nrv_wafer_check', label: 'Wafer check valve' },
-          { kind: 'leaf', key: 'fp_nrv_non_slam', label: 'Non-slam check valve' },
+          {
+            kind: 'group',
+            label: 'In Line Check Valve',
+            children: [
+              { kind: 'leaf', key: 'fp_nrv_inline_check', label: 'In Line Check Valve Casco Make' },
+            ],
+          },
+          {
+            kind: 'group',
+            label: 'Wafer Check Valve',
+            children: [{ kind: 'leaf', key: 'fp_nrv_wafer_check', label: 'Wafer Check Valve Casco Make' }],
+          },
+          {
+            kind: 'group',
+            label: 'Non Slam Check Valve',
+            children: [
+              { kind: 'leaf', key: 'fp_nrv_non_slam', label: 'Non Slam Check Valve Casco Make' },
+            ],
+          },
         ],
       },
       {
         kind: 'group',
         label: 'Safety / Pressure Relief Valve',
         children: [
-          { kind: 'leaf', key: 'fp_safety_sv_bsp_f', label: 'SV — Screwed (BSP)' },
-          { kind: 'leaf', key: 'fp_safety_sv_tc_end', label: 'SV — TC end' },
-          { kind: 'leaf', key: 'fp_safety_sv_flanged_150', label: 'SV — Flanged #150' },
+          {
+            kind: 'group',
+            label: 'SV – Screwed (BSP)',
+            children: [{ kind: 'leaf', key: 'fp_safety_sv_bsp_f', label: 'SV – Screwed (BSP) PVH Make' }],
+          },
+          {
+            kind: 'group',
+            label: 'SV – TC End',
+            children: [{ kind: 'leaf', key: 'fp_safety_sv_tc_end', label: 'SV – TC End PVH Make' }],
+          },
+          {
+            kind: 'group',
+            label: 'SV – Flanged #150',
+            children: [
+              { kind: 'leaf', key: 'fp_safety_sv_flanged_150', label: 'SV – Flanged #150 PVH Make' },
+            ],
+          },
         ],
       },
       {
         kind: 'group',
         label: 'Sampling Valve',
         children: [
-          { kind: 'leaf', key: 'fp_sampling_sv_tc_end', label: 'Sampling — TC end' },
-          { kind: 'leaf', key: 'fp_sampling_sv_od_base_weld', label: 'Sampling — OD base weld' },
+          {
+            kind: 'group',
+            label: 'Sampling Valve – TC End',
+            children: [
+              {
+                kind: 'leaf',
+                key: 'fp_sampling_sv_tc_end',
+                label: 'Sampling Valve – TC End Mascon Make',
+              },
+            ],
+          },
+          {
+            kind: 'group',
+            label: 'Sampling Valve – OD Base Weld End',
+            children: [
+              {
+                kind: 'leaf',
+                key: 'fp_sampling_sv_od_base_weld',
+                label: 'Sampling Valve – OD Base Weld End PVH Make',
+              },
+            ],
+          },
         ],
       },
       {
@@ -95,23 +266,27 @@ export const MASTER_SIDEBAR_NAV: MasterNavNode[] = [
             kind: 'group',
             label: 'Manual Diaphragm Valve',
             children: [
-              { kind: 'leaf', key: 'fp_mascon_manual_tc_end', label: 'Manual — TC end' },
-              { kind: 'leaf', key: 'fp_mascon_manual_butt_weld', label: 'Manual — Butt weld' },
+              { kind: 'leaf', key: 'fp_mascon_manual_tc_end', label: 'Manual – TC End Mascon Make' },
+              { kind: 'leaf', key: 'fp_mascon_manual_butt_weld', label: 'Manual – Butt Weld Mascon Make' },
             ],
           },
           {
             kind: 'group',
             label: 'Pneumatic Diaphragm Valve',
             children: [
-              { kind: 'leaf', key: 'fp_mascon_pneumatic_tc_end', label: 'Pneumatic — TC end' },
-              { kind: 'leaf', key: 'fp_mascon_pneumatic_butt_weld', label: 'Pneumatic — Butt weld' },
+              { kind: 'leaf', key: 'fp_mascon_pneumatic_tc_end', label: 'Pneumatic – TC End Mascon Make' },
+              {
+                kind: 'leaf',
+                key: 'fp_mascon_pneumatic_butt_weld',
+                label: 'Pneumatic – Butt Weld Mascon Make',
+              },
             ],
           },
           {
             kind: 'group',
             label: 'Spare Diaphragm',
             children: [
-              { kind: 'leaf', key: 'fp_mascon_spare_diaphragm', label: 'Spare diaphragm' },
+              { kind: 'leaf', key: 'fp_mascon_spare_diaphragm', label: 'Spare Diaphragm Mascon Make' },
             ],
           },
         ],
@@ -124,16 +299,16 @@ export const MASTER_SIDEBAR_NAV: MasterNavNode[] = [
             kind: 'group',
             label: 'Manual ZDV',
             children: [
-              { kind: 'leaf', key: 'fp_mascon_zdvm_l_type', label: 'ZDV-M — L type' },
-              { kind: 'leaf', key: 'fp_mascon_zdvm_j_type', label: 'ZDV-M — J type' },
+              { kind: 'leaf', key: 'fp_mascon_zdvm_l_type', label: 'ZDV-M L Type Mascon Make' },
+              { kind: 'leaf', key: 'fp_mascon_zdvm_j_type', label: 'ZDV-M J Type Mascon Make' },
             ],
           },
           {
             kind: 'group',
             label: 'Pneumatic ZDV',
             children: [
-              { kind: 'leaf', key: 'fp_mascon_zdvp_l_type', label: 'ZDV-P — L type' },
-              { kind: 'leaf', key: 'fp_mascon_zdvp_j_type', label: 'ZDV-P — J type' },
+              { kind: 'leaf', key: 'fp_mascon_zdvp_l_type', label: 'ZDV-P L Type Mascon Make' },
+              { kind: 'leaf', key: 'fp_mascon_zdvp_j_type', label: 'ZDV-P J Type Mascon Make' },
             ],
           },
         ],
@@ -141,32 +316,70 @@ export const MASTER_SIDEBAR_NAV: MasterNavNode[] = [
       {
         kind: 'group',
         label: 'Pressure Reducing Valve',
-        children: [{ kind: 'leaf', key: 'fp_mascon_prv', label: 'Pressure reducing valve' }],
+        children: [
+          { kind: 'leaf', key: 'fp_mascon_prv', label: 'Pressure Reducing Valve Mascon Make' },
+        ],
       },
       {
         kind: 'group',
         label: 'Angle Type Valve',
         children: [
-          { kind: 'leaf', key: 'fp_mascon_angle_sc_flanged', label: 'Angle — Screwed & flanged' },
-          { kind: 'leaf', key: 'fp_mascon_angle_butt_weld', label: 'Angle — Butt weld' },
-          { kind: 'leaf', key: 'fp_mascon_angle_tc_end', label: 'Angle — TC end' },
+          {
+            kind: 'leaf',
+            key: 'fp_mascon_angle_sc_flanged',
+            label: 'ATV – Screwed & Flanged Mascon Make',
+          },
+          { kind: 'leaf', key: 'fp_mascon_angle_butt_weld', label: 'ATV – Butt Weld Mascon Make' },
+          { kind: 'leaf', key: 'fp_mascon_angle_tc_end', label: 'ATV – TC End Mascon Make' },
         ],
       },
       {
         kind: 'group',
         label: 'Sight Glass',
         children: [
-          { kind: 'leaf', key: 'fp_sight_glass_double_window', label: 'Sight glass — Double window' },
-          { kind: 'leaf', key: 'fp_sight_glass_inline_ic_casted', label: 'Sight glass — Inline IC casted' },
-          { kind: 'leaf', key: 'fp_sight_glass_inline_solid_flange', label: 'Sight glass — Inline solid flange' },
+          {
+            kind: 'group',
+            label: 'Double Window Sight Glass',
+            children: [
+              {
+                kind: 'leaf',
+                key: 'fp_sight_glass_double_window',
+                label: 'Sight Glass – Double Window',
+              },
+            ],
+          },
+          {
+            kind: 'group',
+            label: 'Inline Sight Glass',
+            children: [
+              {
+                kind: 'leaf',
+                key: 'fp_sight_glass_inline_ic_casted',
+                label: 'Sight Glass – Inline IC Casted',
+              },
+              {
+                kind: 'leaf',
+                key: 'fp_sight_glass_inline_solid_flange',
+                label: 'Sight Glass – Inline Solid Flange',
+              },
+            ],
+          },
         ],
       },
       {
         kind: 'group',
         label: 'Strainer',
         children: [
-          { kind: 'leaf', key: 'fp_strainer_y_150', label: 'Strainer — Y type #150' },
-          { kind: 'leaf', key: 'fp_strainer_y_300', label: 'Strainer — Y type #300' },
+          {
+            kind: 'group',
+            label: 'Y Type Strainer #150',
+            children: [{ kind: 'leaf', key: 'fp_strainer_y_150', label: 'Strainer – Y Type #150' }],
+          },
+          {
+            kind: 'group',
+            label: 'Y Type Strainer #300',
+            children: [{ kind: 'leaf', key: 'fp_strainer_y_300', label: 'Strainer – Y Type #300' }],
+          },
         ],
       },
     ],
@@ -175,22 +388,30 @@ export const MASTER_SIDEBAR_NAV: MasterNavNode[] = [
     kind: 'group',
     label: 'Hoses',
     children: [
-      { kind: 'leaf', key: 'fp_hose_tuder', label: 'Tuder hoses' },
-      { kind: 'leaf', key: 'fp_hose_thunder', label: 'PVC — Thunder hoses' },
-      { kind: 'leaf', key: 'fp_hose_pvc_nylon_non_toxic', label: 'PVC nylon braided — Non-toxic' },
-      { kind: 'leaf', key: 'fp_hose_pvc_nylon_food_grade', label: 'PVC nylon braided — Food grade' },
-      { kind: 'leaf', key: 'fp_hose_red_silicon', label: 'Red silicon hose' },
-      { kind: 'leaf', key: 'fp_hose_pu', label: 'PU hose' },
+      { kind: 'leaf', key: 'fp_hose_tuder', label: 'Tuder Hoses' },
+      { kind: 'leaf', key: 'fp_hose_thunder', label: 'PVC – Thunder Hoses Jyoti Make' },
+      {
+        kind: 'leaf',
+        key: 'fp_hose_pvc_nylon_non_toxic',
+        label: 'PVC Nylon Braided – Non-Toxic Jyoti Make',
+      },
+      {
+        kind: 'leaf',
+        key: 'fp_hose_pvc_nylon_food_grade',
+        label: 'PVC Nylon Braided – Food Grade Jyoti Make',
+      },
+      { kind: 'leaf', key: 'fp_hose_red_silicon', label: 'Red Silicon Hose Jyoti Make' },
+      { kind: 'leaf', key: 'fp_hose_pu', label: 'PU Hose Jyoti Make' },
     ],
   },
   {
     kind: 'group',
     label: 'Hose Fittings',
     children: [
-      { kind: 'leaf', key: 'fp_fittings_sms_nut', label: 'SMS nut' },
-      { kind: 'leaf', key: 'fp_fittings_tri_clover_end', label: 'Tri-Clover end' },
-      { kind: 'leaf', key: 'fp_fittings_din_nut_11851', label: 'DIN nut 11851' },
-      { kind: 'leaf', key: 'fp_fittings_swivel_nut', label: 'Swivel nut' },
+      { kind: 'leaf', key: 'fp_fittings_sms_nut', label: 'SMS Nut' },
+      { kind: 'leaf', key: 'fp_fittings_tri_clover_end', label: 'Tri-Clover End' },
+      { kind: 'leaf', key: 'fp_fittings_din_nut_11851', label: 'DIN Nut 11851' },
+      { kind: 'leaf', key: 'fp_fittings_swivel_nut', label: 'Swivel Nut' },
       { kind: 'leaf', key: 'fp_fittings_flange_150', label: 'Flange #150' },
     ],
   },
@@ -216,19 +437,59 @@ export function flattenMasterNavLeaves(nodes: MasterNavNode[] = MASTER_SIDEBAR_N
   return out
 }
 
+/** One entry per catalog API key (for supplier dropdowns). */
+export function flattenMasterNavCatalogCategories(): { key: string; label: string }[] {
+  const byKey = new Map<string, string>()
+  for (const leaf of flattenMasterNavLeaves()) {
+    if (!byKey.has(leaf.key)) byKey.set(leaf.key, leaf.label)
+  }
+  return [...byKey.entries()].map(([key, label]) => ({ key, label }))
+}
+
+export function findMasterNavLeafBySlug(
+  navSlug: string,
+  nodes: MasterNavNode[] = MASTER_SIDEBAR_NAV,
+): MasterNavLeaf | null {
+  for (const node of nodes) {
+    if (node.kind === 'leaf') {
+      if (node.navSlug === navSlug) return node
+    } else {
+      const found = findMasterNavLeafBySlug(navSlug, node.children)
+      if (found) return found
+    }
+  }
+  return null
+}
+
 /** All category keys that appear in the sidebar tree (for validation / dropdowns). */
-export const SIDEBAR_MASTER_CATEGORY_KEYS = new Set(flattenMasterNavLeaves().map((l) => l.key))
+export const SIDEBAR_MASTER_CATEGORY_KEYS = new Set(
+  flattenMasterNavCatalogCategories().map((c) => c.key),
+)
+
+export type MasterNavMatch = {
+  variantType?: string | null
+  navSlug?: string | null
+}
+
+function leafMatches(node: MasterNavLeaf, targetKey: string, match?: MasterNavMatch): boolean {
+  if (node.key !== targetKey) return false
+  if (!match) return true
+  if (node.navSlug) return match.navSlug === node.navSlug
+  if (node.variantType) return match.variantType === node.variantType && !match.navSlug
+  return !match.variantType && !match.navSlug
+}
 
 export function findMasterNavPathForKey(
   targetKey: string,
   nodes: MasterNavNode[] = MASTER_SIDEBAR_NAV,
   path: string[] = [],
+  match?: MasterNavMatch,
 ): string[] | null {
   for (const node of nodes) {
     if (node.kind === 'leaf') {
-      if (node.key === targetKey) return [...path, node.key]
+      if (leafMatches(node, targetKey, match)) return [...path, node.key]
     } else {
-      const found = findMasterNavPathForKey(targetKey, node.children, [...path, node.label])
+      const found = findMasterNavPathForKey(targetKey, node.children, [...path, node.label], match)
       if (found) return found
     }
   }

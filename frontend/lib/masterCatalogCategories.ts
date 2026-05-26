@@ -1,6 +1,6 @@
 /** Masters sidebar + supplier UI: catalog keys after Final_Products import. */
 
-import { flattenMasterNavLeaves } from '@/lib/masterSidebarNav'
+import { flattenMasterNavCatalogCategories } from '@/lib/masterSidebarNav'
 
 export type MasterCatalogCategory = { key: string; label: string }
 
@@ -64,4 +64,4 @@ export const BALL_VALVE_MASTER_CATEGORIES: MasterCatalogCategory[] = [
 ]
 
 /** Flat list derived from hierarchical sidebar nav (dropdowns in Sidebar). */
-export const SIDEBAR_MASTER_CATEGORIES: MasterCatalogCategory[] = flattenMasterNavLeaves()
+export const SIDEBAR_MASTER_CATEGORIES: MasterCatalogCategory[] = flattenMasterNavCatalogCategories()

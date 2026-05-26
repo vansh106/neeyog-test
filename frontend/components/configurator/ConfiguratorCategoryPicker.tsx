@@ -5,16 +5,29 @@ import { ChevronDown, ChevronRight } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
 import {
+  type ConfiguratorCatalogPick,
   CONFIGURATOR_STEP1_PRODUCT_NAV,
   configuratorProductFamilyForKey,
+  configuratorPickFromLeaf,
 } from '@/lib/configuratorProductFlow'
-import { findMasterNavPathForKey, type MasterNavNode } from '@/lib/masterSidebarNav'
+import {
+  findMasterNavPathForKey,
+  isMasterNavLeafActive,
+  type MasterNavLeaf,
+  type MasterNavNode,
+} from '@/lib/masterSidebarNav'
 
 export type ConfiguratorProductFamily = 'Valves' | 'Hoses'
 
+export type ConfiguratorCategorySelection = {
+  key: string | null
+  variantType?: string | null
+  navSlug?: string | null
+}
+
 type Props = {
-  selectedKey: string | null
-  onSelect: (key: string) => void
+  selection: ConfiguratorCategorySelection
+  onSelect: (pick: ConfiguratorCatalogPick) => void
   onClearSelection: () => void
 }
 
@@ -27,8 +40,12 @@ function familyNodes(family: ConfiguratorProductFamily): MasterNavNode[] {
   return root?.kind === 'group' ? root.children : []
 }
 
-function groupPathKeysForCategory(key: string): string[] {
-  const segments = findMasterNavPathForKey(key, CONFIGURATOR_STEP1_PRODUCT_NAV)
+function groupPathKeysForSelection(selection: ConfiguratorCategorySelection): string[] {
+  if (!selection.key) return []
+  const segments = findMasterNavPathForKey(selection.key, CONFIGURATOR_STEP1_PRODUCT_NAV, [], {
+    variantType: selection.variantType ?? null,
+    navSlug: selection.navSlug ?? null,
+  })
   if (!segments || segments.length < 2) return []
   const keys: string[] = []
   let prefix = ''
@@ -39,11 +56,15 @@ function groupPathKeysForCategory(key: string): string[] {
   return keys
 }
 
+function leafRowKey(leaf: MasterNavLeaf): string {
+  return `${leaf.key}:${leaf.navSlug ?? ''}:${leaf.variantType ?? ''}`
+}
+
 function NavNodeRow({
   node,
   depth,
   pathPrefix,
-  selectedKey,
+  selection,
   openPaths,
   togglePath,
   onSelect,
@@ -51,17 +72,22 @@ function NavNodeRow({
   node: MasterNavNode
   depth: number
   pathPrefix: string
-  selectedKey: string | null
+  selection: ConfiguratorCategorySelection
   openPaths: Set<string>
   togglePath: (pathKey: string) => void
-  onSelect: (key: string) => void
+  onSelect: (pick: ConfiguratorCatalogPick) => void
 }) {
   if (node.kind === 'leaf') {
-    const active = selectedKey === node.key
+    const active = isMasterNavLeafActive(
+      node,
+      selection.key,
+      selection.variantType ?? null,
+      selection.navSlug ?? null,
+    )
     return (
       <button
         type="button"
-        onClick={() => onSelect(node.key)}
+        onClick={() => onSelect(configuratorPickFromLeaf(node))}
         className={cn(
           'w-full rounded-xl border p-3 text-left transition',
           active
@@ -100,11 +126,11 @@ function NavNodeRow({
         <div className="space-y-1 pb-1 pl-1">
           {node.children.map((child, i) => (
             <NavNodeRow
-              key={child.kind === 'leaf' ? child.key : `${child.label}-${i}`}
+              key={child.kind === 'leaf' ? leafRowKey(child) : `${child.label}-${i}`}
               node={child}
               depth={depth + 1}
               pathPrefix={pathKey}
-              selectedKey={selectedKey}
+              selection={selection}
               openPaths={openPaths}
               togglePath={togglePath}
               onSelect={onSelect}
@@ -117,19 +143,19 @@ function NavNodeRow({
 }
 
 export default function ConfiguratorCategoryPicker({
-  selectedKey,
+  selection,
   onSelect,
   onClearSelection,
 }: Props) {
-  const inferredFamily = configuratorProductFamilyForKey(selectedKey)
+  const inferredFamily = configuratorProductFamilyForKey(selection.key)
   const [pickedFamily, setPickedFamily] = React.useState<ConfiguratorProductFamily | null>(null)
 
   const activeFamily = inferredFamily ?? pickedFamily
 
-  const activeGroupPathKeys = React.useMemo(() => {
-    if (!selectedKey) return []
-    return groupPathKeysForCategory(selectedKey)
-  }, [selectedKey])
+  const activeGroupPathKeys = React.useMemo(
+    () => groupPathKeysForSelection(selection),
+    [selection],
+  )
 
   const [openPaths, setOpenPaths] = React.useState<Set<string>>(() => new Set(activeGroupPathKeys))
 
@@ -197,14 +223,14 @@ export default function ConfiguratorCategoryPicker({
           {activeFamily} → pick type, then product sheet
         </span>
       </div>
-      <div className="max-h-[280px] space-y-1 overflow-y-auto pr-1">
+      <div className="max-h-[320px] space-y-1 overflow-y-auto pr-1">
         {tree.map((node, i) => (
           <NavNodeRow
-            key={node.kind === 'leaf' ? node.key : `${node.label}-${i}`}
+            key={node.kind === 'leaf' ? leafRowKey(node) : `${node.label}-${i}`}
             node={node}
             depth={0}
             pathPrefix={activeFamily}
-            selectedKey={selectedKey}
+            selection={selection}
             openPaths={openPaths}
             togglePath={togglePath}
             onSelect={onSelect}

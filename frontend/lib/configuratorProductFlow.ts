@@ -5,8 +5,26 @@ import {
   findMasterNavPathForKey,
   MASTER_SIDEBAR_NAV,
   type MasterNavGroup,
+  type MasterNavLeaf,
   type MasterNavNode,
 } from '@/lib/masterSidebarNav'
+
+/** Manual step-1 catalog selection (mirrors masters sidebar leaf). */
+export type ConfiguratorCatalogPick = {
+  key: string
+  label: string
+  variantType?: string
+  navSlug?: string
+}
+
+export function configuratorPickFromLeaf(leaf: MasterNavLeaf): ConfiguratorCatalogPick {
+  return {
+    key: leaf.key,
+    label: leaf.label,
+    variantType: leaf.variantType,
+    navSlug: leaf.navSlug,
+  }
+}
 
 /** Step-1 manual picker: Valves and Hoses only (no fittings / accessories). */
 export const CONFIGURATOR_STEP1_PRODUCT_NAV: MasterNavNode[] = MASTER_SIDEBAR_NAV.filter(
@@ -17,10 +35,40 @@ export const CONFIGURATOR_STEP1_CATEGORY_KEYS = new Set(
   flattenMasterNavLeaves(CONFIGURATOR_STEP1_PRODUCT_NAV).map((l) => l.key),
 )
 
-export function configuratorLeafLabel(key: string): string {
-  return (
-    flattenMasterNavLeaves(CONFIGURATOR_STEP1_PRODUCT_NAV).find((l) => l.key === key)?.label ?? key
-  )
+export function configuratorLeafLabel(
+  key: string,
+  opts?: { navSlug?: string | null; variantType?: string | null },
+): string {
+  const leaves = flattenMasterNavLeaves(CONFIGURATOR_STEP1_PRODUCT_NAV)
+  if (opts?.navSlug) {
+    const bySlug = leaves.find((l) => l.navSlug === opts.navSlug)
+    if (bySlug) return bySlug.label
+  }
+  if (opts?.variantType) {
+    const byVt = leaves.find(
+      (l) => l.key === key && l.variantType === opts.variantType && !l.navSlug,
+    )
+    if (byVt) return byVt.label
+  }
+  return leaves.find((l) => l.key === key)?.label ?? key
+}
+
+export function findConfiguratorNavLeaf(
+  key: string,
+  opts?: { navSlug?: string | null; variantType?: string | null },
+): MasterNavLeaf | null {
+  const leaves = flattenMasterNavLeaves(CONFIGURATOR_STEP1_PRODUCT_NAV)
+  if (opts?.navSlug) {
+    const bySlug = leaves.find((l) => l.navSlug === opts.navSlug)
+    if (bySlug) return bySlug
+  }
+  if (opts?.variantType) {
+    const byVt = leaves.find(
+      (l) => l.key === key && l.variantType === opts.variantType && !l.navSlug,
+    )
+    if (byVt) return byVt
+  }
+  return leaves.find((l) => l.key === key) ?? null
 }
 
 export function configuratorProductFamilyForKey(

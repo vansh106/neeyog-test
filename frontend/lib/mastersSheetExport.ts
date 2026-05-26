@@ -32,7 +32,10 @@ export function visibleMastersExportColumns(columns: string[]): string[] {
 }
 
 /** Fetches every row for a sheet (API pages at 200). */
-export async function fetchAllMastersSheetRows(sheet: string): Promise<{
+export async function fetchAllMastersSheetRows(
+  sheet: string,
+  variantType?: string,
+): Promise<{
   columns: string[]
   items: Record<string, unknown>[]
 }> {
@@ -44,6 +47,7 @@ export async function fetchAllMastersSheetRows(sheet: string): Promise<{
     const res = await mastersApi.listSheetRows<MastersSheetRowsPayload>(sheet, {
       skip,
       limit: SHEET_ROWS_PAGE,
+      ...(variantType ? { variant_type: variantType } : {}),
     })
     columns = res.columns ?? []
     const chunk = res.items ?? []

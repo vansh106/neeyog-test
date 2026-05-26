@@ -1,6 +1,6 @@
 'use client'
 
-import React from 'react'
+import React, { Suspense } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import {
@@ -126,7 +126,9 @@ export default function Sidebar() {
                     >
                       <span className="truncate">Edit Masters</span>
                     </Link>
-                    <MastersSidebarNav pathname={pathname} />
+                    <Suspense fallback={<div className="px-3 py-2 text-[11px] text-[#8AAF8E]">Loading…</div>}>
+                      <MastersSidebarNav />
+                    </Suspense>
                   </div>
                 )}
               </div>

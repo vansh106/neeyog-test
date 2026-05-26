@@ -693,6 +693,10 @@ export interface CascadeStep {
 export interface ValveSpecSelections {
   /** Catalog API key from ``/api/configurator/valve-types`` (e.g. ``butterfly_valve``). */
   catalog_category: string | null
+  /** Butterfly (and similar) rows filtered to this ``variant_type`` when set. */
+  catalog_variant_type?: string | null
+  /** Disambiguates nav label when several leaves share the same catalog key. */
+  catalog_nav_slug?: string | null
   /** Values keyed by DB / cascade field name. */
   field_values: Record<string, string>
 }

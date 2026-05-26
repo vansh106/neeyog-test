@@ -2,18 +2,18 @@
 
 import React from 'react'
 import Link from 'next/link'
+import { usePathname, useSearchParams } from 'next/navigation'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
 import {
   MASTER_SIDEBAR_NAV,
   findMasterNavPathForKey,
+  isMasterNavLeafActive,
+  masterNavLeafHref,
+  type MasterNavLeaf,
   type MasterNavNode,
 } from '@/lib/masterSidebarNav'
-
-type Props = {
-  pathname: string
-}
 
 function activeCategoryKey(pathname: string): string | null {
   const m = pathname.match(/^\/masters\/([^/?]+)/)
@@ -23,14 +23,18 @@ function activeCategoryKey(pathname: string): string | null {
 function MastersNavNodeRow({
   node,
   depth,
-  pathname,
+  categoryKey,
+  variantType,
+  navSlug,
   pathPrefix,
   openPaths,
   togglePath,
 }: {
   node: MasterNavNode
   depth: number
-  pathname: string
+  categoryKey: string | null
+  variantType: string | null
+  navSlug: string | null
   pathPrefix: string
   openPaths: Set<string>
   togglePath: (pathKey: string) => void
@@ -38,11 +42,10 @@ function MastersNavNodeRow({
   const pad = 8 + depth * 10
 
   if (node.kind === 'leaf') {
-    const href = `/masters/${node.key}`
-    const active = pathname === href
+    const active = isMasterNavLeafActive(node, categoryKey, variantType, navSlug)
     return (
       <Link
-        href={href}
+        href={masterNavLeafHref(node)}
         className={cn(
           'flex items-center gap-2 rounded-md py-1.5 pr-2 text-[12px] transition-colors',
           active
@@ -82,10 +85,12 @@ function MastersNavNodeRow({
       {isOpen &&
         node.children.map((child, i) => (
           <MastersNavNodeRow
-            key={child.kind === 'leaf' ? child.key : `${child.label}-${i}`}
+            key={child.kind === 'leaf' ? leafRowKey(child) : `${child.label}-${i}`}
             node={child}
             depth={depth + 1}
-            pathname={pathname}
+            categoryKey={categoryKey}
+            variantType={variantType}
+            navSlug={navSlug}
             pathPrefix={pathKey}
             openPaths={openPaths}
             togglePath={togglePath}
@@ -95,11 +100,23 @@ function MastersNavNodeRow({
   )
 }
 
-export default function MastersSidebarNav({ pathname }: Props) {
-  const activeKey = activeCategoryKey(pathname)
+function leafRowKey(leaf: MasterNavLeaf): string {
+  return `${leaf.key}:${leaf.navSlug ?? ''}:${leaf.variantType ?? ''}`
+}
+
+export default function MastersSidebarNav() {
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
+  const categoryKey = activeCategoryKey(pathname)
+  const variantType = searchParams.get('variant_type')
+  const navSlug = searchParams.get('nav')
+
   const activeGroupPathKeys = React.useMemo(() => {
-    if (!activeKey) return []
-    const segments = findMasterNavPathForKey(activeKey)
+    if (!categoryKey) return []
+    const segments = findMasterNavPathForKey(categoryKey, MASTER_SIDEBAR_NAV, [], {
+      variantType,
+      navSlug,
+    })
     if (!segments || segments.length < 2) return []
     const keys: string[] = []
     let prefix = ''
@@ -108,7 +125,7 @@ export default function MastersSidebarNav({ pathname }: Props) {
       keys.push(prefix)
     }
     return keys
-  }, [activeKey])
+  }, [categoryKey, variantType, navSlug])
 
   const [openPaths, setOpenPaths] = React.useState<Set<string>>(() => new Set(activeGroupPathKeys))
 
@@ -134,10 +151,12 @@ export default function MastersSidebarNav({ pathname }: Props) {
     <div className="space-y-0.5">
       {MASTER_SIDEBAR_NAV.map((node, i) => (
         <MastersNavNodeRow
-          key={node.kind === 'leaf' ? node.key : `${node.label}-${i}`}
+          key={node.kind === 'leaf' ? leafRowKey(node) : `${node.label}-${i}`}
           node={node}
           depth={0}
-          pathname={pathname}
+          categoryKey={categoryKey}
+          variantType={variantType}
+          navSlug={navSlug}
           pathPrefix=""
           openPaths={openPaths}
           togglePath={togglePath}

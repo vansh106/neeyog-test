@@ -16,6 +16,7 @@ import {
 } from '@/lib/supplierCatalogPrice'
 import ConfiguratorCategoryPicker from '@/components/configurator/ConfiguratorCategoryPicker'
 import {
+  type ConfiguratorCatalogPick,
   configuratorLeafLabel,
   FITTING_CATALOG_OPTIONS,
   hoseRequiresFittings,
@@ -132,7 +133,12 @@ const UNIT_OPTIONS = ['Nos', 'Pcs', 'Set', 'Pair', 'Meter', 'Kg'] as const
 const ADDON_ENABLED_CATEGORIES = new Set(['butterfly_valve'])
 
 function emptySpecs(): ValveSpecSelections {
-  return { catalog_category: null, field_values: {} }
+  return {
+    catalog_category: null,
+    catalog_variant_type: null,
+    catalog_nav_slug: null,
+    field_values: {},
+  }
 }
 
 function inferCatalogCategoryFromValve(v: ValveProduct): string | null {
@@ -395,18 +401,40 @@ export function ValveConfigurator({
 
   const categoryDisplayLabel = useMemo(() => {
     if (!specs.catalog_category) return ''
-    return stripMasconPrefix(configuratorLeafLabel(specs.catalog_category))
-  }, [specs.catalog_category])
+    return stripMasconPrefix(
+      configuratorLeafLabel(specs.catalog_category, {
+        navSlug: specs.catalog_nav_slug,
+        variantType: specs.catalog_variant_type,
+      }),
+    )
+  }, [specs.catalog_category, specs.catalog_nav_slug, specs.catalog_variant_type])
+
+  const categorySelection = useMemo(
+    () => ({
+      key: specs.catalog_category,
+      variantType: specs.catalog_variant_type ?? null,
+      navSlug: specs.catalog_nav_slug ?? null,
+    }),
+    [specs.catalog_category, specs.catalog_variant_type, specs.catalog_nav_slug],
+  )
 
   const {
-    catalog,
+    catalog: fullCatalog,
     isLoading: catalogLoading,
     error: catalogError,
     loadCatalog,
     getOptions,
     resolve,
-    rowCount,
+    rowCount: fullRowCount,
   } = useValveCatalog(specs.catalog_category)
+
+  const catalog = useMemo(() => {
+    const vt = specs.catalog_variant_type?.trim()
+    if (!vt || fullCatalog.length === 0) return fullCatalog
+    return fullCatalog.filter((row) => String(row.variant_type ?? '').trim() === vt)
+  }, [fullCatalog, specs.catalog_variant_type])
+
+  const rowCount = catalog.length > 0 ? catalog.length : fullRowCount
 
   const {
     catalog: fittingCatalog,
@@ -861,12 +889,19 @@ export function ValveConfigurator({
     setSpecs(emptySpecs())
   }
 
-  const pickCatalogCategory = (key: string) => {
+  const pickCatalogCategory = (pick: ConfiguratorCatalogPick) => {
     setCascadeSteps([])
     setFittingSpecs(emptySpecs())
     setFittingCascadeSteps([])
-    setSpecs({ catalog_category: key, field_values: {} })
-    void loadCatalog(key, true)
+    const field_values: Record<string, string> = {}
+    if (pick.variantType) field_values.variant_type = pick.variantType
+    setSpecs({
+      catalog_category: pick.key,
+      catalog_variant_type: pick.variantType ?? null,
+      catalog_nav_slug: pick.navSlug ?? null,
+      field_values,
+    })
+    void loadCatalog(pick.key, true)
   }
 
   const pickFittingCategory = (key: string) => {
@@ -1137,7 +1172,7 @@ export function ValveConfigurator({
       {stage === 'valve_specs' && (
         <div className="mt-4 space-y-4">
           <ConfiguratorCategoryPicker
-            selectedKey={specs.catalog_category}
+            selection={categorySelection}
             onSelect={pickCatalogCategory}
             onClearSelection={clearCatalogSelection}
           />

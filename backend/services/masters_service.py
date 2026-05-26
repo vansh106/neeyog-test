@@ -606,6 +606,7 @@ async def list_sheet_rows(
     sheet: str,
     skip: int = 0,
     limit: int = 50,
+    variant_type: str | None = None,
 ) -> dict:
     """Paginated listing of a single sheet table, returning raw columns."""
     settings = get_settings()
@@ -618,10 +619,13 @@ async def list_sheet_rows(
     skip = max(0, skip)
     limit = min(max(1, limit), 200)
 
+    filters = [model.client_id == client_id]
+    vt = (variant_type or "").strip()
+    if vt and hasattr(model, "variant_type"):
+        filters.append(model.variant_type == vt)
+
     total = (
-        await db.execute(
-            select(func.count()).select_from(model).where(model.client_id == client_id)
-        )
+        await db.execute(select(func.count()).select_from(model).where(*filters))
     ).scalar_one()
 
     order_parts = []
@@ -635,7 +639,7 @@ async def list_sheet_rows(
         order_parts.append(model.model_name.asc().nulls_last())
     order_parts.append(model.created_at.desc())
 
-    stmt = select(model).where(model.client_id == client_id).order_by(*order_parts).offset(skip).limit(limit)
+    stmt = select(model).where(*filters).order_by(*order_parts).offset(skip).limit(limit)
     rows = (await db.execute(stmt)).scalars().all()
 
     columns = list(model.__table__.columns.keys())
