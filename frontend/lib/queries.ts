@@ -136,10 +136,17 @@ export function useProducts(params?: { category?: string }) {
   })
 }
 
-export function useSheetRows(
-  sheet: string,
-  params?: { skip?: number; limit?: number; variant_type?: string },
-) {
+export type MastersSheetRowsParams = {
+  skip?: number
+  limit?: number
+  variant_type?: string
+  variant_contains?: string
+  variant_exclude_contains?: string
+  variant_contains_any?: string
+  model_name_prefix?: string
+}
+
+export function useSheetRows(sheet: string, params?: MastersSheetRowsParams) {
   return useQuery<{
     sheet: string
     columns: string[]

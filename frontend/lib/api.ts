@@ -304,7 +304,15 @@ export const mastersApi = {
   getClientConfig: <T = unknown>() => get<T>('/api/masters/client-config'),
   listSheetRows: <T = unknown>(
     sheet: string,
-    params?: { skip?: number; limit?: number; variant_type?: string },
+    params?: {
+      skip?: number
+      limit?: number
+      variant_type?: string
+      variant_contains?: string
+      variant_exclude_contains?: string
+      variant_contains_any?: string
+      model_name_prefix?: string
+    },
   ) => get<T>(`/api/masters/sheets/${sheet}/rows`, params as Record<string, unknown>),
   getClientsForDropdown: <T = unknown>(search?: string) =>
     get<T>('/api/masters/clients', search ? { search } : undefined),

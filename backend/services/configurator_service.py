@@ -72,15 +72,18 @@ def list_valve_catalog_categories() -> list[dict[str, str]]:
 
 def _operator_sheet_filter_for_category(catalog_category: str | None, valve_type: str) -> str | None:
     """Return ``operator_for`` ILIKE pattern for ``CatalogOperatorRow``, or None = no filter."""
-    # Operators apply to every valve family; we still keep the column for display / legacy.
-    # If the DB was normalized, this will be 'All valves' for all rows.
     if catalog_category == "butterfly_valve":
         return "Butterfly Valve"
+    if catalog_category and catalog_category.startswith("fp_ball_valve_"):
+        return "Ball Valve"
     if catalog_category:
         return None
     key = _valve_type_key(valve_type)
     if key == "Butterfly Valve":
         return "Butterfly Valve"
+    t = (valve_type or "").strip().lower()
+    if "ball" in t and "butterfly" not in t:
+        return "Ball Valve"
     return None
 
 # Human-readable label per valve type for operator_options. Excel stores

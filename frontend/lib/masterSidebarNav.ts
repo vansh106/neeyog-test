@@ -4,33 +4,109 @@ export type MasterNavLeaf = {
   kind: 'leaf'
   key: string
   label: string
-  /** When set, masters table filters rows by this ``variant_type`` (same catalog key). */
+  /** Exact ``variant_type`` match. */
   variantType?: string
-  /** Disambiguates active link when several leaves share key + variantType. */
+  /** ``variant_type`` ILIKE %value% (optional exclude substring). */
+  variantContains?: string
+  variantExcludeContains?: string
+  /** Any of these substrings (comma in query param ``variant_contains_any``). */
+  variantContainsAny?: string[]
+  /** Operator/actuator ``model_name`` prefix (e.g. DA / SA). */
+  modelNamePrefix?: string
+  /** Disambiguates active link when several leaves share one catalog key. */
   navSlug?: string
 }
 
 export type MasterNavGroup = { kind: 'group'; label: string; children: MasterNavNode[] }
 export type MasterNavNode = MasterNavLeaf | MasterNavGroup
 
+export type MasterSheetQueryFilters = {
+  variant_type?: string
+  variant_contains?: string
+  variant_exclude_contains?: string
+  variant_contains_any?: string
+  model_name_prefix?: string
+  nav?: string
+}
+
+export function masterNavLeafQueryFilters(leaf: MasterNavLeaf): MasterSheetQueryFilters {
+  const out: MasterSheetQueryFilters = {}
+  if (leaf.variantType) out.variant_type = leaf.variantType
+  if (leaf.variantContains) out.variant_contains = leaf.variantContains
+  if (leaf.variantExcludeContains) out.variant_exclude_contains = leaf.variantExcludeContains
+  if (leaf.variantContainsAny?.length) out.variant_contains_any = leaf.variantContainsAny.join(',')
+  if (leaf.modelNamePrefix) out.model_name_prefix = leaf.modelNamePrefix
+  if (leaf.navSlug) out.nav = leaf.navSlug
+  return out
+}
+
 export function masterNavLeafHref(leaf: MasterNavLeaf): string {
   const params = new URLSearchParams()
-  if (leaf.variantType) params.set('variant_type', leaf.variantType)
-  if (leaf.navSlug) params.set('nav', leaf.navSlug)
+  const f = masterNavLeafQueryFilters(leaf)
+  if (f.variant_type) params.set('variant_type', f.variant_type)
+  if (f.variant_contains) params.set('variant_contains', f.variant_contains)
+  if (f.variant_exclude_contains) params.set('variant_exclude_contains', f.variant_exclude_contains)
+  if (f.variant_contains_any) params.set('variant_contains_any', f.variant_contains_any)
+  if (f.model_name_prefix) params.set('model_name_prefix', f.model_name_prefix)
+  if (f.nav) params.set('nav', f.nav)
   const q = params.toString()
   return `/masters/${leaf.key}${q ? `?${q}` : ''}`
+}
+
+export type MasterNavActiveQuery = {
+  variantType: string | null
+  navSlug: string | null
+  variantContains: string | null
+  variantExcludeContains: string | null
+  variantContainsAny: string | null
+  modelNamePrefix: string | null
+}
+
+export function masterNavActiveQueryFromSearchParams(
+  params: URLSearchParams | { get: (k: string) => string | null },
+): MasterNavActiveQuery {
+  return {
+    variantType: params.get('variant_type')?.trim() || null,
+    navSlug: params.get('nav')?.trim() || null,
+    variantContains: params.get('variant_contains')?.trim() || null,
+    variantExcludeContains: params.get('variant_exclude_contains')?.trim() || null,
+    variantContainsAny: params.get('variant_contains_any')?.trim() || null,
+    modelNamePrefix: params.get('model_name_prefix')?.trim() || null,
+  }
+}
+
+function filtersMatchLeaf(leaf: MasterNavLeaf, q: MasterNavActiveQuery): boolean {
+  if (leaf.navSlug) return q.navSlug === leaf.navSlug
+  if (leaf.modelNamePrefix) return q.modelNamePrefix === leaf.modelNamePrefix
+  if (leaf.variantType) {
+    return q.variantType === leaf.variantType && !q.navSlug && !q.variantContains && !q.modelNamePrefix
+  }
+  if (leaf.variantContainsAny?.length) {
+    return q.variantContainsAny === leaf.variantContainsAny.join(',')
+  }
+  if (leaf.variantContains) {
+    return (
+      q.variantContains === leaf.variantContains &&
+      (leaf.variantExcludeContains || '') === (q.variantExcludeContains || '')
+    )
+  }
+  return (
+    !q.variantType &&
+    !q.navSlug &&
+    !q.variantContains &&
+    !q.variantExcludeContains &&
+    !q.variantContainsAny &&
+    !q.modelNamePrefix
+  )
 }
 
 export function isMasterNavLeafActive(
   leaf: MasterNavLeaf,
   categoryKey: string | null,
-  variantType: string | null,
-  navSlug: string | null,
+  query: MasterNavActiveQuery,
 ): boolean {
   if (!categoryKey || leaf.key !== categoryKey) return false
-  if (leaf.navSlug) return navSlug === leaf.navSlug
-  if (leaf.variantType) return variantType === leaf.variantType && !navSlug
-  return !variantType && !navSlug
+  return filtersMatchLeaf(leaf, query)
 }
 
 export const MASTER_SIDEBAR_NAV: MasterNavNode[] = [
@@ -221,13 +297,6 @@ export const MASTER_SIDEBAR_NAV: MasterNavNode[] = [
             label: 'SV – TC End',
             children: [{ kind: 'leaf', key: 'fp_safety_sv_tc_end', label: 'SV – TC End PVH Make' }],
           },
-          {
-            kind: 'group',
-            label: 'SV – Flanged #150',
-            children: [
-              { kind: 'leaf', key: 'fp_safety_sv_flanged_150', label: 'SV – Flanged #150 PVH Make' },
-            ],
-          },
         ],
       },
       {
@@ -388,20 +457,30 @@ export const MASTER_SIDEBAR_NAV: MasterNavNode[] = [
     kind: 'group',
     label: 'Hoses',
     children: [
-      { kind: 'leaf', key: 'fp_hose_tuder', label: 'Tuder Hoses' },
-      { kind: 'leaf', key: 'fp_hose_thunder', label: 'PVC – Thunder Hoses Jyoti Make' },
       {
-        kind: 'leaf',
-        key: 'fp_hose_pvc_nylon_non_toxic',
-        label: 'PVC Nylon Braided – Non-Toxic Jyoti Make',
+        kind: 'group',
+        label: 'Tuder Hoses',
+        children: [{ kind: 'leaf', key: 'fp_hose_tuder', label: 'Tuder Hoses' }],
       },
       {
-        kind: 'leaf',
-        key: 'fp_hose_pvc_nylon_food_grade',
-        label: 'PVC Nylon Braided – Food Grade Jyoti Make',
+        kind: 'group',
+        label: 'PVC Hoses',
+        children: [
+          { kind: 'leaf', key: 'fp_hose_thunder', label: 'PVC — Thunder Hoses Jyoti Make' },
+          {
+            kind: 'leaf',
+            key: 'fp_hose_pvc_nylon_non_toxic',
+            label: 'PVC Nylon Braided – Non-Toxic Jyoti Make',
+          },
+          {
+            kind: 'leaf',
+            key: 'fp_hose_pvc_nylon_food_grade',
+            label: 'PVC Nylon Braided – Food Grade Jyoti Make',
+          },
+          { kind: 'leaf', key: 'fp_hose_red_silicon', label: 'Red Silicon Hose Jyoti Make' },
+          { kind: 'leaf', key: 'fp_hose_pu', label: 'PU Hose Jyoti Make' },
+        ],
       },
-      { kind: 'leaf', key: 'fp_hose_red_silicon', label: 'Red Silicon Hose Jyoti Make' },
-      { kind: 'leaf', key: 'fp_hose_pu', label: 'PU Hose Jyoti Make' },
     ],
   },
   {
@@ -419,11 +498,110 @@ export const MASTER_SIDEBAR_NAV: MasterNavNode[] = [
     kind: 'group',
     label: 'Accessories',
     children: [
-      { kind: 'leaf', key: 'operator', label: 'Operator' },
+      {
+        kind: 'group',
+        label: 'Actuator',
+        children: [
+          {
+            kind: 'group',
+            label: 'Double Acting',
+            children: [
+              {
+                kind: 'leaf',
+                key: 'operator',
+                label: 'DA',
+                modelNamePrefix: 'DA',
+                navSlug: 'actuator-da',
+              },
+            ],
+          },
+          {
+            kind: 'group',
+            label: 'Single Acting',
+            children: [
+              {
+                kind: 'leaf',
+                key: 'operator',
+                label: 'SA',
+                modelNamePrefix: 'SA',
+                navSlug: 'actuator-sa',
+              },
+            ],
+          },
+        ],
+      },
       { kind: 'leaf', key: 'brackets_coupler', label: 'Brackets & couplers' },
-      { kind: 'leaf', key: 'sov', label: 'SOV' },
-      { kind: 'leaf', key: 'limit_switch_box', label: 'Limit switch box' },
-      { kind: 'leaf', key: 'positioner', label: 'Positioner' },
+      {
+        kind: 'group',
+        label: 'SOV',
+        children: [
+          {
+            kind: 'leaf',
+            key: 'sov',
+            label: 'Namur Type',
+            variantContains: 'Namur Type',
+            variantExcludeContains: 'Non Namur',
+            navSlug: 'sov-namur',
+          },
+          {
+            kind: 'leaf',
+            key: 'sov',
+            label: 'Non Namur Type',
+            variantContainsAny: ['Non Namur', 'Non Type'],
+            navSlug: 'sov-non-namur',
+          },
+        ],
+      },
+      {
+        kind: 'group',
+        label: 'Limit Switch Box',
+        children: [
+          {
+            kind: 'leaf',
+            key: 'limit_switch_box',
+            label: 'Weather Proof',
+            variantContains: 'Wheather proof',
+            navSlug: 'lsb-weather',
+          },
+          {
+            kind: 'leaf',
+            key: 'limit_switch_box',
+            label: 'Flame proof',
+            variantContains: 'Flame proof',
+            navSlug: 'lsb-flame',
+          },
+        ],
+      },
+      {
+        kind: 'group',
+        label: 'Positioner',
+        children: [
+          {
+            kind: 'leaf',
+            key: 'positioner',
+            label: 'Electro Pneumatic Positioner Rotork Make',
+            variantContains: 'Electro- Pneumatic',
+            variantExcludeContains: 'Rotex',
+            navSlug: 'positioner-electro-rotork',
+          },
+          {
+            kind: 'leaf',
+            key: 'positioner',
+            label: 'Pneumatic Pneumatic Positioner Rotork Make',
+            variantContains: 'Pneumatic- Pneumatic',
+            variantExcludeContains: 'Rotex',
+            navSlug: 'positioner-pneumatic-rotork',
+          },
+          {
+            kind: 'leaf',
+            key: 'positioner',
+            label: 'SMART Positioner Rotork Make',
+            variantContains: 'SMART Positioner',
+            variantExcludeContains: 'Rotex',
+            navSlug: 'positioner-smart-rotork',
+          },
+        ],
+      },
     ],
   },
 ]
@@ -466,17 +644,12 @@ export const SIDEBAR_MASTER_CATEGORY_KEYS = new Set(
   flattenMasterNavCatalogCategories().map((c) => c.key),
 )
 
-export type MasterNavMatch = {
-  variantType?: string | null
-  navSlug?: string | null
-}
+export type MasterNavMatch = MasterNavActiveQuery
 
 function leafMatches(node: MasterNavLeaf, targetKey: string, match?: MasterNavMatch): boolean {
   if (node.key !== targetKey) return false
   if (!match) return true
-  if (node.navSlug) return match.navSlug === node.navSlug
-  if (node.variantType) return match.variantType === node.variantType && !match.navSlug
-  return !match.variantType && !match.navSlug
+  return filtersMatchLeaf(node, match)
 }
 
 export function findMasterNavPathForKey(

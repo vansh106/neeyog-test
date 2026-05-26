@@ -45,10 +45,22 @@ async def handle_list_sheet_rows(
     skip: int = 0,
     limit: int = 50,
     variant_type: str | None = None,
+    variant_contains: str | None = None,
+    variant_exclude_contains: str | None = None,
+    variant_contains_any: str | None = None,
+    model_name_prefix: str | None = None,
 ) -> dict:
     try:
         return await masters_service.list_sheet_rows(
-            db, sheet=sheet, skip=skip, limit=limit, variant_type=variant_type
+            db,
+            sheet=sheet,
+            skip=skip,
+            limit=limit,
+            variant_type=variant_type,
+            variant_contains=variant_contains,
+            variant_exclude_contains=variant_exclude_contains,
+            variant_contains_any=variant_contains_any,
+            model_name_prefix=model_name_prefix,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

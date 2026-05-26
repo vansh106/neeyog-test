@@ -1,12 +1,13 @@
 'use client'
 
 import React from 'react'
-import { ChevronDown, ChevronRight } from 'lucide-react'
+import { ChevronLeft } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
 import {
   type ConfiguratorCatalogPick,
   CONFIGURATOR_STEP1_PRODUCT_NAV,
+  configuratorLeafLabel,
   configuratorProductFamilyForKey,
   configuratorPickFromLeaf,
 } from '@/lib/configuratorProductFlow'
@@ -40,105 +41,55 @@ function familyNodes(family: ConfiguratorProductFamily): MasterNavNode[] {
   return root?.kind === 'group' ? root.children : []
 }
 
-function groupPathKeysForSelection(selection: ConfiguratorCategorySelection): string[] {
+function nodesAtPath(family: ConfiguratorProductFamily, pathLabels: string[]): MasterNavNode[] {
+  let current = familyNodes(family)
+  for (const label of pathLabels) {
+    const group = current.find((n) => n.kind === 'group' && n.label === label)
+    if (!group || group.kind !== 'group') return current
+    current = group.children
+  }
+  return current
+}
+
+function navStackFromSelection(selection: ConfiguratorCategorySelection): string[] {
   if (!selection.key) return []
   const segments = findMasterNavPathForKey(selection.key, CONFIGURATOR_STEP1_PRODUCT_NAV, [], {
     variantType: selection.variantType ?? null,
     navSlug: selection.navSlug ?? null,
+    variantContains: null,
+    variantExcludeContains: null,
+    variantContainsAny: null,
+    modelNamePrefix: null,
   })
-  if (!segments || segments.length < 2) return []
-  const keys: string[] = []
-  let prefix = ''
-  for (let i = 0; i < segments.length - 1; i++) {
-    prefix = prefix ? `${prefix}/${segments[i]}` : segments[i]
-    keys.push(prefix)
-  }
-  return keys
+  if (!segments || segments.length < 3) return []
+  return segments.slice(1, -1)
 }
 
-function leafRowKey(leaf: MasterNavLeaf): string {
-  return `${leaf.key}:${leaf.navSlug ?? ''}:${leaf.variantType ?? ''}`
-}
-
-function NavNodeRow({
-  node,
-  depth,
-  pathPrefix,
-  selection,
-  openPaths,
-  togglePath,
-  onSelect,
+function SelectionCard({
+  label,
+  hint,
+  active,
+  onClick,
 }: {
-  node: MasterNavNode
-  depth: number
-  pathPrefix: string
-  selection: ConfiguratorCategorySelection
-  openPaths: Set<string>
-  togglePath: (pathKey: string) => void
-  onSelect: (pick: ConfiguratorCatalogPick) => void
+  label: string
+  hint?: string
+  active?: boolean
+  onClick: () => void
 }) {
-  if (node.kind === 'leaf') {
-    const active = isMasterNavLeafActive(
-      node,
-      selection.key,
-      selection.variantType ?? null,
-      selection.navSlug ?? null,
-    )
-    return (
-      <button
-        type="button"
-        onClick={() => onSelect(configuratorPickFromLeaf(node))}
-        className={cn(
-          'w-full rounded-xl border p-3 text-left transition',
-          active
-            ? 'border-2 border-brand-green-500 bg-brand-green-50'
-            : 'border-surface-border bg-white hover:bg-surface-page',
-        )}
-        style={{ marginLeft: depth * 8 }}
-      >
-        <p className="text-[13px] font-semibold leading-snug text-gray-900">
-          {stripMasconPrefix(node.label)}
-        </p>
-      </button>
-    )
-  }
-
-  const pathKey = pathPrefix ? `${pathPrefix}/${node.label}` : node.label
-  const isOpen = openPaths.has(pathKey)
-
   return (
-    <div className="space-y-1" style={{ marginLeft: depth * 8 }}>
-      <button
-        type="button"
-        onClick={() => togglePath(pathKey)}
-        className={cn(
-          'flex w-full items-center gap-2 rounded-lg border border-surface-border bg-white px-3 py-2 text-left text-[13px] font-medium text-gray-900 transition hover:bg-surface-page',
-        )}
-      >
-        {isOpen ? (
-          <ChevronDown className="h-4 w-4 shrink-0 text-surface-muted" />
-        ) : (
-          <ChevronRight className="h-4 w-4 shrink-0 text-surface-muted" />
-        )}
-        <span className="truncate">{node.label}</span>
-      </button>
-      {isOpen && (
-        <div className="space-y-1 pb-1 pl-1">
-          {node.children.map((child, i) => (
-            <NavNodeRow
-              key={child.kind === 'leaf' ? leafRowKey(child) : `${child.label}-${i}`}
-              node={child}
-              depth={depth + 1}
-              pathPrefix={pathKey}
-              selection={selection}
-              openPaths={openPaths}
-              togglePath={togglePath}
-              onSelect={onSelect}
-            />
-          ))}
-        </div>
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        'w-full rounded-xl border p-3 text-left transition',
+        active
+          ? 'border-2 border-brand-green-500 bg-brand-green-50'
+          : 'border-surface-border bg-white hover:border-brand-green-400 hover:bg-brand-green-50',
       )}
-    </div>
+    >
+      <p className="text-[13px] font-semibold leading-snug text-gray-900">{stripMasconPrefix(label)}</p>
+      {hint ? <p className="mt-0.5 text-[11px] text-surface-muted">{hint}</p> : null}
+    </button>
   )
 }
 
@@ -149,94 +100,174 @@ export default function ConfiguratorCategoryPicker({
 }: Props) {
   const inferredFamily = configuratorProductFamilyForKey(selection.key)
   const [pickedFamily, setPickedFamily] = React.useState<ConfiguratorProductFamily | null>(null)
+  const [navStack, setNavStack] = React.useState<string[]>([])
 
   const activeFamily = inferredFamily ?? pickedFamily
 
-  const activeGroupPathKeys = React.useMemo(
-    () => groupPathKeysForSelection(selection),
-    [selection],
-  )
-
-  const [openPaths, setOpenPaths] = React.useState<Set<string>>(() => new Set(activeGroupPathKeys))
-
   React.useEffect(() => {
-    if (activeGroupPathKeys.length === 0) return
-    setOpenPaths((prev) => {
-      const next = new Set(prev)
-      for (const key of activeGroupPathKeys) next.add(key)
-      return next
-    })
-  }, [activeGroupPathKeys])
+    if (!selection.key) return
+    const family = configuratorProductFamilyForKey(selection.key)
+    if (!family) return
+    setPickedFamily(family)
+    setNavStack(navStackFromSelection(selection))
+  }, [selection.key, selection.variantType, selection.navSlug])
 
-  const togglePath = React.useCallback((pathKey: string) => {
-    setOpenPaths((prev) => {
-      const next = new Set(prev)
-      if (next.has(pathKey)) next.delete(pathKey)
-      else next.add(pathKey)
-      return next
-    })
-  }, [])
+  const currentNodes = activeFamily ? nodesAtPath(activeFamily, navStack) : []
+
+  const breadcrumb = React.useMemo(() => {
+    if (!activeFamily) return []
+    return [activeFamily, ...navStack]
+  }, [activeFamily, navStack])
 
   const changeFamily = () => {
     setPickedFamily(null)
+    setNavStack([])
     onClearSelection()
   }
+
+  const goBackOneLevel = () => {
+    onClearSelection()
+    if (navStack.length === 0) {
+      setPickedFamily(null)
+      return
+    }
+    setNavStack((prev) => prev.slice(0, -1))
+  }
+
+  const drillIntoGroup = (label: string) => {
+    onClearSelection()
+    setNavStack((prev) => [...prev, label])
+  }
+
+  const levelTitle =
+    navStack.length > 0 ? navStack[navStack.length - 1] : activeFamily ? `Select ${activeFamily} type` : ''
 
   if (!activeFamily) {
     return (
       <div className="space-y-2">
-        <p className="text-[12px] text-surface-muted">Choose product family</p>
+        <p className="text-[12px] font-medium text-gray-800">Step 1 — Choose product family</p>
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
           {(['Valves', 'Hoses'] as const).map((family) => (
-            <button
+            <SelectionCard
               key={family}
-              type="button"
-              onClick={() => setPickedFamily(family)}
-              className="rounded-xl border border-surface-border bg-white p-4 text-left transition hover:border-brand-green-400 hover:bg-brand-green-50"
-            >
-              <p className="text-[15px] font-semibold text-gray-900">{family}</p>
-              <p className="mt-1 text-[12px] text-surface-muted">
-                {family === 'Valves'
+              label={family}
+              hint={
+                family === 'Valves'
                   ? 'Butterfly, ball, diaphragm, NRV, and more'
-                  : 'Tuder, PVC, silicon, PU hoses'}
-              </p>
-            </button>
+                  : 'Tuder, PVC, silicon, PU hoses'
+              }
+              onClick={() => {
+                setPickedFamily(family)
+                setNavStack([])
+              }}
+            />
           ))}
         </div>
       </div>
     )
   }
 
-  const tree = familyNodes(activeFamily)
+  const hasLeafSelected = Boolean(selection.key)
 
   return (
-    <div className="space-y-2">
-      <div className="flex flex-wrap items-center gap-2">
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[12px]">
+        {breadcrumb.map((part, i) => (
+          <React.Fragment key={`${part}-${i}`}>
+            {i > 0 ? <span className="text-surface-muted">›</span> : null}
+            <span className={i === breadcrumb.length - 1 && !hasLeafSelected ? 'font-medium text-gray-900' : 'text-surface-muted'}>
+              {part}
+            </span>
+          </React.Fragment>
+        ))}
+        {hasLeafSelected ? (
+          <>
+            <span className="text-surface-muted">›</span>
+            <span className="font-medium text-brand-green-700">Product sheet selected</span>
+          </>
+        ) : null}
+      </div>
+
+      <button
+        type="button"
+        onClick={goBackOneLevel}
+        className="inline-flex items-center gap-1 text-[12px] font-medium text-brand-green-700 hover:underline"
+      >
+        <ChevronLeft className="h-3.5 w-3.5" />
+        {navStack.length === 0 ? 'Change family' : `Back to ${navStack.length > 1 ? navStack[navStack.length - 2] : activeFamily}`}
+      </button>
+
+      {hasLeafSelected && selection.key ? (
+        <div className="rounded-xl border border-brand-green-200 bg-brand-green-50 px-3 py-2">
+          <p className="text-[12px] text-surface-muted">Selected product sheet</p>
+          <p className="text-[13px] font-semibold text-gray-900">
+            {stripMasconPrefix(
+              configuratorLeafLabel(selection.key, {
+                navSlug: selection.navSlug,
+                variantType: selection.variantType,
+              }),
+            )}
+          </p>
+          <button
+            type="button"
+            onClick={onClearSelection}
+            className="mt-1 text-[12px] font-medium text-brand-green-700 hover:underline"
+          >
+            Change product sheet
+          </button>
+        </div>
+      ) : (
+        <>
+          <p className="text-[12px] font-medium text-gray-800">{levelTitle}</p>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {currentNodes.map((node, i) => {
+              if (node.kind === 'leaf') {
+                const active = isMasterNavLeafActive(node, selection.key, {
+                  variantType: selection.variantType ?? null,
+                  navSlug: selection.navSlug ?? null,
+                  variantContains: null,
+                  variantExcludeContains: null,
+                  variantContainsAny: null,
+                  modelNamePrefix: null,
+                })
+                return (
+                  <SelectionCard
+                    key={`leaf-${node.key}-${node.navSlug ?? i}`}
+                    label={node.label}
+                    hint="Product sheet"
+                    active={active}
+                    onClick={() => onSelect(configuratorPickFromLeaf(node))}
+                  />
+                )
+              }
+              const childCount = node.children.length
+              const onlyLeaves = node.children.every((c) => c.kind === 'leaf')
+              return (
+                <SelectionCard
+                  key={`group-${node.label}-${i}`}
+                  label={node.label}
+                  hint={
+                    onlyLeaves
+                      ? `${childCount} product sheet${childCount === 1 ? '' : 's'}`
+                      : `${childCount} sub-categor${childCount === 1 ? 'y' : 'ies'}`
+                  }
+                  onClick={() => drillIntoGroup(node.label)}
+                />
+              )
+            })}
+          </div>
+        </>
+      )}
+
+      {navStack.length === 0 && !hasLeafSelected ? (
         <button
           type="button"
           onClick={changeFamily}
-          className="text-[12px] font-medium text-brand-green-700 hover:underline"
+          className="text-[12px] text-surface-muted hover:text-brand-green-700 hover:underline"
         >
-          ← Change family
+          Switch to {activeFamily === 'Valves' ? 'Hoses' : 'Valves'}
         </button>
-        <span className="text-[12px] text-surface-muted">
-          {activeFamily} → pick type, then product sheet
-        </span>
-      </div>
-      <div className="max-h-[320px] space-y-1 overflow-y-auto pr-1">
-        {tree.map((node, i) => (
-          <NavNodeRow
-            key={node.kind === 'leaf' ? leafRowKey(node) : `${node.label}-${i}`}
-            node={node}
-            depth={0}
-            pathPrefix={activeFamily}
-            selection={selection}
-            openPaths={openPaths}
-            togglePath={togglePath}
-            onSelect={onSelect}
-          />
-        ))}
-      </div>
+      ) : null}
     </div>
   )
 }

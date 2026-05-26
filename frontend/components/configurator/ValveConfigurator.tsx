@@ -21,6 +21,8 @@ import {
   FITTING_CATALOG_OPTIONS,
   hoseRequiresFittings,
   isHoseCatalogCategory,
+  operatorValveTypeForCategory,
+  supportsOperatorAccessoryFlowCategory,
 } from '@/lib/configuratorProductFlow'
 import { useConfiguratorAccessories } from '@/lib/queries'
 import type {
@@ -130,7 +132,6 @@ type ComponentPricingEntry = {
 
 type ComponentPricingState = Record<string, ComponentPricingEntry>
 const UNIT_OPTIONS = ['Nos', 'Pcs', 'Set', 'Pair', 'Meter', 'Kg'] as const
-const ADDON_ENABLED_CATEGORIES = new Set(['butterfly_valve'])
 
 function emptySpecs(): ValveSpecSelections {
   return {
@@ -733,10 +734,13 @@ export function ValveConfigurator({
     ;(async () => {
       try {
         const res = await configuratorApi.getOperators<OperatorsResponsePayload>(
-          resolvedValve.type,
+          operatorValveTypeForCategory(
+            resolvedValve.catalog_category ?? specs.catalog_category,
+            resolvedValve.type,
+          ),
           resolvedValve.construction ?? '',
           resolvedValve.valve_size ?? '',
-          resolvedValve.catalog_category ?? null,
+          resolvedValve.catalog_category ?? specs.catalog_category ?? null,
         )
         setOperatorOptions(res.operator_options ?? [])
         setDaOps(res.da_operators ?? [])
@@ -749,7 +753,7 @@ export function ValveConfigurator({
         setConstructWay(null)
       }
     })()
-  }, [stage, resolvedValve])
+  }, [stage, resolvedValve, specs.catalog_category])
 
   // ── Derived: running unit price (pure on frontend) ────────────────────
   const priceInfo = useMemo(() => {
@@ -869,7 +873,7 @@ export function ValveConfigurator({
   ])
 
   const isDaSa = operatorKey === 'da' || operatorKey === 'sa'
-  const supportsOperatorAccessoryFlow = !!specs.catalog_category && ADDON_ENABLED_CATEGORIES.has(specs.catalog_category)
+  const supportsOperatorAccessoryFlow = supportsOperatorAccessoryFlowCategory(specs.catalog_category)
   const operatorUnlocksAccessories =
     supportsOperatorAccessoryFlow && operatorKey !== null && operatorKey !== 'bare_shaft'
   const canFinishNow = supportsOperatorAccessoryFlow && operatorKey === 'bare_shaft'
@@ -1258,7 +1262,7 @@ export function ValveConfigurator({
             <span className="text-[12px] text-surface-muted">
               {specs.catalog_category
                 ? 'Pick each spec to narrow down.'
-                : 'Choose Valves or Hoses, then product type and sheet.'}
+                : 'Choose family, then type and product sheet (one step at a time).'}
             </span>
             <Button
               type="button"

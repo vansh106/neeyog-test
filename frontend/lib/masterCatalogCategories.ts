@@ -24,7 +24,6 @@ export const FINAL_PRODUCT_MASTER_CATEGORIES: MasterCatalogCategory[] = [
   { key: 'fp_nrv_non_slam', label: 'NRV — Non-slam' },
   { key: 'fp_safety_sv_bsp_f', label: 'Safety — BSP-F' },
   { key: 'fp_safety_sv_tc_end', label: 'Safety — TC end' },
-  { key: 'fp_safety_sv_flanged_150', label: 'Safety — Flanged #150' },
   { key: 'fp_sampling_sv_tc_end', label: 'Sampling — TC end' },
   { key: 'fp_sampling_sv_od_base_weld', label: 'Sampling — OD base weld' },
   { key: 'fp_sight_glass_double_window', label: 'Sight glass — Double window' },

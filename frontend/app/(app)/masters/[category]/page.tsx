@@ -25,10 +25,8 @@ import {
   downloadMastersSheetXlsx,
   fetchAllMastersSheetRows,
 } from '@/lib/mastersSheetExport'
-import {
-  findMasterNavLeafBySlug,
-  flattenMasterNavLeaves,
-} from '@/lib/masterSidebarNav'
+import { findMasterNavLeafBySlug, masterNavActiveQueryFromSearchParams } from '@/lib/masterSidebarNav'
+import type { MastersSheetRowsParams } from '@/lib/queries'
 
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 200] as const
 
@@ -40,22 +38,31 @@ export default function MastersCategoryPage() {
   const params = useParams<{ category: string }>()
   const searchParams = useSearchParams()
   const category = params?.category
-  const variantTypeFilter = searchParams.get('variant_type')?.trim() || undefined
-  const navSlug = searchParams.get('nav')?.trim() || undefined
+  const activeQuery = masterNavActiveQueryFromSearchParams(searchParams)
+
+  const sheetFilters = useMemo((): MastersSheetRowsParams => {
+    const f: MastersSheetRowsParams = {}
+    if (activeQuery.variantType) f.variant_type = activeQuery.variantType
+    if (activeQuery.variantContains) f.variant_contains = activeQuery.variantContains
+    if (activeQuery.variantExcludeContains) f.variant_exclude_contains = activeQuery.variantExcludeContains
+    if (activeQuery.variantContainsAny) f.variant_contains_any = activeQuery.variantContainsAny
+    if (activeQuery.modelNamePrefix) f.model_name_prefix = activeQuery.modelNamePrefix
+    return f
+  }, [
+    activeQuery.variantType,
+    activeQuery.variantContains,
+    activeQuery.variantExcludeContains,
+    activeQuery.variantContainsAny,
+    activeQuery.modelNamePrefix,
+  ])
 
   const sheetDisplayName = useMemo(() => {
-    if (navSlug) {
-      const leaf = findMasterNavLeafBySlug(navSlug)
-      if (leaf) return leaf.label
-    }
-    if (variantTypeFilter && category) {
-      const leaf = flattenMasterNavLeaves().find(
-        (l) => l.key === category && l.variantType === variantTypeFilter && !l.navSlug,
-      )
+    if (activeQuery.navSlug) {
+      const leaf = findMasterNavLeafBySlug(activeQuery.navSlug)
       if (leaf) return leaf.label
     }
     return category?.replace(/_/g, ' ') ?? ''
-  }, [category, navSlug, variantTypeFilter])
+  }, [category, activeQuery.navSlug])
 
   const [limit, setLimit] = useState<number>(50)
   const [skip, setSkip] = useState<number>(0)
@@ -66,12 +73,12 @@ export default function MastersCategoryPage() {
   const { data, isPending } = useSheetRows(category ?? '', {
     skip,
     limit,
-    variant_type: variantTypeFilter,
+    ...sheetFilters,
   })
 
   useEffect(() => {
     setSkip(0)
-  }, [category, variantTypeFilter, navSlug])
+  }, [category, sheetFilters])
 
   const columns = data?.columns ?? []
   const items = data?.items ?? []
@@ -116,17 +123,14 @@ export default function MastersCategoryPage() {
     setExportBusy(true)
     setExportError(null)
     try {
-      const { columns: allCols, items } = await fetchAllMastersSheetRows(
-        category,
-        variantTypeFilter,
-      )
+      const { columns: allCols, items } = await fetchAllMastersSheetRows(category, sheetFilters)
       downloadMastersSheetXlsx(category, allCols, items)
     } catch (e) {
       setExportError(e instanceof Error ? e.message : 'Export failed')
     } finally {
       setExportBusy(false)
     }
-  }, [category, exportBusy, variantTypeFilter])
+  }, [category, exportBusy, sheetFilters])
 
   return (
     <PageShell

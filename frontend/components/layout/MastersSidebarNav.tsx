@@ -10,6 +10,7 @@ import {
   MASTER_SIDEBAR_NAV,
   findMasterNavPathForKey,
   isMasterNavLeafActive,
+  masterNavActiveQueryFromSearchParams,
   masterNavLeafHref,
   type MasterNavLeaf,
   type MasterNavNode,
@@ -24,8 +25,7 @@ function MastersNavNodeRow({
   node,
   depth,
   categoryKey,
-  variantType,
-  navSlug,
+  activeQuery,
   pathPrefix,
   openPaths,
   togglePath,
@@ -33,8 +33,7 @@ function MastersNavNodeRow({
   node: MasterNavNode
   depth: number
   categoryKey: string | null
-  variantType: string | null
-  navSlug: string | null
+  activeQuery: ReturnType<typeof masterNavActiveQueryFromSearchParams>
   pathPrefix: string
   openPaths: Set<string>
   togglePath: (pathKey: string) => void
@@ -42,7 +41,7 @@ function MastersNavNodeRow({
   const pad = 8 + depth * 10
 
   if (node.kind === 'leaf') {
-    const active = isMasterNavLeafActive(node, categoryKey, variantType, navSlug)
+    const active = isMasterNavLeafActive(node, categoryKey, activeQuery)
     return (
       <Link
         href={masterNavLeafHref(node)}
@@ -89,8 +88,7 @@ function MastersNavNodeRow({
             node={child}
             depth={depth + 1}
             categoryKey={categoryKey}
-            variantType={variantType}
-            navSlug={navSlug}
+            activeQuery={activeQuery}
             pathPrefix={pathKey}
             openPaths={openPaths}
             togglePath={togglePath}
@@ -108,15 +106,15 @@ export default function MastersSidebarNav() {
   const pathname = usePathname()
   const searchParams = useSearchParams()
   const categoryKey = activeCategoryKey(pathname)
-  const variantType = searchParams.get('variant_type')
-  const navSlug = searchParams.get('nav')
+  const searchKey = searchParams.toString()
+  const activeQuery = React.useMemo(
+    () => masterNavActiveQueryFromSearchParams(searchParams),
+    [searchKey],
+  )
 
   const activeGroupPathKeys = React.useMemo(() => {
     if (!categoryKey) return []
-    const segments = findMasterNavPathForKey(categoryKey, MASTER_SIDEBAR_NAV, [], {
-      variantType,
-      navSlug,
-    })
+    const segments = findMasterNavPathForKey(categoryKey, MASTER_SIDEBAR_NAV, [], activeQuery)
     if (!segments || segments.length < 2) return []
     const keys: string[] = []
     let prefix = ''
@@ -125,18 +123,26 @@ export default function MastersSidebarNav() {
       keys.push(prefix)
     }
     return keys
-  }, [categoryKey, variantType, navSlug])
+  }, [categoryKey, activeQuery])
+
+  const activeGroupPathKeysKey = activeGroupPathKeys.join('\0')
 
   const [openPaths, setOpenPaths] = React.useState<Set<string>>(() => new Set(activeGroupPathKeys))
 
   React.useEffect(() => {
     if (activeGroupPathKeys.length === 0) return
     setOpenPaths((prev) => {
+      let changed = false
       const next = new Set(prev)
-      for (const key of activeGroupPathKeys) next.add(key)
-      return next
+      for (const key of activeGroupPathKeys) {
+        if (!next.has(key)) {
+          next.add(key)
+          changed = true
+        }
+      }
+      return changed ? next : prev
     })
-  }, [activeGroupPathKeys])
+  }, [activeGroupPathKeysKey, activeGroupPathKeys])
 
   const togglePath = React.useCallback((pathKey: string) => {
     setOpenPaths((prev) => {
@@ -155,8 +161,7 @@ export default function MastersSidebarNav() {
           node={node}
           depth={0}
           categoryKey={categoryKey}
-          variantType={variantType}
-          navSlug={navSlug}
+          activeQuery={activeQuery}
           pathPrefix=""
           openPaths={openPaths}
           togglePath={togglePath}

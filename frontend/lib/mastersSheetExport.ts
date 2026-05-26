@@ -1,6 +1,7 @@
 import * as XLSX from 'xlsx'
 
 import { mastersApi } from '@/lib/api'
+import type { MastersSheetRowsParams } from '@/lib/queries'
 
 /** Matches masters category table: omit internal / metadata columns from exports. */
 export const MASTERS_SHEET_EXPORT_HIDE_COLUMNS = new Set([
@@ -34,7 +35,7 @@ export function visibleMastersExportColumns(columns: string[]): string[] {
 /** Fetches every row for a sheet (API pages at 200). */
 export async function fetchAllMastersSheetRows(
   sheet: string,
-  variantType?: string,
+  filters?: Omit<MastersSheetRowsParams, 'skip' | 'limit'>,
 ): Promise<{
   columns: string[]
   items: Record<string, unknown>[]
@@ -47,7 +48,7 @@ export async function fetchAllMastersSheetRows(
     const res = await mastersApi.listSheetRows<MastersSheetRowsPayload>(sheet, {
       skip,
       limit: SHEET_ROWS_PAGE,
-      ...(variantType ? { variant_type: variantType } : {}),
+      ...filters,
     })
     columns = res.columns ?? []
     const chunk = res.items ?? []

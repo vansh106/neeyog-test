@@ -8,6 +8,7 @@ import uuid
 from datetime import date, datetime
 from typing import Any
 
+import sqlalchemy as sa
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
@@ -45,7 +46,7 @@ SHEET_MODEL_BY_KEY.update(dict(FINAL_PRODUCT_SHEET_MODELS))
 # Human-readable names for manual entry / masters UI (keys stay stable for APIs).
 CATEGORY_LABEL_BY_KEY: dict[str, str] = {
     "butterfly_valve": "Butterfly valve",
-    "operator": "Operator",
+    "operator": "Actuator",
     "brackets_coupler": "Brackets and couplers",
     "sov": "SOV",
     "limit_switch_box": "Limit switch box",
@@ -607,6 +608,10 @@ async def list_sheet_rows(
     skip: int = 0,
     limit: int = 50,
     variant_type: str | None = None,
+    variant_contains: str | None = None,
+    variant_exclude_contains: str | None = None,
+    variant_contains_any: str | None = None,
+    model_name_prefix: str | None = None,
 ) -> dict:
     """Paginated listing of a single sheet table, returning raw columns."""
     settings = get_settings()
@@ -623,6 +628,20 @@ async def list_sheet_rows(
     vt = (variant_type or "").strip()
     if vt and hasattr(model, "variant_type"):
         filters.append(model.variant_type == vt)
+    vc = (variant_contains or "").strip()
+    if vc and hasattr(model, "variant_type"):
+        filters.append(model.variant_type.ilike(f"%{vc}%"))
+    vex = (variant_exclude_contains or "").strip()
+    if vex and hasattr(model, "variant_type"):
+        filters.append(~model.variant_type.ilike(f"%{vex}%"))
+    vany = (variant_contains_any or "").strip()
+    if vany and hasattr(model, "variant_type"):
+        parts = [p.strip() for p in vany.split(",") if p.strip()]
+        if parts:
+            filters.append(sa.or_(*[model.variant_type.ilike(f"%{p}%") for p in parts]))
+    mnp = (model_name_prefix or "").strip()
+    if mnp and hasattr(model, "model_name"):
+        filters.append(model.model_name.ilike(f"{mnp}%"))
 
     total = (
         await db.execute(select(func.count()).select_from(model).where(*filters))

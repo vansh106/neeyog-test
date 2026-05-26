@@ -85,6 +85,28 @@ export function isHoseCatalogCategory(key: string | null | undefined): boolean {
   return configuratorProductFamilyForKey(key) === 'Hoses'
 }
 
+/** Butterfly valve or any sheet under the Ball Valve family in step-1 nav. */
+export function supportsOperatorAccessoryFlowCategory(key: string | null | undefined): boolean {
+  if (!key) return false
+  if (key === 'butterfly_valve') return true
+  if (key.startsWith('fp_ball_valve_')) return true
+  const path = findMasterNavPathForKey(key, CONFIGURATOR_STEP1_PRODUCT_NAV)
+  return path?.includes('Ball Valve') ?? false
+}
+
+/** Valve type label for ``/api/configurator/operators`` (operator_for filter). */
+export function operatorValveTypeForCategory(
+  catalogCategory: string | null | undefined,
+  displayType?: string | null,
+): string {
+  if (!catalogCategory) return displayType?.trim() || 'Valve'
+  if (catalogCategory === 'butterfly_valve') return 'Butterfly Valve'
+  if (catalogCategory.startsWith('fp_ball_valve_')) return 'Ball Valve'
+  const path = findMasterNavPathForKey(catalogCategory, CONFIGURATOR_STEP1_PRODUCT_NAV)
+  if (path?.includes('Ball Valve')) return 'Ball Valve'
+  return displayType?.trim() || 'Valve'
+}
+
 export const HOSE_CATEGORIES_WITH_FITTINGS = new Set([
   'fp_hose_tuder',
   'fp_hose_thunder',
