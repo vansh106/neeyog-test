@@ -43,6 +43,13 @@ SHEET_MODEL_BY_KEY: dict[str, type] = {
 }
 SHEET_MODEL_BY_KEY.update(dict(FINAL_PRODUCT_SHEET_MODELS))
 
+# Sheets kept in DB/import but hidden from masters sidebar, editor, and direct listing.
+MASTERS_HIDDEN_SHEET_KEYS = frozenset(
+    {
+        "fp_ball_valve_casco_1_piece_flanged",
+    }
+)
+
 # Human-readable names for manual entry / masters UI (keys stay stable for APIs).
 CATEGORY_LABEL_BY_KEY: dict[str, str] = {
     "butterfly_valve": "Butterfly valve",
@@ -188,6 +195,8 @@ async def get_product_categories(db: AsyncSession) -> list[dict[str, str | int]]
 
     keyed: list[tuple[str, int]] = []
     for key, model in SHEET_MODEL_BY_KEY.items():
+        if key in MASTERS_HIDDEN_SHEET_KEYS:
+            continue
         total = (
             await db.execute(
                 select(func.count()).select_from(model).where(model.client_id == client_id)
@@ -618,7 +627,7 @@ async def list_sheet_rows(
     client_id = settings.ACTIVE_CLIENT
 
     model = SHEET_MODEL_BY_KEY.get(sheet)
-    if model is None:
+    if model is None or sheet in MASTERS_HIDDEN_SHEET_KEYS:
         raise ValueError(f"Unknown sheet: {sheet}")
 
     skip = max(0, skip)

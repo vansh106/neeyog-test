@@ -737,6 +737,13 @@ export interface AssembledProduct {
   price_breakdown: Array<{ component: string; price: number | null }>
 }
 
+export interface MasterSheetDefaultSupplier {
+  catalog_table: string
+  nav_slug: string | null
+  supplier_id: string
+  supplier_name: string | null
+}
+
 export interface SupplierResponse {
   id: string
   name: string

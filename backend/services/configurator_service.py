@@ -50,7 +50,14 @@ _VALVE_MODEL_BY_TYPE: dict[str, type] = {
 
 # First-step configurator: every sheet-backed product family except accessories / operators.
 _CONFIGURATOR_EXCLUDED_CATEGORIES = frozenset(
-    {"operator", "brackets_coupler", "sov", "limit_switch_box", "positioner"},
+    {
+        "operator",
+        "brackets_coupler",
+        "sov",
+        "limit_switch_box",
+        "positioner",
+        *masters_service.MASTERS_HIDDEN_SHEET_KEYS,
+    },
 )
 
 

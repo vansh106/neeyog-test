@@ -158,6 +158,18 @@ function patch<T>(url: string, data?: unknown): Promise<T> {
   return api.patch(url, data) as unknown as Promise<T>
 }
 
+function put<T>(
+  url: string,
+  data?: unknown,
+  params?: Record<string, unknown>,
+): Promise<T> {
+  return api.put(url, data, { params }) as unknown as Promise<T>
+}
+
+function del<T>(url: string, params?: Record<string, unknown>): Promise<T> {
+  return api.delete(url, { params }) as unknown as Promise<T>
+}
+
 function postFormData<T>(url: string, formData: FormData): Promise<T> {
   return api.post(url, formData) as unknown as Promise<T>
 }
@@ -332,6 +344,24 @@ export const mastersApi = {
     post<T>('/api/masters/products/cascade-match', body),
   postCascadeRows: <T = unknown>(body: { category: string; filters: Record<string, string>; limit?: number }) =>
     post<T>('/api/masters/products/cascade-rows', body),
+  getSheetDefaultSupplier: (sheet: string, navSlug?: string | null) =>
+    get<{ default: import('@/types').MasterSheetDefaultSupplier | null }>(
+      `/api/masters/sheets/${encodeURIComponent(sheet)}/default-supplier`,
+      navSlug ? { nav: navSlug } : undefined,
+    ),
+  setSheetDefaultSupplier: (sheet: string, supplierId: string, navSlug?: string | null) =>
+    put<{ default: import('@/types').MasterSheetDefaultSupplier }>(
+      `/api/masters/sheets/${encodeURIComponent(sheet)}/default-supplier`,
+      { supplier_id: supplierId },
+      navSlug ? { nav: navSlug } : undefined,
+    ),
+  clearSheetDefaultSupplier: (sheet: string, navSlug?: string | null) =>
+    del<{ cleared: boolean }>(
+      `/api/masters/sheets/${encodeURIComponent(sheet)}/default-supplier`,
+      navSlug ? { nav: navSlug } : undefined,
+    ),
+  listSheetDefaultSuppliers: () =>
+    get<{ items: import('@/types').MasterSheetDefaultSupplier[] }>('/api/masters/sheet-default-suppliers'),
 }
 
 export const clientsApi = {

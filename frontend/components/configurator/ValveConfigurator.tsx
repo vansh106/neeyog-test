@@ -5,10 +5,25 @@ import { Check, ChevronLeft, ChevronRight, Loader2, Pencil, Trash2 } from 'lucid
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import {
+  accessoryItemsForCategory,
+  getConfiguratorAccessoryCategories,
+  groupAccessoryItems,
+  type AccessorySubcategory,
+} from '@/lib/accessoriesNav'
 import { cn, formatCurrency } from '@/lib/utils'
 import { useValveCatalog, type CatalogRow, computeDistinctOptions } from '@/hooks/useValveCatalog'
 import { configuratorApi, mastersApi } from '@/lib/api'
+import { pickActiveSupplierId, resolveSupplierForSheet } from '@/lib/sheetDefaultSupplier'
 import {
   catalogPartForSupplierPrice,
   fetchSupplierListPriceInr,
@@ -369,6 +384,8 @@ export function ValveConfigurator({
   const { data: accessoriesData } = useConfiguratorAccessories()
   const accessories: Accessories | null = accessoriesData ?? null
 
+  const accessoryCategories = useMemo(() => getConfiguratorAccessoryCategories(), [])
+
   const [sov, setSov] = useState<AccessoryItem | null>(initialProduct?.sov ?? null)
   const [lsb, setLsb] = useState<AccessoryItem | null>(
     initialProduct?.limit_switch_box ?? null,
@@ -387,12 +404,20 @@ export function ValveConfigurator({
   const [supplierId, setSupplierId] = useState<string | null>(initialProduct?.supplier_id ?? null)
 
   useEffect(() => {
-    if (supplierId) return
-    const active = (suppliers ?? []).filter((s) => s.is_active)
-    if (!active.length) return
-    const pref = active.find((s) => s.is_preferred)
-    setSupplierId(pref?.id ?? active[0].id)
-  }, [supplierId, suppliers])
+    if (supplierId || !specs.catalog_category) return
+    let cancelled = false
+    ;(async () => {
+      const id = await resolveSupplierForSheet(
+        specs.catalog_category!,
+        specs.catalog_nav_slug,
+        suppliers ?? [],
+      )
+      if (!cancelled && id) setSupplierId(id)
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [supplierId, specs.catalog_category, specs.catalog_nav_slug, suppliers])
 
   const [componentPricing, setComponentPricing] = useState<ComponentPricingState>({})
   /** List prices from ``supplier_product_prices`` when catalog rows have no ``price_inr``. */
@@ -906,12 +931,24 @@ export function ValveConfigurator({
       field_values,
     })
     void loadCatalog(pick.key, true)
+    void (async () => {
+      const id = await resolveSupplierForSheet(pick.key, pick.navSlug ?? null, suppliers ?? [])
+      if (id) setSupplierId(id)
+      else {
+        const fallback = pickActiveSupplierId(suppliers ?? [], null)
+        if (fallback) setSupplierId(fallback)
+      }
+    })()
   }
 
   const pickFittingCategory = (key: string) => {
     setFittingCascadeSteps([])
     setFittingSpecs({ catalog_category: key, field_values: {} })
     void loadFittingCatalog(key, true)
+    void (async () => {
+      const id = await resolveSupplierForSheet(key, null, suppliers ?? [])
+      if (id) setSupplierId(id)
+    })()
   }
 
   const pickFittingSpec = (field: string, value: string) => {
@@ -1617,27 +1654,41 @@ export function ValveConfigurator({
 
           {operatorUnlocksAccessories && (
             <>
-              <AccessoryToggleRow
-                label="Solenoid Valve (SOV)"
-                items={accessories?.sov ?? []}
-                value={sov}
-                onChange={setSov}
-              />
-              {sov && renderComponentPricing('sov', 'SOV')}
-              <AccessoryToggleRow
-                label="Limit Switch Box (LSB)"
-                items={accessories?.limit_switch_boxes ?? []}
-                value={lsb}
-                onChange={setLsb}
-              />
-              {lsb && renderComponentPricing('lsb', 'LSB')}
-              <AccessoryToggleRow
-                label="Positioner"
-                items={accessories?.positioners ?? []}
-                value={positioner}
-                onChange={setPositioner}
-              />
-              {positioner && renderComponentPricing('positioner', 'Positioner')}
+              {accessoryCategories.map((cat) => {
+                const items = accessoryItemsForCategory(accessories, cat.catalogKey)
+                const value =
+                  cat.catalogKey === 'sov'
+                    ? sov
+                    : cat.catalogKey === 'limit_switch_box'
+                      ? lsb
+                      : positioner
+                const onChange =
+                  cat.catalogKey === 'sov'
+                    ? setSov
+                    : cat.catalogKey === 'limit_switch_box'
+                      ? setLsb
+                      : setPositioner
+                const pricingKey: SupplierPriceComponentKey =
+                  cat.catalogKey === 'limit_switch_box' ? 'lsb' : cat.catalogKey
+                const pricingLabel =
+                  cat.catalogKey === 'sov'
+                    ? 'SOV'
+                    : cat.catalogKey === 'limit_switch_box'
+                      ? 'LSB'
+                      : 'Positioner'
+                return (
+                  <div key={cat.catalogKey}>
+                    <AccessoryToggleRow
+                      label={cat.uiLabel}
+                      items={items}
+                      subcategories={cat.subcategories}
+                      value={value}
+                      onChange={onChange}
+                    />
+                    {value && renderComponentPricing(pricingKey, pricingLabel)}
+                  </div>
+                )
+              })}
             </>
           )}
 
@@ -1737,16 +1788,23 @@ export function ValveConfigurator({
 function AccessoryToggleRow({
   label,
   items,
+  subcategories,
   value,
   onChange,
 }: {
   label: string
   items: AccessoryItem[]
+  subcategories: AccessorySubcategory[]
   value: AccessoryItem | null
   onChange: (v: AccessoryItem | null) => void
 }) {
   const [open, setOpen] = useState<boolean>(value != null)
   const active = open || value != null
+
+  const groups = useMemo(
+    () => groupAccessoryItems(items, subcategories),
+    [items, subcategories],
+  )
 
   useEffect(() => {
     if (!open) onChange(null)
@@ -1766,34 +1824,47 @@ function AccessoryToggleRow({
         </label>
       </div>
       {active && (
-        <div className="mt-2">
-          <Select
-            value={toSelectValue(value?.id ?? '')}
-            onValueChange={(raw) => {
-              const id = fromSelectValue(raw)
-              const item = items.find((x) => x.id === id) ?? null
-              onChange(item)
-            }}
-          >
-            <SelectTrigger className="h-10 w-full min-w-0">
-              <SelectValue placeholder={`Select ${label}`}>
-                {value?.type ?? null}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={SELECT_EMPTY}>
-                <span className="text-muted-foreground">Select…</span>
-              </SelectItem>
-              {items.map((item) => (
-                <SelectItem key={item.id} value={item.id}>
-                  {item.type} —{' '}
-                  {item.price != null ? formatCurrency(item.price) : '₹TBD'}
+        <div className="mt-2 space-y-2">
+          {groups.length === 0 ? (
+            <p className="text-[12px] text-surface-muted">No models available for this category.</p>
+          ) : (
+            <Select
+              value={toSelectValue(value?.id ?? '')}
+              onValueChange={(raw) => {
+                const id = fromSelectValue(raw)
+                const item = items.find((x) => x.id === id) ?? null
+                onChange(item)
+              }}
+            >
+              <SelectTrigger className="h-10 w-full min-w-0">
+                <SelectValue placeholder={`Select ${label}`}>
+                  {value?.type ?? null}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent className="max-h-[min(320px,70vh)]">
+                <SelectItem value={SELECT_EMPTY}>
+                  <span className="text-muted-foreground">Select…</span>
                 </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+                {groups.map((group) => (
+                  <SelectGroup key={group.label}>
+                    <SelectLabel className="text-[11px] font-semibold uppercase tracking-wide text-[#8A9488]">
+                      {group.label}
+                    </SelectLabel>
+                    {group.items.map((item) => (
+                      <SelectItem key={item.id} value={item.id}>
+                        <span className="line-clamp-2 text-left">
+                          {item.type} —{' '}
+                          {item.price != null ? formatCurrency(item.price) : '₹TBD'}
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
           {value && (
-            <p className="mt-1 font-mono text-[12px] text-brand-green-700">
+            <p className="font-mono text-[12px] text-brand-green-700">
               {value.type} —{' '}
               {value.price != null ? `${formatCurrency(value.price)} added` : '₹TBD'}
             </p>

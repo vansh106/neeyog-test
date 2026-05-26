@@ -29,6 +29,51 @@ class CascadeRowsBody(BaseModel):
     limit: int = 200
 
 
+class SetSheetDefaultSupplierBody(BaseModel):
+    supplier_id: str
+
+
+@router.get("/sheet-default-suppliers")
+async def list_sheet_default_suppliers_route(
+    _user: CurrentUser = Depends(require_permission(Permission.MASTERS_VIEW)),
+    db: AsyncSession = Depends(get_db),
+):
+    return await masters_controller.handle_list_sheet_default_suppliers(db)
+
+
+@router.get("/sheets/{sheet}/default-supplier")
+async def get_sheet_default_supplier_route(
+    sheet: str,
+    nav: str | None = Query(None, description="Masters nav leaf slug (empty = whole sheet)"),
+    _user: CurrentUser = Depends(require_permission(Permission.MASTERS_VIEW)),
+    db: AsyncSession = Depends(get_db),
+):
+    return await masters_controller.handle_get_sheet_default_supplier(db, sheet, nav=nav)
+
+
+@router.put("/sheets/{sheet}/default-supplier")
+async def set_sheet_default_supplier_route(
+    sheet: str,
+    body: SetSheetDefaultSupplierBody,
+    nav: str | None = Query(None),
+    _user: CurrentUser = Depends(require_permission(Permission.MASTERS_EDIT)),
+    db: AsyncSession = Depends(get_db),
+):
+    return await masters_controller.handle_set_sheet_default_supplier(
+        db, sheet, body.supplier_id, nav=nav
+    )
+
+
+@router.delete("/sheets/{sheet}/default-supplier")
+async def clear_sheet_default_supplier_route(
+    sheet: str,
+    nav: str | None = Query(None),
+    _user: CurrentUser = Depends(require_permission(Permission.MASTERS_EDIT)),
+    db: AsyncSession = Depends(get_db),
+):
+    return await masters_controller.handle_clear_sheet_default_supplier(db, sheet, nav=nav)
+
+
 @router.get("/categories")
 async def list_catalog_categories_route(
     _user: CurrentUser = Depends(require_permission(Permission.MASTERS_VIEW)),

@@ -4,11 +4,13 @@ Receives validated data from routers, calls services, and shapes HTTP responses.
 Catches service exceptions and converts them into appropriate HTTP status codes.
 """
 
+import uuid
+
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.exceptions import ProductNotFoundError
-from services import masters_service
+from services import masters_service, sheet_default_supplier_service
 
 
 async def handle_list_products(
@@ -133,6 +135,74 @@ async def handle_cascade_rows(
 ) -> dict:
     try:
         return await masters_service.get_cascade_matching_rows(category, filters, db, limit=limit)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+async def handle_get_sheet_default_supplier(
+    db: AsyncSession,
+    sheet: str,
+    nav: str | None = None,
+) -> dict:
+    try:
+        row = await sheet_default_supplier_service.resolve_sheet_default_supplier(sheet, nav, db)
+        return {"default": row}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+async def handle_list_sheet_default_suppliers(db: AsyncSession) -> dict:
+    try:
+        client_id = sheet_default_supplier_service.active_client_id()
+        rows = await sheet_default_supplier_service.list_sheet_default_suppliers(client_id, db)
+        return {
+            "items": [
+                sheet_default_supplier_service.row_to_dict(r)
+                for r in rows
+                if r.supplier is None or r.supplier.is_active
+            ],
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+async def handle_set_sheet_default_supplier(
+    db: AsyncSession,
+    sheet: str,
+    supplier_id: str,
+    nav: str | None = None,
+) -> dict:
+    try:
+        sid = uuid.UUID(supplier_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail="Invalid supplier id") from e
+    try:
+        client_id = sheet_default_supplier_service.active_client_id()
+        row = await sheet_default_supplier_service.set_sheet_default_supplier(
+            client_id, sheet, nav, sid, db
+        )
+        return {"default": sheet_default_supplier_service.row_to_dict(row)}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+async def handle_clear_sheet_default_supplier(
+    db: AsyncSession,
+    sheet: str,
+    nav: str | None = None,
+) -> dict:
+    try:
+        client_id = sheet_default_supplier_service.active_client_id()
+        cleared = await sheet_default_supplier_service.clear_sheet_default_supplier(
+            client_id, sheet, nav, db
+        )
+        return {"cleared": cleared}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

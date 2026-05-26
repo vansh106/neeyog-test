@@ -188,11 +188,6 @@ export const MASTER_SIDEBAR_NAV: MasterNavNode[] = [
               },
               {
                 kind: 'leaf',
-                key: 'fp_ball_valve_casco_1_piece_flanged',
-                label: '1-Piece Ball Valve Casco Make (flanged)',
-              },
-              {
-                kind: 'leaf',
                 key: 'fp_ball_valve_unison_1_piece_multi_end',
                 label: '1-Piece Ball Valve Unison Make',
               },

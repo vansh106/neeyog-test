@@ -577,6 +577,36 @@ class SupplierCategoryPricing(Base):
     supplier: Mapped["Supplier"] = relationship("Supplier", back_populates="category_pricing")
 
 
+class MasterSheetDefaultSupplier(Base):
+    """Default supplier for a masters catalog sheet (table + optional nav leaf)."""
+
+    __tablename__ = "master_sheet_default_suppliers"
+    __table_args__ = (
+        UniqueConstraint(
+            "client_id",
+            "catalog_table",
+            "nav_slug",
+            name="uq_master_sheet_default_supplier",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    client_id: Mapped[str] = mapped_column(String(100), nullable=False, default="parth_valves", index=True)
+    catalog_table: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    nav_slug: Mapped[str] = mapped_column(String(120), nullable=False, default="", index=True)
+    supplier_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("suppliers.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+
+    supplier: Mapped["Supplier"] = relationship("Supplier")
+
+
 class ClientPricingConfig(Base):
     """Per-tenant (string client_id) margin + default customer discount + default supplier."""
 

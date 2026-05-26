@@ -51,7 +51,6 @@ export const FBV_MASTER_CATEGORIES: MasterCatalogCategory[] = [
 
 export const BALL_VALVE_MASTER_CATEGORIES: MasterCatalogCategory[] = [
   { key: 'fp_ball_valve_casco_1_piece_multi_end', label: 'Ball Valve — 1-piece (multi-end)' },
-  { key: 'fp_ball_valve_casco_1_piece_flanged', label: 'Ball Valve — 1-piece (flanged)' },
   { key: 'fp_ball_valve_casco_2_piece', label: 'Ball Valve — 2-piece' },
   { key: 'fp_ball_valve_casco_3_piece', label: 'Ball Valve — 3-piece' },
   { key: 'fp_ball_valve_casco_3_piece_ext_stem', label: 'Ball Valve — 3-piece (ext. stem)' },

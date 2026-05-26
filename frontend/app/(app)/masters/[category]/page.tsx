@@ -10,7 +10,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Button } from '@/components/ui/button'
 import { Database, Download, Loader2 } from 'lucide-react'
 import { useSheetRows } from '@/lib/queries'
-import { suppliersApi } from '@/lib/api'
+import { mastersApi, suppliersApi } from '@/lib/api'
 import { formatCurrency } from '@/lib/utils'
 import {
   Select,
@@ -64,9 +64,14 @@ export default function MastersCategoryPage() {
     return category?.replace(/_/g, ' ') ?? ''
   }, [category, activeQuery.navSlug])
 
+  const navSlug = activeQuery.navSlug ?? ''
+
   const [limit, setLimit] = useState<number>(50)
   const [skip, setSkip] = useState<number>(0)
   const [supplierId, setSupplierId] = useState<string>('') // empty = no supplier selected
+  const [defaultSupplierDraft, setDefaultSupplierDraft] = useState<string>('')
+  const [defaultSaving, setDefaultSaving] = useState(false)
+  const [defaultError, setDefaultError] = useState<string | null>(null)
   const [exportBusy, setExportBusy] = useState(false)
   const [exportError, setExportError] = useState<string | null>(null)
 
@@ -90,10 +95,60 @@ export default function MastersCategoryPage() {
     queryFn: () => suppliersApi.getSuppliers(true),
     staleTime: 60_000,
   })
+
+  const { data: sheetDefaultData, refetch: refetchSheetDefault } = useQuery({
+    queryKey: ['sheetDefaultSupplier', category, navSlug],
+    queryFn: () => mastersApi.getSheetDefaultSupplier(category!, navSlug || undefined),
+    enabled: Boolean(category),
+    staleTime: 30_000,
+  })
+
+  const sheetDefaultSupplierId = sheetDefaultData?.default?.supplier_id ?? ''
+
+  useEffect(() => {
+    setDefaultSupplierDraft(sheetDefaultSupplierId)
+    if (sheetDefaultSupplierId) {
+      setSupplierId(sheetDefaultSupplierId)
+    } else {
+      setSupplierId('')
+    }
+  }, [sheetDefaultSupplierId, category, navSlug])
+
+  const saveSheetDefaultSupplier = useCallback(
+    async (nextId: string) => {
+      if (!category) return
+      setDefaultSaving(true)
+      setDefaultError(null)
+      try {
+        if (!nextId) {
+          await mastersApi.clearSheetDefaultSupplier(category, navSlug || undefined)
+        } else {
+          await mastersApi.setSheetDefaultSupplier(category, nextId, navSlug || undefined)
+        }
+        await refetchSheetDefault()
+        setDefaultSupplierDraft(nextId)
+        if (nextId) setSupplierId(nextId)
+      } catch (e) {
+        setDefaultError(e instanceof Error ? e.message : 'Failed to save default supplier')
+      } finally {
+        setDefaultSaving(false)
+      }
+    },
+    [category, navSlug, refetchSheetDefault],
+  )
   const supplierLabel = useMemo(() => {
     if (!supplierId) return null
     return suppliers.find((s) => s.id === supplierId)?.name ?? null
   }, [supplierId, suppliers])
+
+  const defaultSupplierLabel = useMemo(() => {
+    if (!defaultSupplierDraft) return null
+    return (
+      suppliers.find((s) => s.id === defaultSupplierDraft)?.name ??
+      sheetDefaultData?.default?.supplier_name ??
+      null
+    )
+  }, [defaultSupplierDraft, suppliers, sheetDefaultData?.default?.supplier_name])
 
   const { data: supplierPrices = [] } = useQuery<SupplierPriceRow[]>({
     queryKey: ['supplierPrices', supplierId, category ?? ''],
@@ -149,6 +204,43 @@ export default function MastersCategoryPage() {
         </Button>
       }
     >
+      <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-surface-border bg-[#F9FAF7] px-3 py-2.5">
+        <span className="text-[12px] font-medium text-gray-800">Default supplier for this sheet</span>
+        <Select
+          value={defaultSupplierDraft || '__none__'}
+          disabled={defaultSaving || !category}
+          onValueChange={(v) => {
+            const next = v === '__none__' || v == null ? '' : v
+            setDefaultSupplierDraft(next)
+            void saveSheetDefaultSupplier(next)
+          }}
+        >
+          <SelectTrigger className="h-9 w-[260px] bg-white">
+            <SelectValue placeholder="Not set">{defaultSupplierLabel}</SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__none__">
+              <span className="text-muted-foreground">Not set</span>
+            </SelectItem>
+            {suppliers.map((s) => (
+              <SelectItem key={s.id} value={s.id}>
+                {s.name}
+                {s.is_preferred ? ' ★' : ''}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {defaultSaving ? (
+          <span className="text-[12px] text-surface-muted">Saving…</span>
+        ) : null}
+        {defaultError ? (
+          <span className="text-[12px] text-red-600">{defaultError}</span>
+        ) : null}
+        <span className="text-[11px] text-[#8A9488]">
+          Used automatically in manual upload when this product sheet is selected.
+        </span>
+      </div>
+
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="text-[14px] text-surface-muted">
           <span className="font-medium text-gray-900">{total}</span> row{total === 1 ? '' : 's'}
@@ -169,7 +261,7 @@ export default function MastersCategoryPage() {
             <span className="w-full text-[12px] text-red-600 sm:w-auto">{exportError}</span>
           ) : null}
 
-          <span className="ml-2 text-[12px] text-[#8A9488]">Supplier</span>
+          <span className="ml-2 text-[12px] text-[#8A9488]">View prices as</span>
           <Select
             value={supplierId || '__none__'}
             onValueChange={(v) => setSupplierId(v === '__none__' || v == null ? '' : v)}
