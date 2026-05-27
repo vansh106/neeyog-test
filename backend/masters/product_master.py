@@ -68,7 +68,7 @@ _KEYWORD_COLUMNS: dict[str, list[str]] = {
         "seat",
         "source_file",
     ],
-    "operator": ["operator_for", "construct", "size_text", "model_name"],
+    "operator": ["operator_for", "model_name"],
     "brackets_coupler": ["bracket_operator", "construct", "size_text"],
     "sov": ["variant_type"],
     "limit_switch_box": ["variant_type"],

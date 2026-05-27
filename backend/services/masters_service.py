@@ -50,6 +50,11 @@ MASTERS_HIDDEN_SHEET_KEYS = frozenset(
     }
 )
 
+# Columns omitted from masters table/export for specific sheets (data remains in DB).
+MASTERS_SHEET_DISPLAY_COLUMNS: dict[str, tuple[str, ...]] = {
+    "operator": ("operator_for", "model_name"),
+}
+
 # Human-readable names for manual entry / masters UI (keys stay stable for APIs).
 CATEGORY_LABEL_BY_KEY: dict[str, str] = {
     "butterfly_valve": "Butterfly valve",
@@ -91,7 +96,7 @@ CASCADE_STEPS: dict[str, list[str]] = {
         "ball_disc",
         "seat",
     ],
-    "operator": ["operator_for", "construct", "size_text", "model_name"],
+    "operator": ["operator_for", "model_name"],
     "brackets_coupler": ["bracket_operator", "construct", "size_text"],
     "sov": ["variant_type"],
     "limit_switch_box": ["variant_type"],
@@ -670,12 +675,14 @@ async def list_sheet_rows(
     stmt = select(model).where(*filters).order_by(*order_parts).offset(skip).limit(limit)
     rows = (await db.execute(stmt)).scalars().all()
 
-    columns = list(model.__table__.columns.keys())
+    all_columns = list(model.__table__.columns.keys())
+    display_cols = list(MASTERS_SHEET_DISPLAY_COLUMNS.get(sheet, all_columns))
+    columns = [c for c in display_cols if c in all_columns]
 
     items: list[dict] = []
     for r in rows:
-        d = {c: _jsonable(getattr(r, c)) for c in columns}
-        items.append(d)
+        d = {c: _jsonable(getattr(r, c)) for c in all_columns}
+        items.append({c: d[c] for c in columns})
 
     return {
         "sheet": sheet,

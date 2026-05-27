@@ -20,8 +20,6 @@ export const CATALOG_SPEC_FIELDS: Record<string, CatalogSpecField[]> = {
   ],
   operator: [
     { key: 'operator_for', label: 'Operator For (Valve Type)' },
-    { key: 'construct', label: 'Construct (2 Way / 3 Way)' },
-    { key: 'size_text', label: 'Size' },
     { key: 'model_name', label: 'Model Name' },
     { key: 'price', label: 'Price (₹)' },
     { key: 'discount_override', label: 'Discount Override (%)' },
