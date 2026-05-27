@@ -23,6 +23,7 @@ from db.final_product_models import (
     FINAL_PRODUCT_SHEET_MODELS,
     FinalProductSheetMarker,
 )
+from db.butterfly_sheet_constants import BUTTERFLY_NAV_SOURCE_FILE
 from db.sheet_models import (
     CatalogBracketsCouplerRow,
     CatalogButterflyValveRow,
@@ -626,6 +627,7 @@ async def list_sheet_rows(
     variant_exclude_contains: str | None = None,
     variant_contains_any: str | None = None,
     model_name_prefix: str | None = None,
+    nav_slug: str | None = None,
 ) -> dict:
     """Paginated listing of a single sheet table, returning raw columns."""
     settings = get_settings()
@@ -656,6 +658,11 @@ async def list_sheet_rows(
     mnp = (model_name_prefix or "").strip()
     if mnp and hasattr(model, "model_name"):
         filters.append(model.model_name.ilike(f"{mnp}%"))
+    nav = (nav_slug or "").strip()
+    if sheet == "butterfly_valve" and nav and hasattr(model, "source_file"):
+        source_label = BUTTERFLY_NAV_SOURCE_FILE.get(nav)
+        if source_label:
+            filters.append(model.source_file == source_label)
 
     total = (
         await db.execute(select(func.count()).select_from(model).where(*filters))

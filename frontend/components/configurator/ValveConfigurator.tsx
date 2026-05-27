@@ -62,6 +62,10 @@ const toSelectValue = (v: string | null | undefined): string =>
 const fromSelectValue = (v: string | null | undefined): string =>
   !v || v === SELECT_EMPTY ? '' : v
 
+/** Long catalog spec labels: fixed-height trigger with ellipsis; full text in wide dropdown + title tooltip. */
+const SPEC_SELECT_TRIGGER_CLASS =
+  'h-10 w-full min-w-0 overflow-hidden py-0 *:data-[slot=select-value]:min-w-0 *:data-[slot=select-value]:truncate *:data-[slot=select-value]:whitespace-nowrap *:data-[slot=select-value]:text-left'
+
 function catalogRowToValveProduct(
   row: CatalogRow,
   displayType: string,
@@ -295,11 +299,7 @@ export function CompletedProductCard({
         )}
         <p className="text-surface-muted">
           Operator: {OperatorKeyLabel(product.operator_key)}
-          {product.operator_model
-            ? ` — ${product.operator_model.model_name}${
-                product.operator_model.size ? ` (${product.operator_model.size})` : ''
-              }`
-            : ''}
+          {product.operator_model ? ` — ${product.operator_model.model_name}` : ''}
         </p>
         {product.sov && <p className="text-surface-muted">SOV: {product.sov.type}</p>}
         {product.limit_switch_box && (
@@ -373,7 +373,6 @@ export function ValveConfigurator({
   const [operatorOptions, setOperatorOptions] = useState<OperatorOption[]>([])
   const [daOps, setDaOps] = useState<OperatorModel[]>([])
   const [saOps, setSaOps] = useState<OperatorModel[]>([])
-  const [constructWay, setConstructWay] = useState<string | null>(null)
   const [operatorKey, setOperatorKey] = useState<OperatorKey | null>(
     initialProduct?.operator_key ?? null,
   )
@@ -755,7 +754,6 @@ export function ValveConfigurator({
   useEffect(() => {
     if (stage === 'valve_specs' || stage === 'complete') return
     if (!resolvedValve) return
-    if (!resolvedValve.construction && !resolvedValve.valve_size) return
     ;(async () => {
       try {
         const res = await configuratorApi.getOperators<OperatorsResponsePayload>(
@@ -770,12 +768,10 @@ export function ValveConfigurator({
         setOperatorOptions(res.operator_options ?? [])
         setDaOps(res.da_operators ?? [])
         setSaOps(res.sa_operators ?? [])
-        setConstructWay(res.construct_way ?? null)
       } catch {
         setOperatorOptions([])
         setDaOps([])
         setSaOps([])
-        setConstructWay(null)
       }
     })()
   }, [stage, resolvedValve, specs.catalog_category])
@@ -902,8 +898,10 @@ export function ValveConfigurator({
   const operatorUnlocksAccessories =
     supportsOperatorAccessoryFlow && operatorKey !== null && operatorKey !== 'bare_shaft'
   const canFinishNow = supportsOperatorAccessoryFlow && operatorKey === 'bare_shaft'
-  const availableModels: OperatorModel[] =
-    operatorKey === 'da' ? daOps : operatorKey === 'sa' ? saOps : []
+  const availableModels: OperatorModel[] = useMemo(() => {
+    const list = operatorKey === 'da' ? daOps : operatorKey === 'sa' ? saOps : []
+    return list
+  }, [operatorKey, daOps, saOps])
 
   useEffect(() => {
     if (supportsOperatorAccessoryFlow) return
@@ -1242,6 +1240,7 @@ export function ValveConfigurator({
                     if (pOpts.length <= 1) return true
                     return !!(specs.field_values[p.key] && String(specs.field_values[p.key]).trim())
                   })
+                const selected = String(specs.field_values[field] ?? '').trim()
                 return (
                   <div key={field} className="space-y-1.5">
                     <div className="text-[10px] font-medium uppercase tracking-wide text-[#8A9488]">
@@ -1252,17 +1251,20 @@ export function ValveConfigurator({
                       onValueChange={(raw) => pickSpec(field, fromSelectValue(raw ?? ''))}
                       disabled={!priorOk}
                     >
-                      <SelectTrigger className="h-10 w-full min-w-0">
+                      <SelectTrigger
+                        className={SPEC_SELECT_TRIGGER_CLASS}
+                        title={selected || undefined}
+                      >
                         <SelectValue
                           placeholder={!priorOk ? 'Complete fields above' : `Select ${step.label}`}
                         />
                       </SelectTrigger>
-                      <SelectContent>
+                      <SelectContent variant="wide" align="start">
                         <SelectItem value={SELECT_EMPTY}>
                           <span className="text-muted-foreground">Select…</span>
                         </SelectItem>
                         {opts.map((o) => (
-                          <SelectItem key={`${field}:${o}`} value={o}>
+                          <SelectItem key={`${field}:${o}`} value={o} multiline title={o}>
                             {o}
                           </SelectItem>
                         ))}
@@ -1396,19 +1398,22 @@ export function ValveConfigurator({
                         onValueChange={(raw) => pickFittingSpec(field, fromSelectValue(raw ?? ''))}
                         disabled={!priorOk}
                       >
-                        <SelectTrigger className="h-10 w-full min-w-0">
+                        <SelectTrigger
+                          className={SPEC_SELECT_TRIGGER_CLASS}
+                          title={String(fittingSpecs.field_values[field] ?? '').trim() || undefined}
+                        >
                           <SelectValue
                             placeholder={
                               !priorOk ? 'Complete fields above' : `Select ${step.label}`
                             }
                           />
                         </SelectTrigger>
-                        <SelectContent>
+                        <SelectContent variant="wide" align="start">
                           <SelectItem value={SELECT_EMPTY}>
                             <span className="text-muted-foreground">Select…</span>
                           </SelectItem>
                           {opts.map((o) => (
-                            <SelectItem key={`${field}:${o}`} value={o}>
+                            <SelectItem key={`${field}:${o}`} value={o} multiline title={o}>
                               {o}
                             </SelectItem>
                           ))}
@@ -1458,12 +1463,6 @@ export function ValveConfigurator({
       {/* ── STAGE 2: Operator type ──────────────────────────────────── */}
       {stage === 'operator' && supportsOperatorAccessoryFlow && (
         <div className="mt-4 space-y-4">
-          {constructWay && (
-            <div className="rounded-lg border border-surface-border bg-surface-page px-3 py-2 text-[12px] text-surface-muted">
-              Valve construct: <span className="font-semibold text-gray-900">{constructWay}</span>.
-              DA and SA actuators are listed by construct — you&apos;ll pick the exact model in the next step.
-            </div>
-          )}
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             {operatorOptions.map((opt) => {
               const selected = operatorKey === opt.key
@@ -1506,7 +1505,7 @@ export function ValveConfigurator({
                       )}
                     >
                       {models.length > 0
-                        ? `${models.length} actuator model${models.length === 1 ? '' : 's'} available for ${constructWay ?? 'this construct'}`
+                        ? `${models.length} actuator model${models.length === 1 ? '' : 's'} available`
                         : 'No actuator data — price on request'}
                     </p>
                   )}
@@ -1572,9 +1571,7 @@ export function ValveConfigurator({
       {stage === 'actuator' && isDaSa && supportsOperatorAccessoryFlow && (
         <div className="mt-4 space-y-4">
           <div className="rounded-lg border border-surface-border bg-surface-page px-3 py-2 text-[12px]">
-            Pick the {operatorKey === 'da' ? 'Double Acting' : 'Single Acting'} actuator for a{' '}
-            <span className="font-semibold text-gray-900">{constructWay ?? ''}</span> valve. Actuator
-            sizes are independent of the valve port size — choose the one the client needs.
+            Pick the {operatorKey === 'da' ? 'Double Acting' : 'Single Acting'} actuator model.
           </div>
 
           <div className="space-y-1.5">
@@ -1589,24 +1586,29 @@ export function ValveConfigurator({
                 setOperatorModel(m)
               }}
             >
-              <SelectTrigger className="h-11 w-full">
-                <SelectValue placeholder="Select an actuator model">
-                  {operatorModel
+              <SelectTrigger
+                className={SPEC_SELECT_TRIGGER_CLASS}
+                title={
+                  operatorModel
                     ? `${operatorModel.model_name}${operatorModel.size ? ` — ${operatorModel.size}` : ''}`
-                    : null}
+                    : undefined
+                }
+              >
+                <SelectValue placeholder="Select an actuator model">
+                  {operatorModel?.model_name ?? null}
                 </SelectValue>
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent variant="wide" align="start">
                 <SelectItem value={SELECT_EMPTY}>
                   <span className="text-muted-foreground">Select…</span>
                 </SelectItem>
                 {availableModels.map((m) => (
-                  <SelectItem key={m.id} value={m.id}>
+                  <SelectItem
+                    key={m.id}
+                    value={m.id}
+                    title={`${m.model_name}${m.size ? ` — ${m.size}` : ''}`}
+                  >
                     {m.model_name}
-                    {m.size ? ` — ${m.size}` : ''} —{' '}
-                    {componentListPrice('operator', m.base_price) != null
-                      ? formatCurrency(componentListPrice('operator', m.base_price)!)
-                      : '₹TBD'}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -1618,7 +1620,6 @@ export function ValveConfigurator({
               <p className="font-semibold text-brand-green-700">
                 <Check className="mr-1 inline size-4" />
                 {operatorModel.model_name}
-                {operatorModel.size ? ` — ${operatorModel.size}` : ''}
               </p>
               <p className="mt-1 font-mono text-brand-green-700">
                 {componentListPrice('operator', operatorModel.base_price) != null
@@ -1836,12 +1837,15 @@ function AccessoryToggleRow({
                 onChange(item)
               }}
             >
-              <SelectTrigger className="h-10 w-full min-w-0">
+              <SelectTrigger
+                className={SPEC_SELECT_TRIGGER_CLASS}
+                title={value?.type ?? undefined}
+              >
                 <SelectValue placeholder={`Select ${label}`}>
                   {value?.type ?? null}
                 </SelectValue>
               </SelectTrigger>
-              <SelectContent className="max-h-[min(320px,70vh)]">
+              <SelectContent variant="wide" align="start">
                 <SelectItem value={SELECT_EMPTY}>
                   <span className="text-muted-foreground">Select…</span>
                 </SelectItem>
@@ -1850,14 +1854,16 @@ function AccessoryToggleRow({
                     <SelectLabel className="text-[11px] font-semibold uppercase tracking-wide text-[#8A9488]">
                       {group.label}
                     </SelectLabel>
-                    {group.items.map((item) => (
-                      <SelectItem key={item.id} value={item.id}>
-                        <span className="line-clamp-2 text-left">
-                          {item.type} —{' '}
-                          {item.price != null ? formatCurrency(item.price) : '₹TBD'}
-                        </span>
-                      </SelectItem>
-                    ))}
+                    {group.items.map((item) => {
+                      const optLabel = `${item.type} — ${
+                        item.price != null ? formatCurrency(item.price) : '₹TBD'
+                      }`
+                      return (
+                        <SelectItem key={item.id} value={item.id} multiline title={optLabel}>
+                          {optLabel}
+                        </SelectItem>
+                      )
+                    })}
                   </SelectGroup>
                 ))}
               </SelectContent>

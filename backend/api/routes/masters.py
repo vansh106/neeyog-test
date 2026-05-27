@@ -190,6 +190,7 @@ async def list_sheet_rows_route(
     variant_exclude_contains: str | None = Query(None, description="Exclude variant_type containing substring"),
     variant_contains_any: str | None = Query(None, description="Comma-separated OR substrings for variant_type"),
     model_name_prefix: str | None = Query(None, description="Operator model_name prefix (DA/SA)"),
+    nav: str | None = Query(None, description="Masters nav leaf slug (butterfly make sheets)"),
     db: AsyncSession = Depends(get_db),
     _user: CurrentUser = Depends(require_permission(Permission.MASTERS_VIEW)),
 ):
@@ -203,6 +204,7 @@ async def list_sheet_rows_route(
         variant_exclude_contains=variant_exclude_contains,
         variant_contains_any=variant_contains_any,
         model_name_prefix=model_name_prefix,
+        nav=nav,
     )
 
 

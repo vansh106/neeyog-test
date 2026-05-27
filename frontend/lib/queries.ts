@@ -144,6 +144,7 @@ export type MastersSheetRowsParams = {
   variant_exclude_contains?: string
   variant_contains_any?: string
   model_name_prefix?: string
+  nav?: string
 }
 
 export function useSheetRows(sheet: string, params?: MastersSheetRowsParams) {

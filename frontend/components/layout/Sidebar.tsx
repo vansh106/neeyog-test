@@ -20,7 +20,7 @@ import {
 } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
-import { useUIStore } from '@/lib/store'
+import { SIDEBAR_WIDTH, useUIStore } from '@/lib/store'
 import { useEmailStore } from '@/stores/emailStore'
 import { Permissions } from '@/lib/permissions'
 import { useAuthStore } from '@/stores/authStore'
@@ -50,10 +50,44 @@ export default function Sidebar() {
   const hasPermission = useAuthStore((s) => s.hasPermission)
   const isAdminOrAbove = useAuthStore((s) => s.isAdminOrAbove())
   const logout = useAuthStore((s) => s.logout)
-  const { sidebarCollapsed, toggleSidebar } = useUIStore()
+  const { sidebarCollapsed, sidebarWidth, toggleSidebar, setSidebarWidth } = useUIStore()
   const unreadCount = useEmailStore((s) => s.unread_count)
   const mastersActive = pathname === '/masters' || pathname.startsWith('/masters/')
   const [mastersOpen, setMastersOpen] = React.useState<boolean>(mastersActive)
+  const [isResizing, setIsResizing] = React.useState(false)
+  const resizeStart = React.useRef<{ x: number; width: number } | null>(null)
+
+  const asideWidth = sidebarCollapsed ? SIDEBAR_WIDTH.collapsed : sidebarWidth
+
+  const onResizePointerDown = React.useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      if (sidebarCollapsed) return
+      e.preventDefault()
+      resizeStart.current = { x: e.clientX, width: sidebarWidth }
+      setIsResizing(true)
+      e.currentTarget.setPointerCapture(e.pointerId)
+    },
+    [sidebarCollapsed, sidebarWidth],
+  )
+
+  const onResizePointerMove = React.useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      if (!resizeStart.current) return
+      const delta = e.clientX - resizeStart.current.x
+      setSidebarWidth(resizeStart.current.width + delta)
+    },
+    [setSidebarWidth],
+  )
+
+  const onResizePointerUp = React.useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    resizeStart.current = null
+    setIsResizing(false)
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId)
+    } catch {
+      /* already released */
+    }
+  }, [])
 
   const visibleNav = NAV_ITEMS.filter((item) => {
     if ('adminOnly' in item && item.adminOnly) return isAdminOrAbove
@@ -64,9 +98,10 @@ export default function Sidebar() {
   return (
     <aside
       className={cn(
-        'flex h-screen min-h-0 w-[220px] flex-shrink-0 flex-col overflow-hidden bg-surface-sidebar transition-all duration-200',
-        sidebarCollapsed && 'w-16',
+        'relative flex h-screen min-h-0 flex-shrink-0 flex-col overflow-hidden bg-surface-sidebar',
+        !isResizing && 'transition-[width] duration-200 ease-out',
       )}
+      style={{ width: asideWidth }}
     >
       <div
         className={cn(
@@ -85,7 +120,7 @@ export default function Sidebar() {
         )}
       </div>
 
-      <nav className="min-h-0 flex-1 space-y-0.5 overflow-x-hidden overflow-y-auto overscroll-y-contain px-2 [-webkit-overflow-scrolling:touch]">
+      <nav className="min-h-0 flex-1 space-y-0.5 overflow-y-auto overflow-x-hidden overscroll-y-contain px-2 [-webkit-overflow-scrolling:touch]">
         {visibleNav.map((item) => {
           if (item.href === '/masters') {
             return (
@@ -188,6 +223,24 @@ export default function Sidebar() {
           {!sidebarCollapsed && <span className="truncate">Log out</span>}
         </button>
       </div>
+
+      {!sidebarCollapsed && (
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize sidebar"
+          title="Drag to resize sidebar"
+          onPointerDown={onResizePointerDown}
+          onPointerMove={onResizePointerMove}
+          onPointerUp={onResizePointerUp}
+          onPointerCancel={onResizePointerUp}
+          className={cn(
+            'absolute right-0 top-0 z-10 h-full w-1.5 cursor-col-resize touch-none',
+            'hover:bg-brand-green-400/40',
+            isResizing && 'bg-brand-green-400/60',
+          )}
+        />
+      )}
     </aside>
   )
 }

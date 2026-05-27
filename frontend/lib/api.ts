@@ -324,6 +324,7 @@ export const mastersApi = {
       variant_exclude_contains?: string
       variant_contains_any?: string
       model_name_prefix?: string
+      nav?: string
     },
   ) => get<T>(`/api/masters/sheets/${sheet}/rows`, params as Record<string, unknown>),
   getClientsForDropdown: <T = unknown>(search?: string) =>

@@ -47,6 +47,7 @@ export default function MastersCategoryPage() {
     if (activeQuery.variantExcludeContains) f.variant_exclude_contains = activeQuery.variantExcludeContains
     if (activeQuery.variantContainsAny) f.variant_contains_any = activeQuery.variantContainsAny
     if (activeQuery.modelNamePrefix) f.model_name_prefix = activeQuery.modelNamePrefix
+    if (activeQuery.navSlug) f.nav = activeQuery.navSlug
     return f
   }, [
     activeQuery.variantType,
@@ -54,6 +55,7 @@ export default function MastersCategoryPage() {
     activeQuery.variantExcludeContains,
     activeQuery.variantContainsAny,
     activeQuery.modelNamePrefix,
+    activeQuery.navSlug,
   ])
 
   const sheetDisplayName = useMemo(() => {

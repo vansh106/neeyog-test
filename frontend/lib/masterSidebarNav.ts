@@ -436,13 +436,11 @@ export const MASTER_SIDEBAR_NAV: MasterNavNode[] = [
         children: [
           {
             kind: 'group',
-            label: 'Y Type Strainer #150',
-            children: [{ kind: 'leaf', key: 'fp_strainer_y_150', label: 'Strainer – Y Type #150' }],
-          },
-          {
-            kind: 'group',
-            label: 'Y Type Strainer #300',
-            children: [{ kind: 'leaf', key: 'fp_strainer_y_300', label: 'Strainer – Y Type #300' }],
+            label: 'Y Type Strainer',
+            children: [
+              { kind: 'leaf', key: 'fp_strainer_y_150', label: 'Strainer – Y Type #150' },
+              { kind: 'leaf', key: 'fp_strainer_y_300', label: 'Strainer – Y Type #300' },
+            ],
           },
         ],
       },

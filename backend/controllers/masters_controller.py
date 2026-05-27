@@ -51,6 +51,7 @@ async def handle_list_sheet_rows(
     variant_exclude_contains: str | None = None,
     variant_contains_any: str | None = None,
     model_name_prefix: str | None = None,
+    nav: str | None = None,
 ) -> dict:
     try:
         return await masters_service.list_sheet_rows(
@@ -63,6 +64,7 @@ async def handle_list_sheet_rows(
             variant_exclude_contains=variant_exclude_contains,
             variant_contains_any=variant_contains_any,
             model_name_prefix=model_name_prefix,
+            nav_slug=nav,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

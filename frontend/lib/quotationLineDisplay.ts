@@ -1,5 +1,20 @@
 import type { QuotationLineItem, QuotationPdfDisplayOverrides } from '@/types'
 
+/** Omit spec lines with no value (legacy quotes used ``----`` placeholders). */
+export function sanitizeQuotationDescription(desc: string): string {
+  if (!desc) return ''
+  const sep = ' : '
+  return desc
+    .split('\n')
+    .filter((line) => {
+      const i = line.indexOf(sep)
+      if (i === -1) return true
+      const val = line.slice(i + sep.length).trim()
+      return Boolean(val) && val !== '----' && val !== '—' && val !== '-'
+    })
+    .join('\n')
+}
+
 export function effectiveLinePdfDisplay(
   line: QuotationLineItem,
   idx: number,
@@ -15,7 +30,7 @@ export function effectiveLinePdfDisplay(
     (line.product_name || line.description || '')
   const size =
     (typeof row?.size === 'string' && row.size !== '' ? row.size : null) ?? (line.size || '')
-  return { description: desc, size: size || '—' }
+  return { description: sanitizeQuotationDescription(desc), size: size || '—' }
 }
 
 /** dd/mm/yyyy (matches quotation PDF letterhead). */

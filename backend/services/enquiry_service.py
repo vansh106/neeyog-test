@@ -104,7 +104,9 @@ def _build_structured_description(name: str, cascade: dict) -> str:
     lines = [f"Product : {name or 'Product'}"]
     for key, label in _DESC_FIELDS:
         v = str(cascade.get(key) or "").strip() if isinstance(cascade, dict) else ""
-        lines.append(f"{label} : {v or '----'}")
+        if not v:
+            continue
+        lines.append(f"{label} : {v}")
     return "\n".join(lines)
 
 

@@ -84,6 +84,57 @@ def _flow_from_kv_rows(rows: object, style: ParagraphStyle) -> list:
     return out
 
 
+def _sanitize_description_for_display(desc: object) -> str:
+    """Drop spec lines with no value (legacy quotes stored ``----`` placeholders)."""
+    if not desc:
+        return ""
+    out: list[str] = []
+    for line in str(desc).split("\n"):
+        if " : " not in line:
+            out.append(line)
+            continue
+        _label, _sep, val = line.partition(" : ")
+        v = val.strip()
+        if not v or v in ("----", "—", "-"):
+            continue
+        out.append(line)
+    return "\n".join(out)
+
+
+def _description_paragraph_html(desc: object) -> str:
+    """Render multi-line key/value description (one pair per line) for ReportLab."""
+    cleaned = _sanitize_description_for_display(desc)
+    if not cleaned:
+        return ""
+    parts: list[str] = []
+    for line in cleaned.split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        if " : " in line:
+            label, _, val = line.partition(" : ")
+            parts.append(f"{escape(label.strip())} : {escape(val.strip())}")
+        else:
+            parts.append(escape(line))
+    return "<br/>".join(parts)
+
+
+def _money_text(amount: float | int) -> str:
+    """Use ASCII currency prefix — Helvetica lacks the rupee glyph (shows as ■)."""
+    return f"Rs. {float(amount):,.2f}"
+
+
+def _table_col_widths(total_width: float, fractions: list[float]) -> list[float]:
+    """Scale column fractions to fit exactly within ``total_width``."""
+    scale = total_width / sum(fractions)
+    return [f * scale for f in fractions]
+
+
+def _edge_padded_col_sum(page_width: float, edge_pad: float) -> float:
+    """Sum of ``colWidths`` so a table fits ``page_width`` with edge horizontal padding."""
+    return page_width - (2 * edge_pad)
+
+
 def _pdf_ov_list(pdf_ov: object, key: str) -> list | None:
     if not isinstance(pdf_ov, dict):
         return None
@@ -204,9 +255,17 @@ async def generate_quotation_pdf(
             textColor=colors.black,
         )
         s_meta_val = ParagraphStyle("MetaV", parent=s_normal, fontSize=8, textColor=colors.black, alignment=TA_LEFT)
-        s_cell = ParagraphStyle("Cell", parent=s_normal, fontSize=7.5, leading=9)
-        s_cell_head = ParagraphStyle("CellH", parent=s_normal, fontName="Helvetica-Bold", fontSize=7.5, leading=9)
-        s_terms = ParagraphStyle("Terms", parent=s_normal, fontSize=8, leading=10)
+        s_cell = ParagraphStyle("Cell", parent=s_normal, fontSize=7.5, leading=10)
+        s_cell_head = ParagraphStyle("CellH", parent=s_normal, fontName="Helvetica-Bold", fontSize=7.5, leading=10)
+        s_desc = ParagraphStyle(
+            "DescCell",
+            parent=s_cell,
+            fontSize=7.5,
+            leading=10,
+            spaceBefore=0,
+            spaceAfter=0,
+        )
+        s_terms = ParagraphStyle("Terms", parent=s_normal, fontSize=8, leading=11)
         s_thanks = ParagraphStyle("Thanks", parent=s_normal, fontSize=9, alignment=1, textColor=_DARK_GREEN)
 
         company = client_config.get("company_name", "PARTH VALVES AND HOSES LLP")
@@ -220,24 +279,33 @@ async def generate_quotation_pdf(
 
         el: list = []
 
+        box_h_pad = 8
+        header_h_pad = 6
+        cell_h_pad = 5
+        page_content_w = doc.width
+
         # ── Header box ──────────────────────────────────────────────
         logo = _logo_flowable(52 * mm, 30 * mm)
         title_cell = [
             Paragraph(f"<b>{escape(str(company).upper())}</b>", s_letter_co),
             Paragraph("<b>QUOTATION</b>", s_quotation_title),
         ]
-        header_top = (
-            Table([[logo, title_cell]], colWidths=[52 * mm, doc.width - 52 * mm])
-            if logo
-            else Table([[title_cell]], colWidths=[doc.width])
-        )
+        logo_w = 52 * mm
+        if logo:
+            title_w = page_content_w - logo_w - (2 * header_h_pad)
+            header_top = Table([[logo, title_cell]], colWidths=[logo_w, title_w])
+        else:
+            header_top = Table(
+                [[title_cell]],
+                colWidths=[_edge_padded_col_sum(page_content_w, header_h_pad)],
+            )
         header_top.setStyle(
             TableStyle(
                 [
                     ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
                     ("ALIGN", (1, 0), (1, 0), "CENTER"),
-                    ("LEFTPADDING", (0, 0), (-1, -1), 6),
-                    ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                    ("LEFTPADDING", (0, 0), (-1, -1), header_h_pad),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), header_h_pad),
                     ("TOPPADDING", (0, 0), (-1, -1), 6),
                     ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
                 ]
@@ -286,24 +354,25 @@ async def generate_quotation_pdf(
                     line += f" / {escape(str(enq_date))}"
                 right_info.append(Paragraph(line, s_meta_val))
 
+        header_info_inner = _edge_padded_col_sum(page_content_w, header_h_pad)
         header_info = Table(
             [[left_info, right_info]],
-            colWidths=[doc.width * 0.52, doc.width * 0.48],
+            colWidths=_table_col_widths(header_info_inner, [0.52, 0.48]),
         )
         header_info.setStyle(
             TableStyle(
                 [
                     ("VALIGN", (0, 0), (-1, -1), "TOP"),
                     ("LINEABOVE", (0, 0), (-1, 0), 1, _BORDER),
-                    ("LEFTPADDING", (0, 0), (-1, -1), 6),
-                    ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                    ("LEFTPADDING", (0, 0), (-1, -1), header_h_pad),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), header_h_pad),
                     ("TOPPADDING", (0, 0), (-1, -1), 6),
                     ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
                 ]
             )
         )
 
-        header_box = Table([[header_top], [header_info]], colWidths=[doc.width])
+        header_box = Table([[header_top], [header_info]], colWidths=[page_content_w])
         header_box.setStyle(
             TableStyle(
                 [
@@ -316,7 +385,7 @@ async def generate_quotation_pdf(
             )
         )
         el.append(header_box)
-        el.append(Spacer(1, 3 * mm))
+        el.append(Spacer(1, 4 * mm))
 
         # ── COMPANY box ─────────────────────────────────────────────
         client_name = quotation_data.get("client_name", "")
@@ -352,22 +421,26 @@ async def generate_quotation_pdf(
             cust_right.append(Paragraph(f"<b>Contact No.</b> : {escape(str(client_phone))}", s_addr))
         if client_email:
             cust_right.append(Paragraph(f"<b>E-Mail</b> : {escape(str(client_email))}", s_addr))
-        company_tbl = Table([[cust_left, cust_right]], colWidths=[doc.width * 0.52, doc.width * 0.48])
+        company_inner = _edge_padded_col_sum(page_content_w, box_h_pad)
+        company_tbl = Table(
+            [[cust_left, cust_right]],
+            colWidths=_table_col_widths(company_inner, [0.52, 0.48]),
+        )
         company_tbl.setStyle(
             TableStyle(
                 [
                     ("VALIGN", (0, 0), (-1, -1), "TOP"),
                     ("BOX", (0, 0), (-1, -1), 1, _BORDER),
                     ("LINEBEFORE", (1, 0), (1, 0), 1, _BORDER),
-                    ("TOPPADDING", (0, 0), (-1, -1), 2),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
-                    ("LEFTPADDING", (0, 0), (-1, -1), 6),
-                    ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                    ("TOPPADDING", (0, 0), (-1, -1), 4),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+                    ("LEFTPADDING", (0, 0), (-1, -1), box_h_pad),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), box_h_pad),
                 ]
             )
         )
         el.append(company_tbl)
-        el.append(Spacer(1, 1.5 * mm))
+        el.append(Spacer(1, 3 * mm))
 
         # Centered thanks row
         thank_txt = "Thank you for Your Enquiry considering us as faithful Supplier"
@@ -381,30 +454,18 @@ async def generate_quotation_pdf(
             TableStyle(
                 [
                     ("BOX", (0, 0), (-1, -1), 1, _BORDER),
-                    ("TOPPADDING", (0, 0), (-1, -1), 5),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+                    ("TOPPADDING", (0, 0), (-1, -1), 7),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
                 ]
             )
         )
         el.append(thank_row)
-        el.append(Spacer(1, 2 * mm))
+        el.append(Spacer(1, 4 * mm))
 
-        # ── VALUATION table ─────────────────────────────────────────
-        valuation_title = Table([[Paragraph("<b>VALUATION</b>", s_section)]], colWidths=[doc.width])
-        valuation_title.setStyle(
-            TableStyle(
-                [
-                    ("BOX", (0, 0), (-1, -1), 1, _BORDER),
-                    ("TOPPADDING", (0, 0), (-1, -1), 3),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
-                    ("LEFTPADDING", (0, 0), (-1, -1), 6),
-                ]
-            )
-        )
-        el.append(valuation_title)
-        el.append(
-            Spacer(1, 0.5 * mm)
-        )
+        # ── VALUATION (title + grid in one bordered block) ───────────
+        block_col_w = _edge_padded_col_sum(page_content_w, box_h_pad)
+        items_col_sum = block_col_w - (2 * box_h_pad) - (2 * cell_h_pad)
+        val_col_w = _table_col_widths(items_col_sum, [0.08, 0.42, 0.10, 0.10, 0.11, 0.08, 0.11])
 
         header = [
             Paragraph("<b>Sr.No</b>", s_cell_head),
@@ -417,6 +478,10 @@ async def generate_quotation_pdf(
         ]
         table_data: list = [header]
 
+        line_items = quotation_data.get("line_items") or []
+        if not isinstance(line_items, list):
+            line_items = []
+
         for idx, item in enumerate(line_items, 1):
             if not isinstance(item, dict):
                 continue
@@ -426,6 +491,7 @@ async def generate_quotation_pdf(
                 desc = str(row_ov["description"])
             elif row_ov.get("product_name"):
                 desc = str(row_ov["product_name"])
+            desc = _sanitize_description_for_display(desc)
             size = item.get("size", "")
             if row_ov.get("size"):
                 size = str(row_ov["size"])
@@ -439,11 +505,12 @@ async def generate_quotation_pdf(
             except (TypeError, ValueError):
                 disc_f = 0.0
 
+            desc_html = _description_paragraph_html(desc)
             qty_cell = f"{escape(str(qty))} {escape(str(unit))}".strip()
             table_data.append(
                 [
                     Paragraph(str(idx), s_cell),
-                    Paragraph(escape(str(desc)), s_cell),
+                    Paragraph(desc_html or "—", s_desc),
                     Paragraph(escape(str(size)) if size else "—", s_cell),
                     Paragraph(qty_cell, s_cell),
                     Paragraph(f"{price:,.2f}", s_cell),
@@ -464,10 +531,11 @@ async def generate_quotation_pdf(
                 rate = str(srow.get("rate") or "").strip() or "—"
                 disc = str(srow.get("disc") or "").strip() or "—"
                 tot = str(srow.get("total") or "").strip() or "—"
+                desc_html = _description_paragraph_html(desc) if desc != "—" else "—"
                 table_data.append(
                     [
                         Paragraph(escape(sr), s_cell),
-                        Paragraph(escape(desc), s_cell),
+                        Paragraph(desc_html, s_desc),
                         Paragraph(escape(size), s_cell),
                         Paragraph(escape(qty), s_cell),
                         Paragraph(escape(rate), s_cell),
@@ -477,28 +545,47 @@ async def generate_quotation_pdf(
                 )
 
         if len(table_data) > 1:
-            col_w = [22 * mm, 72 * mm, 22 * mm, 24 * mm, 26 * mm, 18 * mm, 28 * mm]
-            items_table = Table(table_data, colWidths=col_w, repeatRows=1)
+            items_table = Table(table_data, colWidths=val_col_w, repeatRows=1, hAlign="LEFT")
             items_table.setStyle(
                 TableStyle(
                     [
-                        ("BACKGROUND", (0, 0), (-1, 0), _DARK_NAVY),
-                        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
                         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                        ("FONTSIZE", (0, 1), (-1, -1), 7.5),
+                        ("FONTSIZE", (0, 0), (-1, -1), 7.5),
                         ("ALIGN", (0, 0), (0, -1), "CENTER"),
                         ("ALIGN", (3, 0), (-1, -1), "RIGHT"),
                         ("VALIGN", (0, 0), (-1, -1), "TOP"),
                         ("GRID", (0, 0), (-1, -1), 0.6, _BORDER),
                         ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, _LIGHT_GRAY]),
-                        ("TOPPADDING", (0, 0), (-1, -1), 4),
-                        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                        ("LEFTPADDING", (0, 0), (-1, -1), cell_h_pad),
+                        ("RIGHTPADDING", (0, 0), (-1, -1), cell_h_pad),
+                        ("TOPPADDING", (0, 0), (-1, -1), 6),
+                        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
                     ]
                 )
             )
-            el.append(items_table)
+            valuation_block = Table(
+                [
+                    [Paragraph("<b>VALUATION</b>", s_section)],
+                    [items_table],
+                ],
+                colWidths=[block_col_w],
+            )
+            valuation_block.setStyle(
+                TableStyle(
+                    [
+                        ("BOX", (0, 0), (-1, -1), 1, _BORDER),
+                        ("LEFTPADDING", (0, 0), (-1, -1), box_h_pad),
+                        ("RIGHTPADDING", (0, 0), (-1, -1), box_h_pad),
+                        ("TOPPADDING", (0, 0), (0, 0), 6),
+                        ("BOTTOMPADDING", (0, 0), (0, 0), 4),
+                        ("TOPPADDING", (0, 1), (0, 1), 3),
+                        ("BOTTOMPADDING", (0, 1), (0, 1), 6),
+                    ]
+                )
+            )
+            el.append(valuation_block)
 
-        el.append(Spacer(1, 5 * mm))
+        el.append(Spacer(1, 6 * mm))
 
         # ── Totals (recompute if needed — same logic as before) ──
         subtotal = float(quotation_data.get("subtotal", 0))
@@ -544,7 +631,7 @@ async def generate_quotation_pdf(
                 "Third party inspection, if required — extra at actual and in customer's scope.",
                 f"Freight — {str(freight)}.",
                 f"GST @ {gst_pct:g}% — included in valuation total as shown below.",
-                f"P &amp; F @ {pf_pct:g}% — included in valuation total as shown below.",
+                f"P & F @ {pf_pct:g}% — included in valuation total as shown below.",
                 f"Offer validity — {validity_days} days from date of issue.",
                 "Subject to Pune jurisdiction only.",
             ]
@@ -552,27 +639,33 @@ async def generate_quotation_pdf(
         for i, tb in enumerate(terms_body, 1):
             terms_flow.append(Paragraph(f"{i}. {escape(tb)}", s_terms))
 
+        terms_inner = _edge_padded_col_sum(page_content_w, box_h_pad)
+        terms_left_w, terms_right_w = _table_col_widths(terms_inner, [0.62, 0.38])
+        fin_edge_pad = 4
+        fin_col_sum = terms_right_w - (2 * box_h_pad) - (2 * fin_edge_pad)
+        fin_col_w = _table_col_widths(fin_col_sum, [0.62, 0.38])
+
         fin_rows: list[list] = [
-            [Paragraph("<b>SUB TOTAL</b>", s_cell_head), Paragraph(f"₹{subtotal:,.2f}", s_cell)],
+            [Paragraph("<b>SUB TOTAL</b>", s_cell_head), Paragraph(_money_text(subtotal), s_cell)],
             [
                 Paragraph(f"<b>P &amp; F CHARGES</b> ({pf_pct:g} %)", s_cell_head),
-                Paragraph(f"₹{pf_amount:,.2f}", s_cell),
+                Paragraph(_money_text(pf_amount), s_cell),
             ],
         ]
         if abs(gst_pct - 18.0) < 0.01 and gst_amount > 0:
             half = round(gst_amount / 2.0, 2)
             other = round(gst_amount - half, 2)
             fin_rows.append(
-                [Paragraph("<b>CGST</b> (9 %)", s_cell_head), Paragraph(f"₹{half:,.2f}", s_cell)]
+                [Paragraph("<b>CGST</b> (9 %)", s_cell_head), Paragraph(_money_text(half), s_cell)]
             )
             fin_rows.append(
-                [Paragraph("<b>SGST</b> (9 %)", s_cell_head), Paragraph(f"₹{other:,.2f}", s_cell)]
+                [Paragraph("<b>SGST</b> (9 %)", s_cell_head), Paragraph(_money_text(other), s_cell)]
             )
         else:
             fin_rows.append(
                 [
                     Paragraph(f"<b>GST</b> ({gst_pct:g} %)", s_cell_head),
-                    Paragraph(f"₹{gst_amount:,.2f}", s_cell),
+                    Paragraph(_money_text(gst_amount), s_cell),
                 ]
             )
         fin_rows.append(
@@ -584,32 +677,37 @@ async def generate_quotation_pdf(
         fin_rows.append(
             [
                 Paragraph("<b>GRAND TOTAL INR</b>", s_cell_head),
-                Paragraph(f"<b>₹{total_amount:,.2f}</b>", ParagraphStyle("Grand", parent=s_cell, fontName="Helvetica-Bold")),
+                Paragraph(
+                    f"<b>{escape(_money_text(total_amount))}</b>",
+                    ParagraphStyle("Grand", parent=s_cell, fontName="Helvetica-Bold"),
+                ),
             ]
         )
-        fin_tbl = Table(fin_rows, colWidths=[doc.width * 0.24, doc.width * 0.14], hAlign="LEFT")
+        fin_tbl = Table(fin_rows, colWidths=fin_col_w, hAlign="LEFT")
         fin_tbl.setStyle(
             TableStyle(
                 [
                     ("ALIGN", (1, 0), (1, -1), "RIGHT"),
                     ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                    ("TOPPADDING", (0, 0), (-1, -1), 4),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                    ("TOPPADDING", (0, 0), (-1, -1), 5),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+                    ("LEFTPADDING", (0, 0), (-1, -1), fin_edge_pad),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), fin_edge_pad),
                     ("GRID", (0, 0), (-1, -1), 0.6, _BORDER),
                 ]
             )
         )
-        terms_summary = Table([[terms_flow, fin_tbl]], colWidths=[doc.width * 0.62, doc.width * 0.38])
+        terms_summary = Table([[terms_flow, fin_tbl]], colWidths=[terms_left_w, terms_right_w])
         terms_summary.setStyle(
             TableStyle(
                 [
                     ("BOX", (0, 0), (-1, -1), 1, _BORDER),
                     ("LINEBEFORE", (1, 0), (1, 0), 1, _BORDER),
                     ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                    ("LEFTPADDING", (0, 0), (-1, -1), 6),
-                    ("RIGHTPADDING", (0, 0), (-1, -1), 6),
-                    ("TOPPADDING", (0, 0), (-1, -1), 4),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                    ("LEFTPADDING", (0, 0), (-1, -1), box_h_pad),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), box_h_pad),
+                    ("TOPPADDING", (0, 0), (-1, -1), 6),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
                 ]
             )
         )
@@ -623,7 +721,7 @@ async def generate_quotation_pdf(
             el.append(Spacer(1, 2 * mm))
             note_tbl = Table(
                 [[Paragraph("<b>Notes</b>", s_section)], [Paragraph(escape(str(notes)), s_terms)]],
-                colWidths=[doc.width],
+                colWidths=[_edge_padded_col_sum(page_content_w, 6)],
             )
             note_tbl.setStyle(
                 TableStyle(

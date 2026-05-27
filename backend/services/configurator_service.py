@@ -295,38 +295,35 @@ def _row_to_operator(r: CatalogOperatorRow) -> dict | None:
     }
 
 
+def _is_ball_or_butterfly_configurator_category(catalog_category: str | None) -> bool:
+    if catalog_category == "butterfly_valve":
+        return True
+    return bool(catalog_category and catalog_category.startswith("fp_ball_valve_"))
+
+
 async def get_operators_for_valve(
     valve_type: str,
-    construction: str,
+    construction: str,  # noqa: ARG001 — kept in signature for route compatibility
     valve_size: str,  # noqa: ARG001 — kept in signature for route compatibility
     db: AsyncSession,
     *,
     catalog_category: str | None = None,
 ) -> dict:
-    """Return every DA/SA actuator row that matches the valve's construct-way.
+    """Return DA/SA actuator models for the manual configurator.
 
-    The only link between a valve and an actuator row is the ``construct``
-    (2 Way vs 3 Way) — sizes don't line up cleanly (valves use mm/DN/bore,
-    actuators are imperial-only). So we *never* auto-match by size; instead
-    we hand the UI the full list for the construct and let the user pick the
-    actuator model + size they want.
+    Ball-valve and butterfly-valve flows list the full actuator master (no
+    construct-way or size_text matching). Legacy callers without a catalog
+    category still filter by ``operator_for`` when applicable.
     """
     op_pattern = _operator_sheet_filter_for_category(catalog_category, valve_type)
-    way = _extract_construct_way(construction)
+    full_actuator_list = _is_ball_or_butterfly_configurator_category(catalog_category)
 
     da_operators: list[dict] = []
     sa_operators: list[dict] = []
 
     stmt = select(CatalogOperatorRow).where(CatalogOperatorRow.client_id == _active_client_id())
-    # Prefer construct-way match when present, but butterfly/bulk catalogs often don't encode 2/3-way.
-    if way:
-        stmt = stmt.where(CatalogOperatorRow.construct.ilike(way))
 
-    # Include:
-    # - rows explicitly marked for the valve type (legacy), and/or
-    # - rows normalized to "All valves" (preferred), and/or
-    # - any NULL/empty operator_for (treat as global).
-    if op_pattern:
+    if op_pattern and not full_actuator_list:
         stmt = stmt.where(
             sa.or_(
                 CatalogOperatorRow.operator_for.ilike(op_pattern),
@@ -335,7 +332,7 @@ async def get_operators_for_valve(
                 CatalogOperatorRow.operator_for == "",
             )
         )
-    stmt = stmt.order_by(CatalogOperatorRow.construct, CatalogOperatorRow.size_text, CatalogOperatorRow.model_name).limit(600)
+    stmt = stmt.order_by(CatalogOperatorRow.model_name, CatalogOperatorRow.row_id).limit(600)
 
     for r in (await db.execute(stmt)).scalars().all():
         item = _row_to_operator(r)
@@ -351,7 +348,7 @@ async def get_operators_for_valve(
         "sa_operators": sa_operators,
         "has_da": bool(da_operators),
         "has_sa": bool(sa_operators),
-        "construct_way": way,
+        "construct_way": None,
     }
 
 
