@@ -795,6 +795,29 @@ async def process_manual_dropdown(
         quote_line_items, gst_rate=gst_rate, pf_rate=pf_rate
     )
 
+    order_totals_in = body.get("orderTotals") or body.get("order_totals") or {}
+    pf_applicable = True
+    pf_amount_override: float | None = None
+    if isinstance(order_totals_in, dict):
+        pf_applicable = bool(
+            order_totals_in.get("pf_applicable", order_totals_in.get("pfApplicable", True))
+        )
+        raw_pf = order_totals_in.get("pf_amount", order_totals_in.get("pfAmount"))
+        if raw_pf is not None and str(raw_pf).strip() != "":
+            pf_amount_override = round(_clean_float(raw_pf, 0.0), 2)
+
+    if not pf_applicable:
+        pf_amount = 0.0
+        pf_rate = 0.0
+        total_amount = round(subtotal + gst_amount, 2)
+    elif pf_amount_override is not None:
+        pf_amount = pf_amount_override
+        total_amount = round(subtotal + gst_amount + pf_amount, 2)
+        if subtotal > 0:
+            pf_rate = round((pf_amount / subtotal) * 100.0, 2)
+    else:
+        total_amount = round(subtotal + gst_amount + pf_amount, 2)
+
     raw_payload: dict = {
         "source": "manual_dropdown",
         "priority": priority,
@@ -809,6 +832,11 @@ async def process_manual_dropdown(
         "line_items": quote_line_items,
         # Full configurator payload for quotation edit / rehydrate UI.
         "manual_line_items": line_items_in,
+        "order_totals": {
+            "pf_applicable": pf_applicable,
+            "pf_amount": pf_amount,
+            "pf_rate": pf_rate,
+        },
     }
     sp = body.get("supplierPricing")
     if isinstance(sp, dict):

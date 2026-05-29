@@ -510,6 +510,31 @@ class Supplier(Base):
         back_populates="supplier",
         cascade="all, delete-orphan",
     )
+    catalog_categories: Mapped[list["SupplierCatalogCategory"]] = relationship(
+        "SupplierCatalogCategory",
+        back_populates="supplier",
+        cascade="all, delete-orphan",
+    )
+
+
+class SupplierCatalogCategory(Base):
+    """Catalog sheets (masters ``catalog_table`` keys) a supplier is associated with."""
+
+    __tablename__ = "supplier_catalog_categories"
+    __table_args__ = (
+        UniqueConstraint("supplier_id", "category_key", name="uq_supplier_catalog_category"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    supplier_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("suppliers.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    category_key: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+
+    supplier: Mapped["Supplier"] = relationship("Supplier", back_populates="catalog_categories")
 
 
 class SupplierProductPrice(Base):

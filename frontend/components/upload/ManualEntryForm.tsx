@@ -66,9 +66,42 @@ type Props = {
 }
 
 const SELECT_EMPTY = '__none__'
+const DEFAULT_GST_RATE = 0.18
+const DEFAULT_PF_RATE = 0.03
+
 const toSelectValue = (v: string | null | undefined) =>
   v != null && String(v).trim() !== '' ? String(v).trim() : SELECT_EMPTY
 const fromSelectValue = (v: string | null | undefined) => (!v || v === SELECT_EMPTY ? '' : v)
+
+function roundMoney(n: number): number {
+  return Math.round(n * 100) / 100
+}
+
+function resolvePfAmount(
+  subtotal: number,
+  pfApplicable: boolean,
+  pfAmountDraft: string,
+): { pf: number; defaultPf: number } {
+  const defaultPf = roundMoney(subtotal * DEFAULT_PF_RATE)
+  if (!pfApplicable) return { pf: 0, defaultPf }
+  const raw = pfAmountDraft.trim().replace(/,/g, '')
+  if (!raw) return { pf: defaultPf, defaultPf }
+  const n = Number(raw)
+  if (!Number.isFinite(n) || n < 0) return { pf: defaultPf, defaultPf }
+  return { pf: roundMoney(n), defaultPf }
+}
+
+function computeTaxTotals(subtotal: number, pfApplicable: boolean, pfAmountDraft: string) {
+  const gst = roundMoney(subtotal * DEFAULT_GST_RATE)
+  const { pf, defaultPf } = resolvePfAmount(subtotal, pfApplicable, pfAmountDraft)
+  return {
+    subtotal,
+    gst,
+    pf,
+    defaultPf,
+    grand: roundMoney(subtotal + gst + pf),
+  }
+}
 
 function isValidEmail(email: string): boolean {
   if (!email) return true
@@ -427,6 +460,8 @@ export default function ManualEntryForm({
   const [pricingLoading, setPricingLoading] = useState(false)
   const [tempQuoteUnitByProduct, setTempQuoteUnitByProduct] = useState<Record<string, string>>({})
   const [customerDiscountByProduct, setCustomerDiscountByProduct] = useState<Record<string, string>>({})
+  const [pfApplicable, setPfApplicable] = useState(true)
+  const [pfAmountDraft, setPfAmountDraft] = useState('')
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedCompanyQuery(companyQuery), 300)
@@ -707,11 +742,16 @@ export default function ManualEntryForm({
       if (!pc?.ok) return null
       subtotal += pc.assemblyUnit * discountFactor * p.quantity
     }
-    const gst = subtotal * 0.18
-    const pf = subtotal * 0.03
-    const grand = subtotal + gst + pf
-    return { subtotal, gst, pf, grand }
-  }, [assembledProducts, customerDiscountByProduct, defaultClientDiscount, productCalcs, tempQuoteUnitByProduct])
+    return computeTaxTotals(subtotal, pfApplicable, pfAmountDraft)
+  }, [
+    assembledProducts,
+    customerDiscountByProduct,
+    defaultClientDiscount,
+    pfApplicable,
+    pfAmountDraft,
+    productCalcs,
+    tempQuoteUnitByProduct,
+  ])
 
   const supplierRequired = suppliers.length > 0
   const pricingReady = useMemo(() => {
@@ -736,16 +776,11 @@ export default function ManualEntryForm({
       }
       subtotal += Number(u) * p.quantity
     }
-    const gst = subtotal * 0.18
-    const pf = subtotal * 0.03
     return {
-      subtotal,
-      gst,
-      pf,
-      grand: subtotal + gst + pf,
+      ...computeTaxTotals(subtotal, pfApplicable, pfAmountDraft),
       allPriced: true,
     }
-  }, [assembledProducts])
+  }, [assembledProducts, pfApplicable, pfAmountDraft])
 
   const handleProductComplete = useCallback(
     (configId: string) => (product: AssembledProduct) => {
@@ -850,6 +885,13 @@ export default function ManualEntryForm({
       ),
       priority: 'Normal',
       notes: (prefillNotesFromEnquiry || '').trim(),
+    }
+    if (netOrderTotals?.subtotal != null) {
+      const { pf } = resolvePfAmount(netOrderTotals.subtotal, pfApplicable, pfAmountDraft)
+      form.orderTotals = {
+        pfApplicable,
+        pfAmount: pf,
+      }
     }
     if (
       clientMode === 'existing' &&
@@ -1607,8 +1649,9 @@ export default function ManualEntryForm({
         <section className="rounded-xl border border-surface-border bg-white p-5 shadow-sm border-t-2 border-t-brand-navy-200">
           <h2 className="text-[15px] font-semibold text-gray-900">Net total &amp; taxes</h2>
           <p className="mt-1 text-[13px] text-surface-muted">
-            Subtotal uses each product&apos;s quoted unit price (after any customer discount from Step 5). GST and
-            P&amp;F are calculated on that subtotal, same as on quotations.
+            Subtotal uses each product&apos;s quoted unit price (after any customer discount from Step 5). GST is
+            18% on subtotal. Use the P&amp;F checkbox to include packing &amp; forwarding; edit the amount or leave
+            blank to use the calculated 3% default.
           </p>
           <div className="mt-4 space-y-3 text-[13px]">
             <div className="rounded-lg border border-surface-border bg-surface-page p-3">
@@ -1649,11 +1692,32 @@ export default function ManualEntryForm({
                   {netOrderTotals?.gst != null ? formatCurrency(netOrderTotals.gst) : '—'}
                 </span>
               </div>
-              <div className="mt-2 flex justify-between text-surface-muted">
-                <span>P&amp;F @ 3%</span>
-                <span className="font-mono">
-                  {netOrderTotals?.pf != null ? formatCurrency(netOrderTotals.pf) : '—'}
-                </span>
+              <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-surface-muted">
+                <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={pfApplicable}
+                    onChange={(e) => setPfApplicable(e.target.checked)}
+                    aria-label="Apply P and F charges"
+                    className="size-3.5 shrink-0 rounded border-[#B8BFB4] text-brand-green-600 focus:ring-brand-green-500/30"
+                  />
+                  <span>P&amp;F @ 3%</span>
+                </label>
+                <Input
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  disabled={!pfApplicable || netOrderTotals?.subtotal == null}
+                  value={pfAmountDraft}
+                  onChange={(e) => setPfAmountDraft(e.target.value)}
+                  placeholder={
+                    netOrderTotals?.defaultPf != null
+                      ? netOrderTotals.defaultPf.toFixed(2)
+                      : '0.00'
+                  }
+                  className="h-8 w-32 shrink-0 font-mono text-right"
+                  aria-label="P and F amount in INR"
+                />
               </div>
               <div className="mt-3 flex justify-between border-t border-surface-border pt-3 font-semibold text-gray-900">
                 <span>Net total (incl. taxes)</span>
@@ -1818,9 +1882,32 @@ export default function ManualEntryForm({
                     <span>GST @ 18%</span>
                     <span className="font-mono">{formatCurrency(pricingTotals?.gst ?? 0)}</span>
                   </div>
-                  <div className="mt-1 flex justify-between text-surface-muted">
-                    <span>P&amp;F @ 3%</span>
-                    <span className="font-mono">{formatCurrency(pricingTotals?.pf ?? 0)}</span>
+                  <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-surface-muted">
+                    <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={pfApplicable}
+                        onChange={(e) => setPfApplicable(e.target.checked)}
+                        aria-label="Apply P and F charges"
+                        className="size-3.5 shrink-0 rounded border-[#B8BFB4] text-brand-green-600 focus:ring-brand-green-500/30"
+                      />
+                      <span>P&amp;F @ 3%</span>
+                    </label>
+                    <Input
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      disabled={!pfApplicable}
+                      value={pfAmountDraft}
+                      onChange={(e) => setPfAmountDraft(e.target.value)}
+                      placeholder={
+                        pricingTotals?.defaultPf != null
+                          ? pricingTotals.defaultPf.toFixed(2)
+                          : '0.00'
+                      }
+                      className="h-8 w-32 shrink-0 font-mono text-right"
+                      aria-label="P and F amount in INR"
+                    />
                   </div>
                   <div className="mt-2 flex justify-between border-t border-surface-border pt-2 font-semibold text-gray-900">
                     <span>Grand total</span>

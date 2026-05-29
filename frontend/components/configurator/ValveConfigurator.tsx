@@ -29,6 +29,7 @@ import {
   fetchSupplierListPriceInr,
   type SupplierPriceComponentKey,
 } from '@/lib/supplierCatalogPrice'
+import { suppliersForCatalogCategory } from '@/lib/supplierCategoryFilter'
 import ConfiguratorCategoryPicker from '@/components/configurator/ConfiguratorCategoryPicker'
 import {
   type ConfiguratorCatalogPick,
@@ -1050,6 +1051,13 @@ export function ValveConfigurator({
   const renderComponentPricing = (key: string, title: string) => {
     const cfg = componentPricing[key]
     if (!cfg?.enabled) return null
+    const part = catalogPartForSupplierPrice(key as SupplierPriceComponentKey, pricingCtx)
+    const catalogKey = part?.catalog_table ?? null
+    const dropdownSuppliers = suppliersForCatalogCategory(
+      suppliers ?? [],
+      catalogKey,
+      cfg.supplier_id,
+    )
     return (
       <div className="rounded-lg border border-surface-border bg-surface-page p-3">
         <p className="text-[12px] font-semibold uppercase tracking-wide text-brand-navy-500">
@@ -1060,7 +1068,7 @@ export function ValveConfigurator({
             value={toSelectValue(cfg.supplier_id ?? '')}
             onValueChange={(raw) => {
               const newId = fromSelectValue(raw) || null
-              const newName = (suppliers ?? []).find((s) => s.id === newId)?.name ?? null
+              const newName = dropdownSuppliers.find((s) => s.id === newId)?.name ?? null
               setComponentPricing((prev) => ({
                 ...prev,
                 [key]: {
@@ -1095,9 +1103,7 @@ export function ValveConfigurator({
               <SelectItem value={SELECT_EMPTY}>
                 <span className="text-muted-foreground">Select…</span>
               </SelectItem>
-              {(suppliers ?? [])
-                .filter((s) => s.is_active)
-                .map((s) => (
+              {dropdownSuppliers.map((s) => (
                   <SelectItem key={s.id} value={s.id}>
                     {s.name}
                     {s.is_preferred ? ' ★' : ''}

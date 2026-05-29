@@ -111,6 +111,15 @@ class ManualSupplierPricingPayload(BaseModel):
     grand_total: float
 
 
+class ManualOrderTotalsPayload(BaseModel):
+    """P&F toggle and optional override from manual entry Net total section."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    pf_applicable: bool = Field(True, alias="pfApplicable")
+    pf_amount: float | None = Field(None, alias="pfAmount")
+
+
 class ManualNewClientEmployeeRequest(BaseModel):
     """Optional contact to create under the new branch when submitting manual entry."""
 
@@ -134,6 +143,7 @@ class ManualDropdownProcessRequest(BaseModel):
     priority: str = "Normal"
     notes: str = ""
     supplier_pricing: ManualSupplierPricingPayload | None = Field(None, alias="supplierPricing")
+    order_totals: ManualOrderTotalsPayload | None = Field(None, alias="orderTotals")
     target_enquiry_id: str | None = Field(None, alias="targetEnquiryId")
     #: Branch contact person for this quote (must belong to selected branch unless newClientEmployee creates one).
     client_employee_id: str | None = Field(None, alias="clientEmployeeId")

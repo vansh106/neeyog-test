@@ -3,7 +3,7 @@ Import supplier list prices for Butterfly valve from replacement Excel files.
 
 This updates rows in `supplier_product_prices` for:
   - catalog_table = `butterfly_valve`
-  - supplier_id = one of PVH-A01 / PVH-S01 / Alfa Laval / Omval
+  - supplier_id = one of PVH / Alfa Laval / Omval
 
 It is meant to be run after you add/refresh the files in:
   docs/Final_Products/replacement/
@@ -379,7 +379,7 @@ def main() -> None:
     replacements = [
         ReplacementSource(
             xlsx_path=DOCS_FINAL / "Aluminium Butterfly Valve PVH Make.xlsx",
-            supplier_name="PVH-A01",
+            supplier_name="PVH",
         ),
         ReplacementSource(
             xlsx_path=DOCS_FINAL / "Hygienic Butterfly Valve Alfa Laval Make.xlsx",
@@ -387,7 +387,7 @@ def main() -> None:
         ),
         ReplacementSource(
             xlsx_path=DOCS_FINAL / "Hygienic Butterfly Valve PVH Make.xlsx",
-            supplier_name="PVH-S01",
+            supplier_name="PVH",
         ),
         ReplacementSource(
             xlsx_path=DOCS_FINAL / "Industrial Butterfly Valve Omval Make.xlsx",

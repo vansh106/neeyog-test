@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from core.config import get_settings
-from db.models import Supplier, SupplierCategoryPricing, SupplierProductPrice
+from db.models import Supplier, SupplierCatalogCategory, SupplierCategoryPricing, SupplierProductPrice
 from services.masters_service import SHEET_MODEL_BY_KEY
 
 
@@ -120,8 +120,52 @@ async def get_resolved_supplier_category_pricing(
     }
 
 
+def normalize_supplier_category_keys(category_keys: list[str] | None) -> list[str]:
+    """Distinct non-empty catalog keys; empty list means all categories."""
+    if not category_keys:
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in category_keys:
+        key = (raw or "").strip()
+        if not key or key == "all" or key in seen:
+            continue
+        seen.add(key)
+        out.append(key)
+    return out
+
+
+def supplier_category_keys_from_row(supplier: Supplier) -> list[str]:
+    rows = getattr(supplier, "catalog_categories", None) or []
+    keys = sorted({str(r.category_key) for r in rows if getattr(r, "category_key", None)})
+    if keys:
+        return keys
+    legacy = str(getattr(supplier, "primary_category_key", "all") or "all")
+    return [] if legacy == "all" else [legacy]
+
+
+async def set_supplier_catalog_categories(
+    supplier_id: uuid.UUID,
+    category_keys: list[str],
+    db: AsyncSession,
+) -> None:
+    keys = normalize_supplier_category_keys(category_keys)
+    await db.execute(
+        SupplierCatalogCategory.__table__.delete().where(
+            SupplierCatalogCategory.supplier_id == supplier_id,
+        )
+    )
+    for key in keys:
+        db.add(SupplierCatalogCategory(supplier_id=supplier_id, category_key=key))
+    await db.flush()
+
+
 async def get_suppliers(client_id: str, db: AsyncSession, *, active_only: bool = True) -> list[Supplier]:
-    q = select(Supplier).where(Supplier.client_id == client_id)
+    q = (
+        select(Supplier)
+        .options(selectinload(Supplier.catalog_categories))
+        .where(Supplier.client_id == client_id)
+    )
     if active_only:
         q = q.where(Supplier.is_active.is_(True))
     q = q.order_by(Supplier.name)
@@ -174,11 +218,22 @@ async def create_supplier(
     address: str | None,
     notes: str | None,
     db: AsyncSession,
+    *,
+    category_keys: list[str] | None = None,
 ) -> Supplier:
+    keys = normalize_supplier_category_keys(category_keys)
+    if keys:
+        primary = keys[0]
+    else:
+        legacy_primary = (primary_category_key or "all").strip() or "all"
+        primary = legacy_primary if legacy_primary != "all" else "all"
+        if legacy_primary != "all" and legacy_primary not in keys:
+            keys = [legacy_primary]
+
     supplier = Supplier(
         client_id=client_id,
         name=name,
-        primary_category_key=primary_category_key or "all",
+        primary_category_key=primary,
         default_discount_pct=float(supplier_discount_pct or 0.0),
         contact_person=contact_person,
         phone=phone,
@@ -189,17 +244,19 @@ async def create_supplier(
     db.add(supplier)
     await db.flush()
 
-    # Create initial category pricing row (optional fields).
+    await set_supplier_catalog_categories(supplier.id, keys, db)
+
+    pricing_category = keys[0] if keys else (primary_category_key or "all")
     db.add(
         SupplierCategoryPricing(
             supplier_id=supplier.id,
-            category_key=(primary_category_key or "all"),
+            category_key=pricing_category,
             margin_multiplier=margin_multiplier,
             supplier_discount_pct=supplier_discount_pct,
         )
     )
     await db.commit()
-    await db.refresh(supplier)
+    await db.refresh(supplier, attribute_names=["catalog_categories"])
     return supplier
 
 
@@ -210,19 +267,33 @@ async def update_supplier(
     *,
     name: str | None = None,
     primary_category_key: str | None = None,
+    category_keys: list[str] | None = None,
     contact_person: str | None = None,
     phone: str | None = None,
     email: str | None = None,
     address: str | None = None,
     notes: str | None = None,
 ) -> Supplier | None:
-    row = await db.get(Supplier, supplier_id)
+    row = await db.get(
+        Supplier,
+        supplier_id,
+        options=(selectinload(Supplier.catalog_categories),),
+    )
     if row is None or row.client_id != client_id:
         return None
     if name is not None:
         row.name = name
-    if primary_category_key is not None:
-        row.primary_category_key = primary_category_key or "all"
+    if category_keys is not None:
+        keys = normalize_supplier_category_keys(category_keys)
+        await set_supplier_catalog_categories(supplier_id, keys, db)
+        row.primary_category_key = keys[0] if keys else "all"
+    elif primary_category_key is not None:
+        legacy = primary_category_key or "all"
+        row.primary_category_key = legacy
+        if legacy == "all":
+            await set_supplier_catalog_categories(supplier_id, [], db)
+        else:
+            await set_supplier_catalog_categories(supplier_id, [legacy], db)
     if contact_person is not None:
         row.contact_person = contact_person
     if phone is not None:
@@ -234,7 +305,7 @@ async def update_supplier(
     if notes is not None:
         row.notes = notes
     await db.commit()
-    await db.refresh(row)
+    await db.refresh(row, attribute_names=["catalog_categories"])
     return row
 
 

@@ -617,6 +617,50 @@ export function flattenMasterNavCatalogCategories(): { key: string; label: strin
   return [...byKey.entries()].map(([key, label]) => ({ key, label }))
 }
 
+/** Top-level masters headings (Valves, Hoses, …) with catalog keys under each. */
+export type MasterSupplierCategorySection = {
+  heading: string
+  items: { key: string; label: string }[]
+}
+
+export function masterNavSupplierCategorySections(): MasterSupplierCategorySection[] {
+  const sections: MasterSupplierCategorySection[] = []
+  for (const node of MASTER_SIDEBAR_NAV) {
+    if (node.kind !== 'group') continue
+    const byKey = new Map<string, string>()
+    function walk(children: MasterNavNode[]) {
+      for (const child of children) {
+        if (child.kind === 'leaf') {
+          if (!byKey.has(child.key)) byKey.set(child.key, child.label)
+        } else {
+          walk(child.children)
+        }
+      }
+    }
+    walk(node.children)
+    if (byKey.size === 0) continue
+    sections.push({
+      heading: node.label,
+      items: [...byKey.entries()].map(([key, label]) => ({ key, label })),
+    })
+  }
+  return sections
+}
+
+const MASTER_CATALOG_LABEL_BY_KEY: Map<string, string> = (() => {
+  const m = new Map<string, string>()
+  for (const section of masterNavSupplierCategorySections()) {
+    for (const item of section.items) {
+      if (!m.has(item.key)) m.set(item.key, item.label)
+    }
+  }
+  return m
+})()
+
+export function masterCatalogCategoryLabel(categoryKey: string): string {
+  return MASTER_CATALOG_LABEL_BY_KEY.get(categoryKey) ?? categoryKey
+}
+
 export function findMasterNavLeafBySlug(
   navSlug: string,
   nodes: MasterNavNode[] = MASTER_SIDEBAR_NAV,

@@ -325,13 +325,13 @@ def _build_replace_specs() -> list[SheetReplaceSpec]:
             source_file="Hygienic Butterfly Valve PVH Make.xlsx",
             xlsx_path=REPLACEMENT_DIR / "Hygienic Butterfly Valve PVH Make.xlsx",
             variant_type="Hygienic Butterfly Valve",
-            supplier_name="PVH-S01",
+            supplier_name="PVH",
         ),
         SheetReplaceSpec(
             source_file="Aluminium Butterfly Valve PVH Make.xlsx",
             xlsx_path=REPLACEMENT_DIR / "Aluminium Butterfly Valve PVH Make.xlsx",
             variant_type="Aluminium Butterfly Valve",
-            supplier_name="PVH-A01",
+            supplier_name="PVH",
         ),
         SheetReplaceSpec(
             source_file="Industrial Butterfly Valve Omval Make.xlsx",
@@ -425,7 +425,7 @@ async def run(*, dry_run: bool) -> None:
     price_sources = [
         ReplacementSource(
             xlsx_path=REPLACEMENT_DIR / "Aluminium Butterfly Valve PVH Make.xlsx",
-            supplier_name="PVH-A01",
+            supplier_name="PVH",
         ),
         ReplacementSource(
             xlsx_path=REPLACEMENT_DIR / "Hygienic Butterfly Valve Alfa Laval Make.xlsx",
@@ -433,7 +433,7 @@ async def run(*, dry_run: bool) -> None:
         ),
         ReplacementSource(
             xlsx_path=REPLACEMENT_DIR / "Hygienic Butterfly Valve PVH Make.xlsx",
-            supplier_name="PVH-S01",
+            supplier_name="PVH",
         ),
         ReplacementSource(
             xlsx_path=REPLACEMENT_DIR / "Industrial Butterfly Valve Omval Make.xlsx",

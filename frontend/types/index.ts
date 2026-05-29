@@ -470,6 +470,14 @@ export interface ManualEnquiryForm {
   notes: string
   /** Optional supplier + pricing context for manual flow (stored on enquiry raw JSON when supported). */
   supplierPricing?: ManualSupplierPricingContext | null
+  /** Net total section: optional P&amp;F toggle and override amount (defaults to 3% of subtotal). */
+  orderTotals?: ManualOrderTotals | null
+}
+
+export interface ManualOrderTotals {
+  pfApplicable: boolean
+  /** When P&amp;F applies and omitted, server uses 3% of subtotal. */
+  pfAmount?: number | null
 }
 
 export interface ManualSupplierPricingContext {
@@ -748,6 +756,8 @@ export interface SupplierResponse {
   id: string
   name: string
   primary_category_key: string
+  /** Empty = all masters catalog sheets. */
+  category_keys: string[]
   contact_person: string | null
   phone: string | null
   email: string | null

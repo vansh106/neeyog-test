@@ -20,6 +20,7 @@ class CreateSupplierRequest(BaseModel):
     name: str
     # Supplier-category pricing (optional at creation time)
     primary_category_key: str = "all"
+    category_keys: list[str] | None = None
     margin_multiplier: float | None = None
     supplier_discount_pct: float | None = None
     contact_person: str | None = None
@@ -32,6 +33,7 @@ class CreateSupplierRequest(BaseModel):
 class UpdateSupplierRequest(BaseModel):
     name: str | None = None
     primary_category_key: str | None = None
+    category_keys: list[str] | None = None
     contact_person: str | None = None
     phone: str | None = None
     email: str | None = None
@@ -43,6 +45,7 @@ class SupplierResponse(BaseModel):
     id: str
     name: str
     primary_category_key: str
+    category_keys: list[str] = Field(default_factory=list)
     contact_person: str | None
     phone: str | None
     email: str | None
@@ -110,6 +113,7 @@ def _supplier_to_response(s: Supplier) -> SupplierResponse:
         id=str(s.id),
         name=s.name,
         primary_category_key=str(getattr(s, "primary_category_key", "all") or "all"),
+        category_keys=pricing_service.supplier_category_keys_from_row(s),
         contact_person=s.contact_person,
         phone=s.phone,
         email=s.email,
@@ -166,6 +170,7 @@ async def handle_create_supplier(body: CreateSupplierRequest, db: AsyncSession) 
         body.address,
         body.notes,
         db,
+        category_keys=body.category_keys,
     )
     return _supplier_to_response(s)
 
@@ -182,6 +187,7 @@ async def handle_update_supplier(supplier_id: str, body: UpdateSupplierRequest, 
         db,
         name=body.name,
         primary_category_key=body.primary_category_key,
+        category_keys=body.category_keys,
         contact_person=body.contact_person,
         phone=body.phone,
         email=body.email,

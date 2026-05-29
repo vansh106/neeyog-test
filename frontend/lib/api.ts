@@ -410,6 +410,7 @@ export const suppliersApi = {
   createSupplier: (data: {
     name: string
     primary_category_key?: string
+    category_keys?: string[]
     margin_multiplier?: number | null
     supplier_discount_pct?: number | null
     contact_person?: string | null
@@ -423,6 +424,7 @@ export const suppliersApi = {
     data: Partial<{
       name: string
       primary_category_key: string
+      category_keys: string[]
       contact_person: string | null
       phone: string | null
       email: string | null
