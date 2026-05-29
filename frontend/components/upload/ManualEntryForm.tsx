@@ -771,6 +771,7 @@ export default function ManualEntryForm({
           gst: null as number | null,
           pf: null as number | null,
           grand: null as number | null,
+          defaultPf: null as number | null,
           allPriced: false,
         }
       }
@@ -1712,7 +1713,7 @@ export default function ManualEntryForm({
                   onChange={(e) => setPfAmountDraft(e.target.value)}
                   placeholder={
                     netOrderTotals?.defaultPf != null
-                      ? netOrderTotals.defaultPf.toFixed(2)
+                      ? netOrderTotals?.defaultPf.toFixed(2)
                       : '0.00'
                   }
                   className="h-8 w-32 shrink-0 font-mono text-right"
@@ -1902,7 +1903,7 @@ export default function ManualEntryForm({
                       onChange={(e) => setPfAmountDraft(e.target.value)}
                       placeholder={
                         pricingTotals?.defaultPf != null
-                          ? pricingTotals.defaultPf.toFixed(2)
+                          ? pricingTotals?.defaultPf.toFixed(2)
                           : '0.00'
                       }
                       className="h-8 w-32 shrink-0 font-mono text-right"
