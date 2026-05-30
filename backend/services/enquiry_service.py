@@ -131,10 +131,22 @@ def expand_manual_line_items_to_quote_parts(
             continue
         name = str(sp.get("name") or "Product").strip()
         unit = str(sp.get("unit") or "Nos").strip() or "Nos"
-        base_unit_price = _clean_float(sp.get("base_price"), 0.0)
+        price_tbd = bool(li.get("price_tbd"))
+        raw_base = sp.get("base_price")
+        base_unit_price: float | None = None
+        if raw_base is not None and str(raw_base).strip() != "":
+            bp = _clean_float(raw_base, 0.0)
+            if bp > 0:
+                base_unit_price = round(bp, 2)
+        if not price_tbd and base_unit_price is None:
+            price_tbd = True
         customer_discount_pct = _normalize_discount_pct(li.get("customer_discount_pct")) or 0.0
-        customer_discount_amount = round(base_unit_price * (customer_discount_pct / 100.0), 2)
-        unit_price = round(base_unit_price - customer_discount_amount, 2)
+        if price_tbd or base_unit_price is None:
+            customer_discount_amount = 0.0
+            unit_price = 0.0
+        else:
+            customer_discount_amount = round(base_unit_price * (customer_discount_pct / 100.0), 2)
+            unit_price = round(base_unit_price - customer_discount_amount, 2)
         size_inch = sp.get("size_inch")
         size_mm = sp.get("size_mm")
         material = sp.get("material")
@@ -159,8 +171,9 @@ def expand_manual_line_items_to_quote_parts(
                 "material": material,
                 "size_inch": size_inch,
                 "size_mm": size_mm,
-                "base_price": unit_price,
+                "base_price": unit_price if not price_tbd else None,
                 "base_unit_price": base_unit_price,
+                "price_tbd": price_tbd,
                 "customer_discount_pct": customer_discount_pct,
                 "unit": unit,
             }
@@ -185,6 +198,7 @@ def expand_manual_line_items_to_quote_parts(
                 "base_unit_price": base_unit_price,
                 "customer_discount_pct": customer_discount_pct,
                 "customer_discount_amount": customer_discount_amount,
+                "price_tbd": price_tbd,
                 "unit": unit,
                 "category": cat,
                 "catalog_table": catalog_table,
@@ -226,8 +240,20 @@ def _calc_totals(
             continue
         qty = _normalize_int(raw.get("quantity"), 1)
         unit_price = round(_clean_float(raw.get("unit_price"), 0.0), 2)
+        price_tbd = bool(raw.get("price_tbd")) or unit_price <= 0
+        if price_tbd:
+            line_total = 0.0
+            row = {
+                **raw,
+                "quantity": qty,
+                "unit_price": 0.0,
+                "line_total": line_total,
+                "price_tbd": True,
+            }
+            normalized.append(row)
+            continue
         line_total = round(qty * unit_price, 2)
-        row = {**raw, "quantity": qty, "unit_price": unit_price, "line_total": line_total}
+        row = {**raw, "quantity": qty, "unit_price": unit_price, "line_total": line_total, "price_tbd": False}
         normalized.append(row)
         subtotal += line_total
     subtotal = round(subtotal, 2)
@@ -809,14 +835,35 @@ async def process_manual_dropdown(
     if not pf_applicable:
         pf_amount = 0.0
         pf_rate = 0.0
-        total_amount = round(subtotal + gst_amount, 2)
     elif pf_amount_override is not None:
         pf_amount = pf_amount_override
-        total_amount = round(subtotal + gst_amount + pf_amount, 2)
         if subtotal > 0:
             pf_rate = round((pf_amount / subtotal) * 100.0, 2)
     else:
-        total_amount = round(subtotal + gst_amount + pf_amount, 2)
+        pf_amount = round(subtotal * (pf_rate / 100.0), 2)
+
+    freight_applicable = False
+    freight_amount = 0.0
+    freight_rate: float | None = None
+    if isinstance(order_totals_in, dict):
+        freight_applicable = bool(
+            order_totals_in.get("freight_applicable", order_totals_in.get("freightApplicable", False))
+        )
+        raw_freight = order_totals_in.get("freight_amount", order_totals_in.get("freightAmount"))
+        raw_freight_rate = order_totals_in.get("freight_rate", order_totals_in.get("freightRate"))
+        if freight_applicable:
+            if raw_freight is not None and str(raw_freight).strip() != "":
+                freight_amount = round(_clean_float(raw_freight, 0.0), 2)
+            mode = str(
+                order_totals_in.get("freight_mode", order_totals_in.get("freightMode", "amount")) or "amount"
+            ).strip().lower()
+            if raw_freight_rate is not None and str(raw_freight_rate).strip() != "":
+                freight_rate = round(_clean_float(raw_freight_rate, 0.0), 2)
+            elif mode == "percent" and subtotal > 0 and freight_amount > 0:
+                freight_rate = round((freight_amount / subtotal) * 100.0, 2)
+
+    total_amount = round(subtotal + gst_amount + pf_amount + freight_amount, 2)
+    freight_note = "Extra at actual" if not freight_applicable or freight_amount <= 0 else ""
 
     raw_payload: dict = {
         "source": "manual_dropdown",
@@ -836,6 +883,14 @@ async def process_manual_dropdown(
             "pf_applicable": pf_applicable,
             "pf_amount": pf_amount,
             "pf_rate": pf_rate,
+            "freight_applicable": freight_applicable,
+            "freight_amount": freight_amount,
+            "freight_rate": freight_rate,
+            "freight_mode": (
+                order_totals_in.get("freight_mode", order_totals_in.get("freightMode"))
+                if isinstance(order_totals_in, dict)
+                else None
+            ),
         },
     }
     sp = body.get("supplierPricing")
@@ -908,7 +963,9 @@ async def process_manual_dropdown(
         "gst_amount": gst_amount,
         "pf_rate": pf_rate,
         "pf_amount": pf_amount,
-        "freight_note": "Extra at actual",
+        "freight_note": freight_note,
+        "freight_amount": freight_amount,
+        "freight_rate": freight_rate,
         "total_amount": total_amount,
         "professional_notes": notes or "",
         "validity_days": int(client_json.get("quote_validity_days", 15)),
@@ -942,6 +999,9 @@ async def process_manual_dropdown(
         gst_amount=gst_amount,
         pf_rate=pf_rate,
         pf_amount=pf_amount,
+        freight_note=freight_note or "Extra at actual",
+        freight_amount=freight_amount,
+        freight_rate=freight_rate,
         total_amount=total_amount,
         validity_days=int(client_json.get("quote_validity_days", 15)),
         status="ongoing",

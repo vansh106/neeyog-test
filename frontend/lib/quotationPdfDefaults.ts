@@ -64,12 +64,32 @@ export function defaultCompanyRightBlurb(): string {
   return 'Thank you for your enquiry and for considering us as a supplier.'
 }
 
+export function formatQuotationFreight(quotation: Quotation): string {
+  const amt = Number(quotation.freight_amount ?? 0)
+  if (Number.isFinite(amt) && amt > 0) {
+    const money = amt.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    const rate = quotation.freight_rate
+    if (rate != null && Number.isFinite(Number(rate))) {
+      return `₹${money} (${Number(rate)} %)`
+    }
+    return `₹${money}`
+  }
+  return quotation.freight_note || 'Extra at actual'
+}
+
 export function buildDefaultTerms(quotation: Quotation): string[] {
   const gstRate = quotation.gst_rate
+  const freightAmt = Number(quotation.freight_amount ?? 0)
+  const freightTerm =
+    freightAmt > 0 && quotation.freight_rate != null
+      ? `Freight @ ${quotation.freight_rate}% — included in valuation total as shown below.`
+      : freightAmt > 0
+        ? `Freight — ₹${freightAmt.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} included in valuation total as shown below.`
+        : `Freight — ${quotation.freight_note || 'Extra at actual'}.`
   return [
     'Any modification to agreed specifications may attract additional commercial charges.',
     "Third party inspection, if required — extra at actual and in customer's scope.",
-    `Freight — ${quotation.freight_note || 'Extra at actual'}.`,
+    freightTerm,
     `GST @ ${gstRate}% — included in valuation total as shown below.`,
     `P & F @ ${quotation.pf_rate}% — included in valuation total as shown below.`,
     `Offer validity — ${quotation.validity_days} days from date of issue.`,

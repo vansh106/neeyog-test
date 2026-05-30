@@ -16,6 +16,7 @@ import {
 } from '@/components/ui/sheet'
 import { suppliersApi } from '@/lib/api'
 import {
+  expandSupplierCategoryKeys,
   masterCatalogCategoryLabel,
   masterNavSupplierCategorySections,
 } from '@/lib/masterSidebarNav'
@@ -72,7 +73,7 @@ export default function SuppliersTab() {
       setSelectedCategoryKeys(new Set())
     } else {
       setAllCategories(false)
-      setSelectedCategoryKeys(new Set(keys))
+      setSelectedCategoryKeys(new Set(expandSupplierCategoryKeys(keys)))
     }
   }
 

@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useMastersCatalog, computeDistinctOptions, type CatalogRow } from '@/hooks/useValveCatalog'
 import { mastersApi, suppliersApi } from '@/lib/api'
-import { cn, formatCurrency } from '@/lib/utils'
+import { cn, formatCurrency, formatPriceOrTbd } from '@/lib/utils'
 import type { SupplierPriceRow, SupplierResponse } from '@/types'
 
 const SELECT_EMPTY = '__none__'
@@ -478,7 +478,9 @@ export default function MastersEditor({ initialCategory }: { initialCategory?: s
                             currentPrice == null ? 'text-brand-gold-700' : 'text-brand-gold-500',
                           )}
                         >
-                          {currentPrice == null ? '₹TBD' : formatCurrency(Number(currentPrice))}
+                          {currentPrice == null || currentPrice <= 0
+                            ? formatPriceOrTbd(null)
+                            : formatCurrency(Number(currentPrice))}
                         </span>
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap text-right">

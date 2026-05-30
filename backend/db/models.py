@@ -205,6 +205,8 @@ class Quotation(Base):
     pf_rate: Mapped[float] = mapped_column(Float, nullable=False, default=3.0)
     pf_amount: Mapped[float] = mapped_column(Float, nullable=False)
     freight_note: Mapped[str] = mapped_column(String(255), nullable=False, default="Extra at actual")
+    freight_amount: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    freight_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
     total_amount: Mapped[float] = mapped_column(Float, nullable=False)
     validity_days: Mapped[int] = mapped_column(Integer, nullable=False, default=15)
     #: CRM: po_received | lost | hold | ongoing

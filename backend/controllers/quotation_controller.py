@@ -49,6 +49,8 @@ def _quotation_api_dict(q: Quotation) -> dict:
         "pf_rate": q.pf_rate,
         "pf_amount": q.pf_amount,
         "freight_note": q.freight_note,
+        "freight_amount": float(getattr(q, "freight_amount", 0) or 0),
+        "freight_rate": float(q.freight_rate) if getattr(q, "freight_rate", None) is not None else None,
         "total_amount": q.total_amount,
         "validity_days": q.validity_days,
         "status": q.status,

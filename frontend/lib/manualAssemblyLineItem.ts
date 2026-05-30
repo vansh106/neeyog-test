@@ -9,6 +9,7 @@ import type {
   ProductSizeOption,
   ValveProduct,
 } from '@/types'
+import { isPositivePrice } from '@/lib/utils'
 
 export function uuidv4(): string {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID()
@@ -157,14 +158,21 @@ export function assembledToLineItem(
         ? `${catalogTable}:${rawCatalogId}`
         : rawCatalogId
 
+  const resolvedUnit =
+    unitPriceOverride != null && isPositivePrice(unitPriceOverride)
+      ? unitPriceOverride
+      : isPositivePrice(p.unit_price)
+        ? p.unit_price
+        : null
+  const priceTbd = p.has_unknown_prices || !isPositivePrice(resolvedUnit)
+
   const sel: ProductSizeOption = {
     id: catalogId,
     name,
     size_inch: parseSizeInch(v?.valve_size ?? null),
     size_mm: parseSizeMm(v?.valve_size ?? null),
     material,
-    base_price:
-      unitPriceOverride != null && Number.isFinite(unitPriceOverride) ? unitPriceOverride : (p.unit_price ?? 0),
+    base_price: resolvedUnit,
     unit: p.unit || 'Nos',
     display_label: name,
   }
@@ -214,6 +222,7 @@ export function assembledToLineItem(
     quantity: p.quantity,
     customer_discount_pct:
       customerDiscountPct != null && Number.isFinite(customerDiscountPct) ? customerDiscountPct : undefined,
+    price_tbd: priceTbd,
     component_pricing: p.component_pricing ?? undefined,
   }
 }

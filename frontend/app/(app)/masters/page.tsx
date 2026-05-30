@@ -16,7 +16,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { useProducts } from '@/lib/queries'
-import { formatCurrency } from '@/lib/utils'
+import { formatCurrency, formatPriceOrTbd } from '@/lib/utils'
 import { suppliersApi } from '@/lib/api'
 import type { Product, SupplierPriceRow, SupplierResponse } from '@/types'
 import MastersEditor from '@/components/masters/MastersEditor'
@@ -247,7 +247,7 @@ export default function MastersPage() {
                           )}
                           {supplierPricingEnabled && (
                             <td className="px-4 py-3 text-right font-mono text-surface-muted">
-                              {priceRow?.list_price_inr != null ? formatCurrency(priceRow.list_price_inr) : '—'}
+                              {formatPriceOrTbd(priceRow?.list_price_inr ?? null)}
                             </td>
                           )}
                           <td className="px-4 py-3 text-surface-muted">{p.unit}</td>

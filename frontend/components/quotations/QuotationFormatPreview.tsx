@@ -12,8 +12,9 @@ import {
   defaultFooterDisclaimer,
   defaultFooterThanks,
   defaultThankYouBanner,
+  formatQuotationFreight,
 } from '@/lib/quotationPdfDefaults'
-import { cn, formatCurrency } from '@/lib/utils'
+import { cn, formatCurrency, PRICE_TBD_LABEL } from '@/lib/utils'
 import type { ClientConfig, EnquiryDetail, Quotation, QuotationLineItem, QuotationPdfDisplayOverrides } from '@/types'
 
 const NAVY = '#1a2744'
@@ -218,13 +219,17 @@ export default function QuotationFormatPreview({
                   </td>
                   <td className="whitespace-pre-line px-2 py-2 align-top text-gray-700">{pdfDisp.size}</td>
                   <td className="px-2 py-2 text-right font-mono align-top">{qtyCell}</td>
-                  <td className="px-2 py-2 text-right font-mono align-top">{line.unit_price.toFixed(2)}</td>
+                  <td className="px-2 py-2 text-right font-mono align-top">
+                    {line.price_tbd || line.unit_price <= 0 ? PRICE_TBD_LABEL : line.unit_price.toFixed(2)}
+                  </td>
                   <td className="px-2 py-2 text-right font-mono align-top">{disc ? String(disc) : '0'}</td>
                   <td className="px-2 py-2 text-right font-mono font-medium align-top">
-                    {(line.line_total ?? line.total ?? 0).toLocaleString('en-IN', {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    })}
+                    {line.price_tbd || line.unit_price <= 0
+                      ? PRICE_TBD_LABEL
+                      : (line.line_total ?? line.total ?? 0).toLocaleString('en-IN', {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
                   </td>
                 </tr>
               )
@@ -311,8 +316,19 @@ export default function QuotationFormatPreview({
               </tr>
             )}
                 <tr className="border border-[#333] border-t-0 bg-white">
-              <td className="px-2 py-1.5 font-bold">FREIGHT</td>
-              <td className="px-2 py-1.5 text-right text-gray-800">{quotation.freight_note || 'Extra at actual'}</td>
+              <td className="px-2 py-1.5 font-bold">
+                FREIGHT
+                {quotation.freight_amount != null &&
+                quotation.freight_amount > 0 &&
+                quotation.freight_rate != null
+                  ? ` (${quotation.freight_rate} %)`
+                  : ''}
+              </td>
+              <td className="px-2 py-1.5 text-right text-gray-800">
+                {quotation.freight_amount != null && quotation.freight_amount > 0
+                  ? formatCurrency(quotation.freight_amount)
+                  : formatQuotationFreight(quotation)}
+              </td>
             </tr>
                 <tr className="border border-[#333] border-t-0 bg-[#f9faf7]">
               <td className="px-2 py-2 font-bold">GRAND TOTAL INR</td>

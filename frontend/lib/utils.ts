@@ -13,6 +13,20 @@ export function formatCurrency(amount: number): string {
   }).format(amount)
 }
 
+/** Valid list/quote price: finite number strictly greater than zero. */
+export function isPositivePrice(amount: unknown): amount is number {
+  const n = typeof amount === 'number' ? amount : Number(amount)
+  return Number.isFinite(n) && n > 0
+}
+
+export const PRICE_TBD_LABEL = 'TBD'
+
+/** Display a price in INR, or ``TBD`` when missing / zero. */
+export function formatPriceOrTbd(amount: number | null | undefined, withSymbol = true): string {
+  if (!isPositivePrice(amount)) return withSymbol ? `₹${PRICE_TBD_LABEL}` : PRICE_TBD_LABEL
+  return formatCurrency(amount)
+}
+
 export function formatRelativeTime(dateStr: string): string {
   const date = new Date(dateStr)
   const now = new Date()

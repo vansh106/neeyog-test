@@ -108,6 +108,8 @@ def _quotation_payload_for_pdf(q: Quotation) -> dict:
         "pf_rate": float(q.pf_rate),
         "pf_amount": float(q.pf_amount or 0),
         "freight_note": q.freight_note or "Extra at actual",
+        "freight_amount": float(getattr(q, "freight_amount", 0) or 0),
+        "freight_rate": float(q.freight_rate) if getattr(q, "freight_rate", None) is not None else None,
         "total_amount": float(q.total_amount or 0),
         "validity_days": int(q.validity_days or 15),
         "professional_notes": q.notes or "",
@@ -464,9 +466,11 @@ async def update_quotation_from_manual_line_items(
 
     gst_rate = float(q.gst_rate)
     pf_rate = float(q.pf_rate)
-    quote_line_items, subtotal, gst_amount, pf_amount, total_amount = enquiry_svc._calc_totals(
+    quote_line_items, subtotal, gst_amount, pf_amount, _base_total = enquiry_svc._calc_totals(
         quote_line_items, gst_rate=gst_rate, pf_rate=pf_rate
     )
+    freight_amount = float(getattr(q, "freight_amount", 0) or 0)
+    total_amount = round(subtotal + gst_amount + pf_amount + freight_amount, 2)
 
     await db.execute(delete(QuotationProductHistory).where(QuotationProductHistory.quotation_id == q.id))
     await db.flush()

@@ -112,12 +112,16 @@ class ManualSupplierPricingPayload(BaseModel):
 
 
 class ManualOrderTotalsPayload(BaseModel):
-    """P&F toggle and optional override from manual entry Net total section."""
+    """P&F and freight toggles from manual entry Net total section."""
 
     model_config = ConfigDict(populate_by_name=True)
 
     pf_applicable: bool = Field(True, alias="pfApplicable")
     pf_amount: float | None = Field(None, alias="pfAmount")
+    freight_applicable: bool = Field(False, alias="freightApplicable")
+    freight_mode: str | None = Field(None, alias="freightMode")
+    freight_amount: float | None = Field(None, alias="freightAmount")
+    freight_rate: float | None = Field(None, alias="freightRate")
 
 
 class ManualNewClientEmployeeRequest(BaseModel):

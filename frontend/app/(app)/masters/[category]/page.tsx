@@ -11,7 +11,7 @@ import { Button } from '@/components/ui/button'
 import { Database, Download, Loader2 } from 'lucide-react'
 import { useSheetRows } from '@/lib/queries'
 import { mastersApi, suppliersApi } from '@/lib/api'
-import { formatCurrency } from '@/lib/utils'
+import { formatPriceOrTbd } from '@/lib/utils'
 import {
   Select,
   SelectContent,
@@ -386,7 +386,7 @@ export default function MastersCategoryPage() {
                       )}
                       {supplierPricingEnabled && (
                         <td className="px-4 py-3 text-right font-mono text-surface-muted whitespace-nowrap">
-                          {priceRow?.list_price_inr != null ? formatCurrency(priceRow.list_price_inr) : '—'}
+                          {formatPriceOrTbd(priceRow?.list_price_inr ?? null)}
                         </td>
                       )}
                     </tr>

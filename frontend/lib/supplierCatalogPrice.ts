@@ -16,7 +16,7 @@ export async function fetchSupplierListPriceInr(
     const pr = await suppliersApi.getProductPrice(sid, table, rowId)
     if (pr?.list_price_inr == null) return null
     const n = Number(pr.list_price_inr)
-    return Number.isFinite(n) ? n : null
+    return Number.isFinite(n) && n > 0 ? n : null
   } catch {
     return null
   }

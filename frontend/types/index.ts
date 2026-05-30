@@ -72,6 +72,7 @@ export interface QuotationLineItem {
   customer_discount_amount?: number
   line_total: number
   total?: number
+  price_tbd?: boolean
   product_name?: string
   category?: string | null
   catalog_table?: string | null
@@ -147,6 +148,8 @@ export interface Quotation {
   pf_rate: number
   pf_amount: number
   freight_note: string
+  freight_amount?: number
+  freight_rate?: number | null
   total_amount: number
   validity_days: number
   status: string
@@ -402,7 +405,7 @@ export interface ProductSizeOption {
   size_inch: number | null
   size_mm: number | null
   material: string
-  base_price: number
+  base_price: number | null
   unit: string
   display_label: string
 }
@@ -428,6 +431,8 @@ export interface ManualLineItem {
   selectedProduct: ProductSizeOption | null
   quantity: number
   customer_discount_pct?: number
+  /** When true, quote/PDF show TBD instead of a numeric rate. */
+  price_tbd?: boolean
   component_pricing?: Record<string, unknown>
 }
 
@@ -478,6 +483,12 @@ export interface ManualOrderTotals {
   pfApplicable: boolean
   /** When P&amp;F applies and omitted, server uses 3% of subtotal. */
   pfAmount?: number | null
+  freightApplicable?: boolean
+  /** ``percent`` = draft is % of subtotal; ``amount`` = flat INR. */
+  freightMode?: 'percent' | 'amount'
+  freightAmount?: number | null
+  /** Set when freightMode is percent. */
+  freightRate?: number | null
 }
 
 export interface ManualSupplierPricingContext {

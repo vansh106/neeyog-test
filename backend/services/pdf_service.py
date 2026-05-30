@@ -497,6 +497,7 @@ async def generate_quotation_pdf(
                 size = str(row_ov["size"])
             qty = item.get("quantity", 1)
             unit = item.get("unit", "Nos")
+            price_tbd = bool(item.get("price_tbd"))
             price = float(item.get("unit_price", 0))
             total = float(item.get("line_total") or item.get("total", float(qty) * price))
             disc = item.get("customer_discount_pct")
@@ -507,15 +508,17 @@ async def generate_quotation_pdf(
 
             desc_html = _description_paragraph_html(desc)
             qty_cell = f"{escape(str(qty))} {escape(str(unit))}".strip()
+            rate_cell = "TBD" if price_tbd else f"{price:,.2f}"
+            total_cell = "TBD" if price_tbd else f"{total:,.2f}"
             table_data.append(
                 [
                     Paragraph(str(idx), s_cell),
                     Paragraph(desc_html or "—", s_desc),
                     Paragraph(escape(str(size)) if size else "—", s_cell),
                     Paragraph(qty_cell, s_cell),
-                    Paragraph(f"{price:,.2f}", s_cell),
+                    Paragraph(rate_cell, s_cell),
                     Paragraph(f"{disc_f:g}" if disc_f else "0", s_cell),
-                    Paragraph(f"{total:,.2f}", s_cell),
+                    Paragraph(total_cell, s_cell),
                 ]
             )
 
@@ -595,6 +598,8 @@ async def generate_quotation_pdf(
         gst_pct = float(quotation_data.get("gst_rate", 18))
         pf_pct = float(quotation_data.get("pf_rate", 3))
         freight = quotation_data.get("freight_note", "Extra at actual")
+        freight_amount = float(quotation_data.get("freight_amount", 0) or 0)
+        freight_rate = quotation_data.get("freight_rate")
 
         line_items_for_total = quotation_data.get("line_items") or []
         if (
@@ -607,6 +612,8 @@ async def generate_quotation_pdf(
             for item in line_items_for_total:
                 if not isinstance(item, dict):
                     continue
+                if bool(item.get("price_tbd")):
+                    continue
                 qty = float(item.get("quantity") or 1)
                 up = float(item.get("unit_price") or 0)
                 lt = item.get("line_total")
@@ -617,7 +624,7 @@ async def generate_quotation_pdf(
             subtotal = round(st, 2)
             gst_amount = round(subtotal * (gst_pct / 100.0), 2)
             pf_amount = round(subtotal * (pf_pct / 100.0), 2)
-            total_amount = round(subtotal + gst_amount + pf_amount, 2)
+            total_amount = round(subtotal + gst_amount + pf_amount + freight_amount, 2)
 
         # ── Terms + Financial summary side-by-side ────────────────
         ti = None
@@ -629,7 +636,15 @@ async def generate_quotation_pdf(
             terms_body = [
                 "Any modification to agreed specifications may attract additional commercial charges.",
                 "Third party inspection, if required — extra at actual and in customer's scope.",
-                f"Freight — {str(freight)}.",
+                (
+                    f"Freight @ {float(freight_rate):g}% — included in valuation total as shown below."
+                    if freight_amount > 0 and freight_rate is not None
+                    else (
+                        f"Freight — {_money_text(freight_amount)} included in valuation total as shown below."
+                        if freight_amount > 0
+                        else f"Freight — {str(freight or 'Extra at actual')}."
+                    )
+                ),
                 f"GST @ {gst_pct:g}% — included in valuation total as shown below.",
                 f"P & F @ {pf_pct:g}% — included in valuation total as shown below.",
                 f"Offer validity — {validity_days} days from date of issue.",
@@ -668,10 +683,20 @@ async def generate_quotation_pdf(
                     Paragraph(_money_text(gst_amount), s_cell),
                 ]
             )
+        if freight_amount > 0:
+            if freight_rate is not None:
+                freight_label = f"<b>FREIGHT</b> ({float(freight_rate):g} %)"
+                freight_value = _money_text(freight_amount)
+            else:
+                freight_label = "<b>FREIGHT</b>"
+                freight_value = _money_text(freight_amount)
+        else:
+            freight_label = "<b>FREIGHT</b>"
+            freight_value = escape(str(freight or "Extra at actual"))
         fin_rows.append(
             [
-                Paragraph("<b>FREIGHT</b>", s_cell_head),
-                Paragraph(escape(str(freight)), s_cell),
+                Paragraph(freight_label, s_cell_head),
+                Paragraph(freight_value, s_cell),
             ]
         )
         fin_rows.append(

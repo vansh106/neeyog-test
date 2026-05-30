@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { cn, formatCurrency } from '@/lib/utils'
+import { cn, formatCurrency, formatPriceOrTbd, isPositivePrice, PRICE_TBD_LABEL } from '@/lib/utils'
 import { useWarmupMatcherCatalog } from '@/hooks/useValveCatalog'
 import { clientsApi, suppliersApi } from '@/lib/api'
 import { ValveConfigurator, CompletedProductCard } from '@/components/configurator/ValveConfigurator'
@@ -91,15 +91,44 @@ function resolvePfAmount(
   return { pf: roundMoney(n), defaultPf }
 }
 
-function computeTaxTotals(subtotal: number, pfApplicable: boolean, pfAmountDraft: string) {
+export type FreightChargeMode = 'percent' | 'amount'
+
+function resolveFreightAmount(
+  subtotal: number,
+  freightApplicable: boolean,
+  freightMode: FreightChargeMode,
+  freightDraft: string,
+): { freight: number; freightRate: number | null } {
+  if (!freightApplicable) return { freight: 0, freightRate: null }
+  const raw = freightDraft.trim().replace(/,/g, '')
+  if (!raw) return { freight: 0, freightRate: null }
+  const n = Number(raw)
+  if (!Number.isFinite(n) || n < 0) return { freight: 0, freightRate: null }
+  if (freightMode === 'percent') {
+    const freight = roundMoney(subtotal * (n / 100))
+    return { freight, freightRate: n }
+  }
+  return { freight: roundMoney(n), freightRate: null }
+}
+
+function computeTaxTotals(
+  subtotal: number,
+  pfApplicable: boolean,
+  pfAmountDraft: string,
+  freightApplicable: boolean,
+  freightMode: FreightChargeMode,
+  freightDraft: string,
+) {
   const gst = roundMoney(subtotal * DEFAULT_GST_RATE)
   const { pf, defaultPf } = resolvePfAmount(subtotal, pfApplicable, pfAmountDraft)
+  const { freight } = resolveFreightAmount(subtotal, freightApplicable, freightMode, freightDraft)
   return {
     subtotal,
     gst,
     pf,
     defaultPf,
-    grand: roundMoney(subtotal + gst + pf),
+    freight,
+    grand: roundMoney(subtotal + gst + pf + freight),
   }
 }
 
@@ -462,6 +491,9 @@ export default function ManualEntryForm({
   const [customerDiscountByProduct, setCustomerDiscountByProduct] = useState<Record<string, string>>({})
   const [pfApplicable, setPfApplicable] = useState(true)
   const [pfAmountDraft, setPfAmountDraft] = useState('')
+  const [freightApplicable, setFreightApplicable] = useState(false)
+  const [freightMode, setFreightMode] = useState<FreightChargeMode>('amount')
+  const [freightDraft, setFreightDraft] = useState('')
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedCompanyQuery(companyQuery), 300)
@@ -742,13 +774,23 @@ export default function ManualEntryForm({
       if (!pc?.ok) return null
       subtotal += pc.assemblyUnit * discountFactor * p.quantity
     }
-    return computeTaxTotals(subtotal, pfApplicable, pfAmountDraft)
+    return computeTaxTotals(
+      subtotal,
+      pfApplicable,
+      pfAmountDraft,
+      freightApplicable,
+      freightMode,
+      freightDraft,
+    )
   }, [
     assembledProducts,
     customerDiscountByProduct,
     defaultClientDiscount,
     pfApplicable,
     pfAmountDraft,
+    freightApplicable,
+    freightMode,
+    freightDraft,
     productCalcs,
     tempQuoteUnitByProduct,
   ])
@@ -756,32 +798,43 @@ export default function ManualEntryForm({
   const supplierRequired = suppliers.length > 0
   const pricingReady = useMemo(() => {
     if (assembledProducts.length === 0) return false
-    return assembledProducts.every((p) => Number.isFinite(Number(p.unit_price)) && Number(p.unit_price) > 0)
-  }, [assembledProducts])
+    if (!supplierRequired) return true
+    return assembledProducts.every((p) => Boolean(p.supplier_id))
+  }, [assembledProducts, supplierRequired])
 
   /** Subtotal = Σ (quoted unit × qty); taxes match quotation rules (GST 18%, P&amp;F 3% on subtotal). */
   const netOrderTotals = useMemo(() => {
     if (assembledProducts.length === 0) return null
     let subtotal = 0
+    let hasUnpriced = false
     for (const p of assembledProducts) {
       const u = p.unit_price
-      if (u == null || !Number.isFinite(Number(u)) || Number(u) <= 0) {
-        return {
-          subtotal: null as number | null,
-          gst: null as number | null,
-          pf: null as number | null,
-          grand: null as number | null,
-          defaultPf: null as number | null,
-          allPriced: false,
-        }
+      if (!isPositivePrice(u)) {
+        hasUnpriced = true
+        continue
       }
       subtotal += Number(u) * p.quantity
     }
     return {
-      ...computeTaxTotals(subtotal, pfApplicable, pfAmountDraft),
-      allPriced: true,
+      ...computeTaxTotals(
+        subtotal,
+        pfApplicable,
+        pfAmountDraft,
+        freightApplicable,
+        freightMode,
+        freightDraft,
+      ),
+      allPriced: !hasUnpriced,
+      hasUnpriced,
     }
-  }, [assembledProducts, pfApplicable, pfAmountDraft])
+  }, [
+    assembledProducts,
+    pfApplicable,
+    pfAmountDraft,
+    freightApplicable,
+    freightMode,
+    freightDraft,
+  ])
 
   const handleProductComplete = useCallback(
     (configId: string) => (product: AssembledProduct) => {
@@ -837,9 +890,6 @@ export default function ManualEntryForm({
     if (supplierRequired) {
       const missingSupplier = assembledProducts.some((p) => !p.supplier_id)
       if (missingSupplier) e.supplier = 'Please select a supplier for each product'
-      else if (!pricingReady) {
-        e.pricing = 'Prices are missing for one or more products. Complete Step 5 pricing before processing.'
-      }
     }
     setErrors(e)
     return Object.keys(e).length === 0
@@ -856,7 +906,13 @@ export default function ManualEntryForm({
       return 'Fill in client and product details above'
     }
     const est = netOrderTotals?.grand ?? totalEstimate
-    return `${clientLabel} — ${assembledProducts.length} product(s) — Est. ${formatCurrency(est)}`
+    const hasTbd = assembledProducts.some(
+      (p) => p.has_unknown_prices || !isPositivePrice(p.unit_price),
+    )
+    const estLabel = hasTbd
+      ? `Est. ${formatCurrency(est)} (+ ${PRICE_TBD_LABEL} items)`
+      : `Est. ${formatCurrency(est)}`
+    return `${clientLabel} — ${assembledProducts.length} product(s) — ${estLabel}`
   }, [
     clientMode,
     newClient.company_name,
@@ -889,9 +945,19 @@ export default function ManualEntryForm({
     }
     if (netOrderTotals?.subtotal != null) {
       const { pf } = resolvePfAmount(netOrderTotals.subtotal, pfApplicable, pfAmountDraft)
+      const { freight, freightRate } = resolveFreightAmount(
+        netOrderTotals.subtotal,
+        freightApplicable,
+        freightMode,
+        freightDraft,
+      )
       form.orderTotals = {
         pfApplicable,
         pfAmount: pf,
+        freightApplicable,
+        freightMode,
+        freightAmount: freight,
+        freightRate,
       }
     }
     if (
@@ -1652,7 +1718,8 @@ export default function ManualEntryForm({
           <p className="mt-1 text-[13px] text-surface-muted">
             Subtotal uses each product&apos;s quoted unit price (after any customer discount from Step 5). GST is
             18% on subtotal. Use the P&amp;F checkbox to include packing &amp; forwarding; edit the amount or leave
-            blank to use the calculated 3% default.
+            blank to use the calculated 3% default. Freight can be entered as a flat amount (₹) or as a percentage of
+            subtotal.
           </p>
           <div className="mt-4 space-y-3 text-[13px]">
             <div className="rounded-lg border border-surface-border bg-surface-page p-3">
@@ -1660,7 +1727,7 @@ export default function ManualEntryForm({
               <ul className="mt-2 space-y-2">
                 {assembledProducts.map((p) => {
                   const u = p.unit_price
-                  const ok = u != null && Number.isFinite(Number(u)) && Number(u) > 0
+                  const ok = isPositivePrice(u)
                   const line = ok ? Number(u) * p.quantity : null
                   return (
                     <li key={p.id} className="flex flex-col gap-0.5 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
@@ -1672,7 +1739,7 @@ export default function ManualEntryForm({
                             {formatCurrency(line!)}
                           </>
                         ) : (
-                          <span className="text-brand-gold-700">Price pending</span>
+                          <span className="text-brand-gold-700">{PRICE_TBD_LABEL}</span>
                         )}
                       </span>
                     </li>
@@ -1720,6 +1787,70 @@ export default function ManualEntryForm({
                   aria-label="P and F amount in INR"
                 />
               </div>
+              <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-surface-muted">
+                <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={freightApplicable}
+                    onChange={(e) => setFreightApplicable(e.target.checked)}
+                    aria-label="Apply freight charges"
+                    className="size-3.5 shrink-0 rounded border-[#B8BFB4] text-brand-green-600 focus:ring-brand-green-500/30"
+                  />
+                  <span>Freight charges</span>
+                </label>
+                <div className="flex shrink-0 items-center gap-1.5">
+                  <div className="flex overflow-hidden rounded-md border border-surface-border bg-white">
+                    <button
+                      type="button"
+                      disabled={!freightApplicable || netOrderTotals?.subtotal == null}
+                      onClick={() => setFreightMode('percent')}
+                      className={cn(
+                        'px-2.5 py-1 text-[11px] font-semibold transition-colors',
+                        freightMode === 'percent'
+                          ? 'bg-brand-navy-500 text-white'
+                          : 'text-gray-700 hover:bg-[#F4F5F0]',
+                      )}
+                    >
+                      %
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!freightApplicable || netOrderTotals?.subtotal == null}
+                      onClick={() => setFreightMode('amount')}
+                      className={cn(
+                        'border-l border-surface-border px-2.5 py-1 text-[11px] font-semibold transition-colors',
+                        freightMode === 'amount'
+                          ? 'bg-brand-navy-500 text-white'
+                          : 'text-gray-700 hover:bg-[#F4F5F0]',
+                      )}
+                    >
+                      ₹
+                    </button>
+                  </div>
+                  <Input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    disabled={!freightApplicable || netOrderTotals?.subtotal == null}
+                    value={freightDraft}
+                    onChange={(e) => setFreightDraft(e.target.value)}
+                    placeholder={freightMode === 'percent' ? 'e.g. 2' : '0.00'}
+                    className="h-8 w-32 shrink-0 font-mono text-right"
+                    aria-label={
+                      freightMode === 'percent'
+                        ? 'Freight as percent of subtotal'
+                        : 'Freight amount in INR'
+                    }
+                  />
+                </div>
+                {freightApplicable &&
+                  netOrderTotals?.freight != null &&
+                  netOrderTotals.freight > 0 && (
+                    <span className="w-full text-right text-[11px] text-surface-muted">
+                      Applied: {formatCurrency(netOrderTotals.freight)}
+                    </span>
+                  )}
+              </div>
               <div className="mt-3 flex justify-between border-t border-surface-border pt-3 font-semibold text-gray-900">
                 <span>Net total (incl. taxes)</span>
                 <span className="font-mono text-brand-green-700">
@@ -1727,9 +1858,9 @@ export default function ManualEntryForm({
                 </span>
               </div>
             </div>
-            {!pricingReady && (
+            {netOrderTotals?.hasUnpriced && (
               <p className="text-[12px] text-brand-gold-700">
-                Complete Step 5 pricing for every product to show subtotal, taxes, and net total.
+                Items marked {PRICE_TBD_LABEL} are excluded from subtotal and net total until a list price is available.
               </p>
             )}
           </div>

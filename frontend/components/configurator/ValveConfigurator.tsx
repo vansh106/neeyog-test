@@ -20,7 +20,7 @@ import {
   groupAccessoryItems,
   type AccessorySubcategory,
 } from '@/lib/accessoriesNav'
-import { cn, formatCurrency } from '@/lib/utils'
+import { cn, formatCurrency, formatPriceOrTbd, isPositivePrice, PRICE_TBD_LABEL } from '@/lib/utils'
 import { useValveCatalog, type CatalogRow, computeDistinctOptions } from '@/hooks/useValveCatalog'
 import { configuratorApi, mastersApi } from '@/lib/api'
 import { pickActiveSupplierId, resolveSupplierForSheet } from '@/lib/sheetDefaultSupplier'
@@ -79,7 +79,7 @@ function catalogRowToValveProduct(
       : typeof priceRaw === 'number'
         ? priceRaw
         : Number(priceRaw)
-  const priceOk = basePrice != null && Number.isFinite(basePrice)
+  const priceOk = isPositivePrice(basePrice)
   const g = (k: string): string | null => {
     const v = row[k]
     if (v == null) return null
@@ -204,8 +204,7 @@ function valveProductToSpecs(v: ValveProduct): ValveSpecSelections {
 }
 
 function priceText(v: number | null | undefined): string {
-  if (v == null) return '₹TBD'
-  return formatCurrency(v)
+  return formatPriceOrTbd(v)
 }
 
 function stripMasconPrefix(label: string): string {
@@ -323,19 +322,19 @@ export function CompletedProductCard({
           Qty: {product.quantity} {product.unit || 'Nos'}
         </span>
         <span className="font-mono text-brand-green-700">
-          {product.unit_price != null ? (
+          {isPositivePrice(product.unit_price) ? (
             <>
-              {product.quantity} × {formatCurrency(product.unit_price)} ={' '}
-              {lineTotal != null ? formatCurrency(lineTotal) : '—'}
+              {product.quantity} × {formatCurrency(product.unit_price!)} ={' '}
+              {lineTotal != null ? formatCurrency(lineTotal) : PRICE_TBD_LABEL}
             </>
           ) : (
-            'Price on request'
+            PRICE_TBD_LABEL
           )}
         </span>
       </div>
       {product.has_unknown_prices && (
         <p className="mt-1 text-[12px] text-brand-gold-700">
-          * Some prices pending confirmation
+          * Some components priced as {PRICE_TBD_LABEL}
         </p>
       )}
     </div>
@@ -671,9 +670,9 @@ export function ValveConfigurator({
 
   const componentListPrice = useCallback(
     (key: SupplierPriceComponentKey, catalogBase: number | null | undefined): number | null => {
-      if (catalogBase != null && Number.isFinite(catalogBase)) return catalogBase
+      if (isPositivePrice(catalogBase)) return catalogBase
       const fromSupplier = supplierListPrices[key]
-      return fromSupplier != null && Number.isFinite(fromSupplier) ? fromSupplier : null
+      return isPositivePrice(fromSupplier) ? fromSupplier : null
     },
     [supplierListPrices],
   )
@@ -691,8 +690,15 @@ export function ValveConfigurator({
     setComponentPricing((prev) => {
       const mk = (key: string, enabled: boolean): ComponentPricingEntry => {
         const p = prev[key]
-        const defaultSupplier =
-          key === 'valve' || key === 'fitting' ? defaultForCatalog : activeSupplier
+        if (key === 'fitting') {
+          return {
+            enabled,
+            supplier_id: p?.supplier_id ?? null,
+            supplier_name: p?.supplier_name ?? null,
+            temp_price: p?.temp_price != null ? String(p.temp_price) : '',
+          }
+        }
+        const defaultSupplier = key === 'valve' ? defaultForCatalog : activeSupplier
         return {
           enabled,
           supplier_id: p?.supplier_id ?? defaultSupplier?.id ?? null,
@@ -723,6 +729,33 @@ export function ValveConfigurator({
     suppliers,
     specs.catalog_category,
   ])
+
+  useEffect(() => {
+    const cat = fittingSpecs.catalog_category
+    if (!cat) return
+    let cancelled = false
+    ;(async () => {
+      const id = await resolveSupplierForSheet(cat, null, suppliers ?? [])
+      if (cancelled || !id) return
+      const name = (suppliers ?? []).find((s) => s.id === id)?.name ?? null
+      setComponentPricing((prev) => {
+        const cur = prev.fitting
+        if (cur?.supplier_id === id) return prev
+        return {
+          ...prev,
+          fitting: {
+            enabled: cur?.enabled ?? false,
+            supplier_id: id,
+            supplier_name: name,
+            temp_price: '',
+          },
+        }
+      })
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [fittingSpecs.catalog_category, suppliers])
 
   useEffect(() => {
     if (catalogLoading || !specs.catalog_category || catalog.length === 0 || cascadeSteps.length === 0) return
@@ -786,11 +819,19 @@ export function ValveConfigurator({
     const posPrice = positioner?.price ?? null
 
     let subtotal = 0
-    const breakdown: Array<{ component: string; price: number | null }> = []
+    const breakdown: Array<{
+      component: string
+      price: number | null
+      pricing_key: SupplierPriceComponentKey | 'bracket'
+    }> = []
 
-    const push = (component: string, price: number | null) => {
+    const push = (
+      component: string,
+      price: number | null,
+      pricingKey: SupplierPriceComponentKey | 'bracket',
+    ) => {
       if (price != null) subtotal += price
-      breakdown.push({ component, price })
+      breakdown.push({ component, price, pricing_key: pricingKey })
     }
 
     if (resolvedValve) {
@@ -798,24 +839,29 @@ export function ValveConfigurator({
       push(
         `${categoryDisplayLabel || resolvedValve.type}${sizeLabel ? ` ${sizeLabel}` : ''}`,
         valvePrice,
+        'valve',
       )
     }
     if (resolvedFitting) {
       const fitLabel = [fittingCategoryLabel, resolvedFitting.size_mm].filter(Boolean).join(' ')
-      push(fitLabel || 'Fitting', componentListPrice('fitting', resolvedFitting.base_price))
+      push(
+        fitLabel || 'Fitting',
+        componentListPrice('fitting', resolvedFitting.base_price),
+        'fitting',
+      )
     }
     if (operatorKey === 'da' || operatorKey === 'sa') {
       const label =
         operatorModel?.model_name ??
         (operatorKey === 'da' ? 'DA actuator' : 'SA actuator')
-      push(label, opPrice)
-    } else if (operatorKey === 'manual') push('Manual operator', null)
-    else if (operatorKey === 'gear_box') push('Gear box', null)
-    else if (operatorKey === 'electric_actuator') push('Electric actuator', null)
+      push(label, opPrice, 'operator')
+    } else if (operatorKey === 'manual') push('Manual operator', null, 'operator')
+    else if (operatorKey === 'gear_box') push('Gear box', null, 'operator')
+    else if (operatorKey === 'electric_actuator') push('Electric actuator', null, 'operator')
 
-    if (sov) push('SOV', sovPrice)
-    if (lsb) push('Limit switch box', lsbPrice)
-    if (positioner) push('Positioner', posPrice)
+    if (sov) push('SOV', sovPrice, 'sov')
+    if (lsb) push('Limit switch box', lsbPrice, 'lsb')
+    if (positioner) push('Positioner', posPrice, 'positioner')
 
     const fittingPrice = componentListPrice('fitting', resolvedFitting?.base_price)
     const componentBaseByKey: Record<string, number | null> = {
@@ -946,7 +992,18 @@ export function ValveConfigurator({
     void loadFittingCatalog(key, true)
     void (async () => {
       const id = await resolveSupplierForSheet(key, null, suppliers ?? [])
-      if (id) setSupplierId(id)
+      if (!id) return
+      const name = (suppliers ?? []).find((s) => s.id === id)?.name ?? null
+      setSupplierId(id)
+      setComponentPricing((prev) => ({
+        ...prev,
+        fitting: {
+          enabled: prev.fitting?.enabled ?? false,
+          supplier_id: id,
+          supplier_name: name,
+          temp_price: '',
+        },
+      }))
     })()
   }
 
@@ -1053,10 +1110,17 @@ export function ValveConfigurator({
     if (!cfg?.enabled) return null
     const part = catalogPartForSupplierPrice(key as SupplierPriceComponentKey, pricingCtx)
     const catalogKey = part?.catalog_table ?? null
+    const navSlug =
+      key === 'valve'
+        ? specs.catalog_nav_slug
+        : key === 'fitting'
+          ? fittingSpecs.catalog_nav_slug
+          : null
     const dropdownSuppliers = suppliersForCatalogCategory(
       suppliers ?? [],
       catalogKey,
       cfg.supplier_id,
+      navSlug,
     )
     return (
       <div className="rounded-lg border border-surface-border bg-surface-page p-3">
@@ -1776,9 +1840,8 @@ export function ValveConfigurator({
               type="button"
               onClick={finishAndEmit}
               disabled={
-                ((suppliers ?? []).length > 0 &&
-                  Object.values(componentPricing).some((entry) => entry.enabled && !entry.supplier_id)) ||
-                priceInfo.has_unknown_prices
+                (suppliers ?? []).length > 0 &&
+                Object.values(componentPricing).some((entry) => entry.enabled && !entry.supplier_id)
               }
               className="bg-brand-green-500 text-white hover:bg-brand-green-600 disabled:opacity-50"
             >
@@ -1904,7 +1967,11 @@ function PriceSummary({
     subtotal: number
     has_unknown_prices: boolean
     unknown_components: string[]
-    breakdown: Array<{ component: string; price: number | null }>
+    breakdown: Array<{
+      component: string
+      price: number | null
+      pricing_key?: SupplierPriceComponentKey | 'bracket'
+    }>
     component_subtotal?: number
     product_discount_pct?: number
   }
@@ -1918,16 +1985,6 @@ function PriceSummary({
   customerDiscountPct: string
   onCustomerDiscountPctChange: (v: string) => void
 }) {
-  const keyForComponent = (name: string): string => {
-    const s = name.toLowerCase()
-    if (s.includes('limit switch')) return 'lsb'
-    if (s.includes('positioner')) return 'positioner'
-    if (s.includes('sov')) return 'sov'
-    if (s.includes('bracket')) return 'bracket'
-    if (s.includes('gear')) return 'operator'
-    if (s.includes('da') || s.includes('sa') || s.includes('operator') || s.includes('actuator')) return 'operator'
-    return 'valve'
-  }
   return (
     <div className="sticky bottom-3 rounded-xl border border-surface-border bg-white p-4 shadow-sm">
       <p className="text-[12px] font-semibold uppercase tracking-wide text-brand-navy-500">
@@ -1939,9 +1996,14 @@ function PriceSummary({
             <span>{row.component}</span>
             {editableComponentPrices ? (
               <Input
-                value={componentPricing[keyForComponent(row.component)]?.temp_price ?? ''}
+                value={
+                  row.pricing_key
+                    ? (componentPricing[row.pricing_key]?.temp_price ?? '')
+                    : ''
+                }
                 onChange={(e) => {
-                  const key = keyForComponent(row.component)
+                  const key = row.pricing_key
+                  if (!key) return
                   setComponentPricing((prev) => ({
                     ...prev,
                     [key]: { ...prev[key], temp_price: e.target.value },

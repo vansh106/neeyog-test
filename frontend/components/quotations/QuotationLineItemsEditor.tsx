@@ -225,8 +225,9 @@ export default function QuotationLineItemsEditor({
   const supplierRequired = suppliers.length > 0
   const pricingReady = useMemo(() => {
     if (assembledProducts.length === 0) return false
-    return assembledProducts.every((p) => Number.isFinite(Number(p.unit_price)) && Number(p.unit_price) > 0)
-  }, [assembledProducts])
+    if (!supplierRequired) return true
+    return assembledProducts.every((p) => Boolean(p.supplier_id))
+  }, [assembledProducts, supplierRequired])
 
   const handleProductComplete = useCallback(
     (configId: string) => (product: AssembledProduct) => {
@@ -266,9 +267,6 @@ export default function QuotationLineItemsEditor({
     if (supplierRequired) {
       const missingSupplier = assembledProducts.some((p) => !p.supplier_id)
       if (missingSupplier) e.supplier = 'Please select a supplier for each product'
-      else if (!pricingReady) {
-        e.pricing = 'Prices are missing for one or more products. Complete Step 5 pricing before saving.'
-      }
     }
     setErrors(e)
     return Object.keys(e).length === 0

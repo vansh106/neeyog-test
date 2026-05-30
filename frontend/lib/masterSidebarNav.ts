@@ -608,6 +608,45 @@ export function flattenMasterNavLeaves(nodes: MasterNavNode[] = MASTER_SIDEBAR_N
   return out
 }
 
+/** Stable id for supplier assignment — one entry per masters sidebar leaf. */
+export function supplierCategoryKeyForLeaf(leaf: MasterNavLeaf): string {
+  if (leaf.navSlug) return `${leaf.key}#${leaf.navSlug}`
+  return leaf.key
+}
+
+/** Catalog API key portion of a supplier category key (``butterfly_valve#nav`` → ``butterfly_valve``). */
+export function supplierCategoryCatalogKey(categoryKey: string): string {
+  const idx = categoryKey.indexOf('#')
+  return idx > 0 ? categoryKey.slice(0, idx) : categoryKey
+}
+
+/** Expand legacy broad keys (e.g. ``butterfly_valve``) to all matching sidebar leaves. */
+export function expandSupplierCategoryKeys(keys: string[]): string[] {
+  const leafKeysByCatalogKey = new Map<string, string[]>()
+  for (const leaf of flattenMasterNavLeaves()) {
+    const id = supplierCategoryKeyForLeaf(leaf)
+    const list = leafKeysByCatalogKey.get(leaf.key) ?? []
+    list.push(id)
+    leafKeysByCatalogKey.set(leaf.key, list)
+  }
+  const out = new Set<string>()
+  for (const raw of keys) {
+    const key = raw.trim()
+    if (!key) continue
+    if (key.includes('#')) {
+      out.add(key)
+      continue
+    }
+    const siblings = leafKeysByCatalogKey.get(key)
+    if (siblings && siblings.length > 1) {
+      for (const id of siblings) out.add(id)
+    } else {
+      out.add(key)
+    }
+  }
+  return [...out]
+}
+
 /** One entry per catalog API key (for supplier dropdowns). */
 export function flattenMasterNavCatalogCategories(): { key: string; label: string }[] {
   const byKey = new Map<string, string>()
@@ -627,21 +666,24 @@ export function masterNavSupplierCategorySections(): MasterSupplierCategorySecti
   const sections: MasterSupplierCategorySection[] = []
   for (const node of MASTER_SIDEBAR_NAV) {
     if (node.kind !== 'group') continue
-    const byKey = new Map<string, string>()
+    const items: { key: string; label: string }[] = []
     function walk(children: MasterNavNode[]) {
       for (const child of children) {
         if (child.kind === 'leaf') {
-          if (!byKey.has(child.key)) byKey.set(child.key, child.label)
+          items.push({
+            key: supplierCategoryKeyForLeaf(child),
+            label: child.label,
+          })
         } else {
           walk(child.children)
         }
       }
     }
     walk(node.children)
-    if (byKey.size === 0) continue
+    if (items.length === 0) continue
     sections.push({
       heading: node.label,
-      items: [...byKey.entries()].map(([key, label]) => ({ key, label })),
+      items,
     })
   }
   return sections
@@ -649,10 +691,10 @@ export function masterNavSupplierCategorySections(): MasterSupplierCategorySecti
 
 const MASTER_CATALOG_LABEL_BY_KEY: Map<string, string> = (() => {
   const m = new Map<string, string>()
-  for (const section of masterNavSupplierCategorySections()) {
-    for (const item of section.items) {
-      if (!m.has(item.key)) m.set(item.key, item.label)
-    }
+  for (const leaf of flattenMasterNavLeaves()) {
+    const id = supplierCategoryKeyForLeaf(leaf)
+    if (!m.has(id)) m.set(id, leaf.label)
+    if (!m.has(leaf.key)) m.set(leaf.key, leaf.label)
   }
   return m
 })()
@@ -678,7 +720,7 @@ export function findMasterNavLeafBySlug(
 
 /** All category keys that appear in the sidebar tree (for validation / dropdowns). */
 export const SIDEBAR_MASTER_CATEGORY_KEYS = new Set(
-  flattenMasterNavCatalogCategories().map((c) => c.key),
+  flattenMasterNavLeaves().map((leaf) => supplierCategoryKeyForLeaf(leaf)),
 )
 
 export type MasterNavMatch = MasterNavActiveQuery
