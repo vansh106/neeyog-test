@@ -223,8 +223,9 @@ async def _import_sheet(
         }
         if not _apply_row_fields(kwargs, data_row, idx_map):
             continue
-        session.add(model(**kwargs))
         n_cat += 1
+        kwargs["sr_no"] = float(n_cat)
+        session.add(model(**kwargs))
 
         spec, price_f = _row_spec_and_price(data_row, idx_map, price_idx)
         if price_f is None:
@@ -288,8 +289,9 @@ async def _import_strainer_sheet(
         }
         if not _apply_row_fields(kwargs, data_row, idx_map):
             continue
-        session.add(model(**kwargs))
         counts[catalog_key] += 1
+        kwargs["sr_no"] = float(counts[catalog_key])
+        session.add(model(**kwargs))
 
         spec, price_f = _row_spec_and_price(data_row, idx_map, price_idx)
         if price_f is None:

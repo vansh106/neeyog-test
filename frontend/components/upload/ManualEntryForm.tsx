@@ -67,11 +67,12 @@ type Props = {
 
 const SELECT_EMPTY = '__none__'
 const DEFAULT_GST_RATE = 0.18
-const DEFAULT_PF_RATE = 0.03
+const DEFAULT_PF_PERCENT = 3
+const DEFAULT_PF_RATE = DEFAULT_PF_PERCENT / 100
 
-const toSelectValue = (v: string | null | undefined) =>
-  v != null && String(v).trim() !== '' ? String(v).trim() : SELECT_EMPTY
-const fromSelectValue = (v: string | null | undefined) => (!v || v === SELECT_EMPTY ? '' : v)
+export type ChargeMode = 'percent' | 'amount'
+/** @deprecated Use ChargeMode */
+export type FreightChargeMode = ChargeMode
 
 function roundMoney(n: number): number {
   return Math.round(n * 100) / 100
@@ -80,23 +81,36 @@ function roundMoney(n: number): number {
 function resolvePfAmount(
   subtotal: number,
   pfApplicable: boolean,
-  pfAmountDraft: string,
-): { pf: number; defaultPf: number } {
+  pfMode: ChargeMode,
+  pfDraft: string,
+): { pf: number; defaultPf: number; pfRate: number | null } {
   const defaultPf = roundMoney(subtotal * DEFAULT_PF_RATE)
-  if (!pfApplicable) return { pf: 0, defaultPf }
-  const raw = pfAmountDraft.trim().replace(/,/g, '')
-  if (!raw) return { pf: defaultPf, defaultPf }
+  if (!pfApplicable) return { pf: 0, defaultPf, pfRate: null }
+  const raw = pfDraft.trim().replace(/,/g, '')
+  if (!raw) {
+    if (pfMode === 'percent') {
+      return { pf: defaultPf, defaultPf, pfRate: DEFAULT_PF_PERCENT }
+    }
+    return { pf: defaultPf, defaultPf, pfRate: null }
+  }
   const n = Number(raw)
-  if (!Number.isFinite(n) || n < 0) return { pf: defaultPf, defaultPf }
-  return { pf: roundMoney(n), defaultPf }
+  if (!Number.isFinite(n) || n < 0) {
+    if (pfMode === 'percent') {
+      return { pf: defaultPf, defaultPf, pfRate: DEFAULT_PF_PERCENT }
+    }
+    return { pf: defaultPf, defaultPf, pfRate: null }
+  }
+  if (pfMode === 'percent') {
+    const pf = roundMoney(subtotal * (n / 100))
+    return { pf, defaultPf, pfRate: n }
+  }
+  return { pf: roundMoney(n), defaultPf, pfRate: null }
 }
-
-export type FreightChargeMode = 'percent' | 'amount'
 
 function resolveFreightAmount(
   subtotal: number,
   freightApplicable: boolean,
-  freightMode: FreightChargeMode,
+  freightMode: ChargeMode,
   freightDraft: string,
 ): { freight: number; freightRate: number | null } {
   if (!freightApplicable) return { freight: 0, freightRate: null }
@@ -111,16 +125,21 @@ function resolveFreightAmount(
   return { freight: roundMoney(n), freightRate: null }
 }
 
+const toSelectValue = (v: string | null | undefined) =>
+  v != null && String(v).trim() !== '' ? String(v).trim() : SELECT_EMPTY
+const fromSelectValue = (v: string | null | undefined) => (!v || v === SELECT_EMPTY ? '' : v)
+
 function computeTaxTotals(
   subtotal: number,
   pfApplicable: boolean,
-  pfAmountDraft: string,
+  pfMode: ChargeMode,
+  pfDraft: string,
   freightApplicable: boolean,
-  freightMode: FreightChargeMode,
+  freightMode: ChargeMode,
   freightDraft: string,
 ) {
   const gst = roundMoney(subtotal * DEFAULT_GST_RATE)
-  const { pf, defaultPf } = resolvePfAmount(subtotal, pfApplicable, pfAmountDraft)
+  const { pf, defaultPf } = resolvePfAmount(subtotal, pfApplicable, pfMode, pfDraft)
   const { freight } = resolveFreightAmount(subtotal, freightApplicable, freightMode, freightDraft)
   return {
     subtotal,
@@ -490,9 +509,10 @@ export default function ManualEntryForm({
   const [tempQuoteUnitByProduct, setTempQuoteUnitByProduct] = useState<Record<string, string>>({})
   const [customerDiscountByProduct, setCustomerDiscountByProduct] = useState<Record<string, string>>({})
   const [pfApplicable, setPfApplicable] = useState(true)
+  const [pfMode, setPfMode] = useState<ChargeMode>('percent')
   const [pfAmountDraft, setPfAmountDraft] = useState('')
   const [freightApplicable, setFreightApplicable] = useState(false)
-  const [freightMode, setFreightMode] = useState<FreightChargeMode>('amount')
+  const [freightMode, setFreightMode] = useState<ChargeMode>('amount')
   const [freightDraft, setFreightDraft] = useState('')
 
   useEffect(() => {
@@ -777,6 +797,7 @@ export default function ManualEntryForm({
     return computeTaxTotals(
       subtotal,
       pfApplicable,
+      pfMode,
       pfAmountDraft,
       freightApplicable,
       freightMode,
@@ -787,6 +808,7 @@ export default function ManualEntryForm({
     customerDiscountByProduct,
     defaultClientDiscount,
     pfApplicable,
+    pfMode,
     pfAmountDraft,
     freightApplicable,
     freightMode,
@@ -819,6 +841,7 @@ export default function ManualEntryForm({
       ...computeTaxTotals(
         subtotal,
         pfApplicable,
+        pfMode,
         pfAmountDraft,
         freightApplicable,
         freightMode,
@@ -830,6 +853,7 @@ export default function ManualEntryForm({
   }, [
     assembledProducts,
     pfApplicable,
+    pfMode,
     pfAmountDraft,
     freightApplicable,
     freightMode,
@@ -944,7 +968,12 @@ export default function ManualEntryForm({
       notes: (prefillNotesFromEnquiry || '').trim(),
     }
     if (netOrderTotals?.subtotal != null) {
-      const { pf } = resolvePfAmount(netOrderTotals.subtotal, pfApplicable, pfAmountDraft)
+      const { pf, pfRate } = resolvePfAmount(
+        netOrderTotals.subtotal,
+        pfApplicable,
+        pfMode,
+        pfAmountDraft,
+      )
       const { freight, freightRate } = resolveFreightAmount(
         netOrderTotals.subtotal,
         freightApplicable,
@@ -953,7 +982,9 @@ export default function ManualEntryForm({
       )
       form.orderTotals = {
         pfApplicable,
+        pfMode,
         pfAmount: pf,
+        pfRate,
         freightApplicable,
         freightMode,
         freightAmount: freight,
@@ -1717,9 +1748,8 @@ export default function ManualEntryForm({
           <h2 className="text-[15px] font-semibold text-gray-900">Net total &amp; taxes</h2>
           <p className="mt-1 text-[13px] text-surface-muted">
             Subtotal uses each product&apos;s quoted unit price (after any customer discount from Step 5). GST is
-            18% on subtotal. Use the P&amp;F checkbox to include packing &amp; forwarding; edit the amount or leave
-            blank to use the calculated 3% default. Freight can be entered as a flat amount (₹) or as a percentage of
-            subtotal.
+            18% on subtotal. P&amp;F and freight can each be entered as a flat amount (₹) or as a percentage of
+            subtotal; leave blank to use the default 3% for P&amp;F when enabled.
           </p>
           <div className="mt-4 space-y-3 text-[13px]">
             <div className="rounded-lg border border-surface-border bg-surface-page p-3">
@@ -1769,23 +1799,64 @@ export default function ManualEntryForm({
                     aria-label="Apply P and F charges"
                     className="size-3.5 shrink-0 rounded border-[#B8BFB4] text-brand-green-600 focus:ring-brand-green-500/30"
                   />
-                  <span>P&amp;F @ 3%</span>
+                  <span>P&amp;F</span>
                 </label>
-                <Input
-                  type="number"
-                  min={0}
-                  step="0.01"
-                  disabled={!pfApplicable || netOrderTotals?.subtotal == null}
-                  value={pfAmountDraft}
-                  onChange={(e) => setPfAmountDraft(e.target.value)}
-                  placeholder={
-                    netOrderTotals?.defaultPf != null
-                      ? netOrderTotals?.defaultPf.toFixed(2)
-                      : '0.00'
-                  }
-                  className="h-8 w-32 shrink-0 font-mono text-right"
-                  aria-label="P and F amount in INR"
-                />
+                <div className="flex shrink-0 items-center gap-1.5">
+                  <div className="flex overflow-hidden rounded-md border border-surface-border bg-white">
+                    <button
+                      type="button"
+                      disabled={!pfApplicable || netOrderTotals?.subtotal == null}
+                      onClick={() => setPfMode('percent')}
+                      className={cn(
+                        'px-2.5 py-1 text-[11px] font-semibold transition-colors',
+                        pfMode === 'percent'
+                          ? 'bg-brand-navy-500 text-white'
+                          : 'text-gray-700 hover:bg-[#F4F5F0]',
+                      )}
+                    >
+                      %
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!pfApplicable || netOrderTotals?.subtotal == null}
+                      onClick={() => setPfMode('amount')}
+                      className={cn(
+                        'border-l border-surface-border px-2.5 py-1 text-[11px] font-semibold transition-colors',
+                        pfMode === 'amount'
+                          ? 'bg-brand-navy-500 text-white'
+                          : 'text-gray-700 hover:bg-[#F4F5F0]',
+                      )}
+                    >
+                      ₹
+                    </button>
+                  </div>
+                  <Input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    disabled={!pfApplicable || netOrderTotals?.subtotal == null}
+                    value={pfAmountDraft}
+                    onChange={(e) => setPfAmountDraft(e.target.value)}
+                    placeholder={
+                      pfMode === 'percent'
+                        ? String(DEFAULT_PF_PERCENT)
+                        : netOrderTotals?.defaultPf != null
+                          ? netOrderTotals.defaultPf.toFixed(2)
+                          : '0.00'
+                    }
+                    className="h-8 w-32 shrink-0 font-mono text-right"
+                    aria-label={
+                      pfMode === 'percent'
+                        ? 'P and F as percent of subtotal'
+                        : 'P and F amount in INR'
+                    }
+                  />
+                </div>
+                {pfApplicable && netOrderTotals?.pf != null && netOrderTotals.pf > 0 && (
+                  <span className="w-full text-right text-[11px] text-surface-muted">
+                    Applied: {formatCurrency(netOrderTotals.pf)}
+                  </span>
+                )}
               </div>
               <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-surface-muted">
                 <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2">

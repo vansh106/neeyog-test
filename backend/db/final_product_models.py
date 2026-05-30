@@ -405,6 +405,7 @@ class CatalogFpStrainerY150Row(FinalProductSheetMarker, _FinalCatalogBase):
     pressure: Mapped[str | None] = mapped_column(Text, nullable=True)
     body: Mapped[str | None] = mapped_column(Text, nullable=True)
     mesh: Mapped[str | None] = mapped_column(Text, nullable=True)
+    packing: Mapped[str | None] = mapped_column(Text, nullable=True)
     source_file: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
@@ -418,6 +419,7 @@ class CatalogFpStrainerY300Row(FinalProductSheetMarker, _FinalCatalogBase):
     pressure: Mapped[str | None] = mapped_column(Text, nullable=True)
     body: Mapped[str | None] = mapped_column(Text, nullable=True)
     mesh: Mapped[str | None] = mapped_column(Text, nullable=True)
+    packing: Mapped[str | None] = mapped_column(Text, nullable=True)
     source_file: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
@@ -926,8 +928,24 @@ FINAL_PRODUCT_CASCADE_STEPS: dict[str, list[str]] = {
         "packing",
         "glass",
     ],
-    "fp_strainer_y_150": ["variant_type", "valve_size", "end_connection", "pressure", "body", "mesh"],
-    "fp_strainer_y_300": ["variant_type", "valve_size", "end_connection", "pressure", "body", "mesh"],
+    "fp_strainer_y_150": [
+        "variant_type",
+        "valve_size",
+        "end_connection",
+        "pressure",
+        "body",
+        "mesh",
+        "packing",
+    ],
+    "fp_strainer_y_300": [
+        "variant_type",
+        "valve_size",
+        "end_connection",
+        "pressure",
+        "body",
+        "mesh",
+        "packing",
+    ],
     "fp_hose_tuder": ["variant_type", "size_id_mm", "temperature_range"],
     "fp_hose_thunder": ["variant_type", "size_id_mm", "temperature_range"],
     "fp_hose_pvc_nylon_non_toxic": ["variant_type", "size_id_mm", "temperature_range"],

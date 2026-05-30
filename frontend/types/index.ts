@@ -481,8 +481,12 @@ export interface ManualEnquiryForm {
 
 export interface ManualOrderTotals {
   pfApplicable: boolean
+  /** ``percent`` = draft is % of subtotal; ``amount`` = flat INR. */
+  pfMode?: 'percent' | 'amount'
   /** When P&amp;F applies and omitted, server uses 3% of subtotal. */
   pfAmount?: number | null
+  /** Set when pfMode is percent. */
+  pfRate?: number | null
   freightApplicable?: boolean
   /** ``percent`` = draft is % of subtotal; ``amount`` = flat INR. */
   freightMode?: 'percent' | 'amount'

@@ -117,7 +117,9 @@ class ManualOrderTotalsPayload(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     pf_applicable: bool = Field(True, alias="pfApplicable")
+    pf_mode: str | None = Field(None, alias="pfMode")
     pf_amount: float | None = Field(None, alias="pfAmount")
+    pf_rate: float | None = Field(None, alias="pfRate")
     freight_applicable: bool = Field(False, alias="freightApplicable")
     freight_mode: str | None = Field(None, alias="freightMode")
     freight_amount: float | None = Field(None, alias="freightAmount")

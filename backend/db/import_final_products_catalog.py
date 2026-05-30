@@ -258,7 +258,7 @@ async def _import_all(dry_run: bool) -> None:
                         continue
                     raw = data_row[col_idx]
                     if field == "sr_no":
-                        kwargs[field] = _cell_float(raw)
+                        continue
                     elif field == "valve_size" and model is CatalogButterflyValveRow:
                         kwargs[field] = _normalize_valve_size(raw) or _cell_str(raw)
                     else:
@@ -267,8 +267,9 @@ async def _import_all(dry_run: bool) -> None:
                         empty = False
                 if empty:
                     continue
-                session.add(model(**kwargs))
                 n += 1
+                kwargs["sr_no"] = float(n)
+                session.add(model(**kwargs))
             total += n
             logger.info("Imported %d rows -> %s (%s)", n, model.__tablename__, sheet_name)
             wb.close()

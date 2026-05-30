@@ -824,11 +824,13 @@ async def process_manual_dropdown(
     order_totals_in = body.get("orderTotals") or body.get("order_totals") or {}
     pf_applicable = True
     pf_amount_override: float | None = None
+    raw_pf_rate = None
     if isinstance(order_totals_in, dict):
         pf_applicable = bool(
             order_totals_in.get("pf_applicable", order_totals_in.get("pfApplicable", True))
         )
         raw_pf = order_totals_in.get("pf_amount", order_totals_in.get("pfAmount"))
+        raw_pf_rate = order_totals_in.get("pf_rate", order_totals_in.get("pfRate"))
         if raw_pf is not None and str(raw_pf).strip() != "":
             pf_amount_override = round(_clean_float(raw_pf, 0.0), 2)
 
@@ -837,7 +839,9 @@ async def process_manual_dropdown(
         pf_rate = 0.0
     elif pf_amount_override is not None:
         pf_amount = pf_amount_override
-        if subtotal > 0:
+        if raw_pf_rate is not None and str(raw_pf_rate).strip() != "":
+            pf_rate = round(_clean_float(raw_pf_rate, 0.0), 2)
+        elif subtotal > 0:
             pf_rate = round((pf_amount / subtotal) * 100.0, 2)
     else:
         pf_amount = round(subtotal * (pf_rate / 100.0), 2)
