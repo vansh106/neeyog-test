@@ -151,6 +151,161 @@ function computeTaxTotals(
   }
 }
 
+/** Right column width for subtotal / GST / P&F / freight amounts (aligned). */
+const NET_TOTAL_AMOUNT_COL =
+  'block w-full text-right font-mono text-[13px] tabular-nums leading-tight'
+
+const NET_AMOUNT_INPUT_CLASS = cn(
+  'h-6 min-h-0 w-[8ch] max-w-full min-w-0 shrink-0 rounded border border-input bg-white',
+  'px-0 py-0 text-right font-mono text-[13px] tabular-nums leading-tight',
+  'appearance-textfield [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none',
+  'outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40',
+  'disabled:cursor-not-allowed disabled:opacity-50',
+)
+
+function ChargeModeToggle({
+  mode,
+  disabled,
+  onPercent,
+  onAmount,
+}: {
+  mode: ChargeMode
+  disabled: boolean
+  onPercent: () => void
+  onAmount: () => void
+}) {
+  return (
+    <div className="flex overflow-hidden rounded-md border border-surface-border bg-white">
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={onPercent}
+        className={cn(
+          'px-2 py-0.5 text-[11px] font-semibold transition-colors',
+          mode === 'percent' ? 'bg-brand-navy-500 text-white' : 'text-gray-700 hover:bg-[#F4F5F0]',
+        )}
+      >
+        %
+      </button>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={onAmount}
+        className={cn(
+          'border-l border-surface-border px-2 py-0.5 text-[11px] font-semibold transition-colors',
+          mode === 'amount' ? 'bg-brand-navy-500 text-white' : 'text-gray-700 hover:bg-[#F4F5F0]',
+        )}
+      >
+        ₹
+      </button>
+    </div>
+  )
+}
+
+function NetChargeRow({
+  label,
+  checkboxAriaLabel,
+  checked,
+  onCheckedChange,
+  controlsDisabled,
+  mode,
+  onModePercent,
+  onModeAmount,
+  draft,
+  onDraftChange,
+  percentPlaceholder,
+  amountPlaceholder,
+  percentAriaLabel,
+  amountAriaLabel,
+  appliedAmount,
+}: {
+  label: string
+  checkboxAriaLabel: string
+  checked: boolean
+  onCheckedChange: (checked: boolean) => void
+  controlsDisabled: boolean
+  mode: ChargeMode
+  onModePercent: () => void
+  onModeAmount: () => void
+  draft: string
+  onDraftChange: (value: string) => void
+  percentPlaceholder: string
+  amountPlaceholder: string
+  percentAriaLabel: string
+  amountAriaLabel: string
+  appliedAmount: number | null | undefined
+}) {
+  const isPercent = mode === 'percent'
+  const showApplied =
+    checked && isPercent && appliedAmount != null && appliedAmount > 0
+
+  return (
+    <div className="contents text-surface-muted">
+      <div className="flex min-w-0 flex-nowrap items-center gap-2 py-0">
+        <label className="flex shrink-0 cursor-pointer items-center gap-2">
+          <input
+            type="checkbox"
+            checked={checked}
+            onChange={(e) => onCheckedChange(e.target.checked)}
+            aria-label={checkboxAriaLabel}
+            className="size-3.5 shrink-0 rounded border-[#B8BFB4] text-brand-green-600 focus:ring-brand-green-500/30"
+          />
+          <span className="whitespace-nowrap">{label}</span>
+        </label>
+        {checked && (
+          <div className="flex shrink-0 flex-nowrap items-center gap-1.5">
+            <ChargeModeToggle
+              mode={mode}
+              disabled={controlsDisabled}
+              onPercent={onModePercent}
+              onAmount={onModeAmount}
+            />
+            {isPercent && (
+              <Input
+                type="number"
+                min={0}
+                step="0.01"
+                disabled={controlsDisabled}
+                value={draft}
+                onChange={(e) => onDraftChange(e.target.value)}
+                placeholder={percentPlaceholder}
+                className="h-7 w-[3.25rem] shrink-0 px-1.5 py-0 font-mono text-[13px] tabular-nums text-right"
+                aria-label={percentAriaLabel}
+              />
+            )}
+          </div>
+        )}
+      </div>
+      <div className="flex w-full flex-col items-end justify-center self-center leading-none">
+        {checked &&
+          (isPercent ? (
+            showApplied ? (
+              <span className={cn(NET_TOTAL_AMOUNT_COL, 'whitespace-nowrap')}>
+                <span className="text-[11px] font-sans text-surface-muted">Applied: </span>
+                {formatCurrency(appliedAmount!)}
+              </span>
+            ) : null
+          ) : (
+            <div className="flex w-full items-center justify-end gap-0 font-mono text-[13px] tabular-nums">
+              <span className="shrink-0 leading-tight">₹</span>
+              <input
+                type="number"
+                min={0}
+                step="0.01"
+                disabled={controlsDisabled}
+                value={draft}
+                onChange={(e) => onDraftChange(e.target.value)}
+                placeholder={amountPlaceholder.replace(/[^\d.]/g, '') || '0.00'}
+                className={NET_AMOUNT_INPUT_CLASS}
+                aria-label={amountAriaLabel}
+              />
+            </div>
+          ))}
+      </div>
+    </div>
+  )
+}
+
 function isValidEmail(email: string): boolean {
   if (!email) return true
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
@@ -1778,153 +1933,57 @@ export default function ManualEntryForm({
               </ul>
             </div>
             <div className="rounded-lg border border-surface-border bg-[#FAFAF8] p-4">
-              <div className="flex justify-between">
+              <div className="grid grid-cols-[1fr_8.5rem] items-center gap-x-3 gap-y-0.5 text-[13px]">
                 <span className="text-surface-muted">Subtotal (excl. taxes)</span>
-                <span className="font-mono">
+                <span className={NET_TOTAL_AMOUNT_COL}>
                   {netOrderTotals?.subtotal != null ? formatCurrency(netOrderTotals.subtotal) : '—'}
                 </span>
-              </div>
-              <div className="mt-2 flex justify-between text-surface-muted">
-                <span>GST @ 18%</span>
-                <span className="font-mono">
+                <span className="text-surface-muted">GST @ 18%</span>
+                <span className={NET_TOTAL_AMOUNT_COL}>
                   {netOrderTotals?.gst != null ? formatCurrency(netOrderTotals.gst) : '—'}
                 </span>
+                <NetChargeRow
+                  label="P&amp;F"
+                  checkboxAriaLabel="Apply P and F charges"
+                  checked={pfApplicable}
+                  onCheckedChange={setPfApplicable}
+                  controlsDisabled={!pfApplicable || netOrderTotals?.subtotal == null}
+                  mode={pfMode}
+                  onModePercent={() => setPfMode('percent')}
+                  onModeAmount={() => setPfMode('amount')}
+                  draft={pfAmountDraft}
+                  onDraftChange={setPfAmountDraft}
+                  percentPlaceholder={String(DEFAULT_PF_PERCENT)}
+                  amountPlaceholder={
+                    netOrderTotals?.defaultPf != null
+                      ? netOrderTotals.defaultPf.toFixed(2)
+                      : '0.00'
+                  }
+                  percentAriaLabel="P and F as percent of subtotal"
+                  amountAriaLabel="P and F amount in INR"
+                  appliedAmount={netOrderTotals?.pf}
+                />
+                <NetChargeRow
+                  label="Freight"
+                  checkboxAriaLabel="Apply freight"
+                  checked={freightApplicable}
+                  onCheckedChange={setFreightApplicable}
+                  controlsDisabled={!freightApplicable || netOrderTotals?.subtotal == null}
+                  mode={freightMode}
+                  onModePercent={() => setFreightMode('percent')}
+                  onModeAmount={() => setFreightMode('amount')}
+                  draft={freightDraft}
+                  onDraftChange={setFreightDraft}
+                  percentPlaceholder="e.g. 2"
+                  amountPlaceholder="0.00"
+                  percentAriaLabel="Freight as percent of subtotal"
+                  amountAriaLabel="Freight amount in INR"
+                  appliedAmount={netOrderTotals?.freight}
+                />
               </div>
-              <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-surface-muted">
-                <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={pfApplicable}
-                    onChange={(e) => setPfApplicable(e.target.checked)}
-                    aria-label="Apply P and F charges"
-                    className="size-3.5 shrink-0 rounded border-[#B8BFB4] text-brand-green-600 focus:ring-brand-green-500/30"
-                  />
-                  <span>P&amp;F</span>
-                </label>
-                <div className="flex shrink-0 items-center gap-1.5">
-                  <div className="flex overflow-hidden rounded-md border border-surface-border bg-white">
-                    <button
-                      type="button"
-                      disabled={!pfApplicable || netOrderTotals?.subtotal == null}
-                      onClick={() => setPfMode('percent')}
-                      className={cn(
-                        'px-2.5 py-1 text-[11px] font-semibold transition-colors',
-                        pfMode === 'percent'
-                          ? 'bg-brand-navy-500 text-white'
-                          : 'text-gray-700 hover:bg-[#F4F5F0]',
-                      )}
-                    >
-                      %
-                    </button>
-                    <button
-                      type="button"
-                      disabled={!pfApplicable || netOrderTotals?.subtotal == null}
-                      onClick={() => setPfMode('amount')}
-                      className={cn(
-                        'border-l border-surface-border px-2.5 py-1 text-[11px] font-semibold transition-colors',
-                        pfMode === 'amount'
-                          ? 'bg-brand-navy-500 text-white'
-                          : 'text-gray-700 hover:bg-[#F4F5F0]',
-                      )}
-                    >
-                      ₹
-                    </button>
-                  </div>
-                  <Input
-                    type="number"
-                    min={0}
-                    step="0.01"
-                    disabled={!pfApplicable || netOrderTotals?.subtotal == null}
-                    value={pfAmountDraft}
-                    onChange={(e) => setPfAmountDraft(e.target.value)}
-                    placeholder={
-                      pfMode === 'percent'
-                        ? String(DEFAULT_PF_PERCENT)
-                        : netOrderTotals?.defaultPf != null
-                          ? netOrderTotals.defaultPf.toFixed(2)
-                          : '0.00'
-                    }
-                    className="h-8 w-32 shrink-0 font-mono text-right"
-                    aria-label={
-                      pfMode === 'percent'
-                        ? 'P and F as percent of subtotal'
-                        : 'P and F amount in INR'
-                    }
-                  />
-                </div>
-                {pfApplicable && netOrderTotals?.pf != null && netOrderTotals.pf > 0 && (
-                  <span className="w-full text-right text-[11px] text-surface-muted">
-                    Applied: {formatCurrency(netOrderTotals.pf)}
-                  </span>
-                )}
-              </div>
-              <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-surface-muted">
-                <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={freightApplicable}
-                    onChange={(e) => setFreightApplicable(e.target.checked)}
-                    aria-label="Apply freight charges"
-                    className="size-3.5 shrink-0 rounded border-[#B8BFB4] text-brand-green-600 focus:ring-brand-green-500/30"
-                  />
-                  <span>Freight charges</span>
-                </label>
-                <div className="flex shrink-0 items-center gap-1.5">
-                  <div className="flex overflow-hidden rounded-md border border-surface-border bg-white">
-                    <button
-                      type="button"
-                      disabled={!freightApplicable || netOrderTotals?.subtotal == null}
-                      onClick={() => setFreightMode('percent')}
-                      className={cn(
-                        'px-2.5 py-1 text-[11px] font-semibold transition-colors',
-                        freightMode === 'percent'
-                          ? 'bg-brand-navy-500 text-white'
-                          : 'text-gray-700 hover:bg-[#F4F5F0]',
-                      )}
-                    >
-                      %
-                    </button>
-                    <button
-                      type="button"
-                      disabled={!freightApplicable || netOrderTotals?.subtotal == null}
-                      onClick={() => setFreightMode('amount')}
-                      className={cn(
-                        'border-l border-surface-border px-2.5 py-1 text-[11px] font-semibold transition-colors',
-                        freightMode === 'amount'
-                          ? 'bg-brand-navy-500 text-white'
-                          : 'text-gray-700 hover:bg-[#F4F5F0]',
-                      )}
-                    >
-                      ₹
-                    </button>
-                  </div>
-                  <Input
-                    type="number"
-                    min={0}
-                    step="0.01"
-                    disabled={!freightApplicable || netOrderTotals?.subtotal == null}
-                    value={freightDraft}
-                    onChange={(e) => setFreightDraft(e.target.value)}
-                    placeholder={freightMode === 'percent' ? 'e.g. 2' : '0.00'}
-                    className="h-8 w-32 shrink-0 font-mono text-right"
-                    aria-label={
-                      freightMode === 'percent'
-                        ? 'Freight as percent of subtotal'
-                        : 'Freight amount in INR'
-                    }
-                  />
-                </div>
-                {freightApplicable &&
-                  netOrderTotals?.freight != null &&
-                  netOrderTotals.freight > 0 && (
-                    <span className="w-full text-right text-[11px] text-surface-muted">
-                      Applied: {formatCurrency(netOrderTotals.freight)}
-                    </span>
-                  )}
-              </div>
-              <div className="mt-3 flex justify-between border-t border-surface-border pt-3 font-semibold text-gray-900">
+              <div className="mt-3 grid grid-cols-[1fr_8.5rem] items-center gap-x-3 border-t border-surface-border pt-3 text-[13px] font-semibold text-gray-900">
                 <span>Net total (incl. taxes)</span>
-                <span className="font-mono text-brand-green-700">
+                <span className={cn(NET_TOTAL_AMOUNT_COL, 'text-brand-green-700')}>
                   {netOrderTotals?.grand != null ? formatCurrency(netOrderTotals.grand) : '—'}
                 </span>
               </div>
