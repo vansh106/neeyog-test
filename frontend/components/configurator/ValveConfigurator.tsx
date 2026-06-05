@@ -32,7 +32,6 @@ import {
   fetchSupplierListPriceInr,
   type SupplierPriceComponentKey,
 } from '@/lib/supplierCatalogPrice'
-import { suppliersForCatalogCategory } from '@/lib/supplierCategoryFilter'
 import ConfiguratorCategoryPicker from '@/components/configurator/ConfiguratorCategoryPicker'
 import {
   type ConfiguratorCatalogPick,
@@ -1152,90 +1151,6 @@ export function ValveConfigurator({
     onProductComplete(buildAssembled())
     setStage('complete')
   }
-  const hasSuppliers = (suppliers ?? []).length > 0
-  const componentNeedsSupplier = (key: string): boolean =>
-    hasSuppliers && !!componentPricing[key]?.enabled && !componentPricing[key]?.supplier_id
-
-  const renderComponentPricing = (key: string, title: string) => {
-    const cfg = componentPricing[key]
-    if (!cfg?.enabled) return null
-    const part = catalogPartForSupplierPrice(key as SupplierPriceComponentKey, pricingCtx)
-    const catalogKey = part?.catalog_table ?? null
-    const navSlug =
-      key === 'valve'
-        ? specs.catalog_nav_slug
-        : key === 'fitting_end_1'
-          ? fittingEnd1Specs.catalog_nav_slug
-          : key === 'fitting_end_2'
-            ? fittingEnd2Specs.catalog_nav_slug
-            : null
-    const dropdownSuppliers = suppliersForCatalogCategory(
-      suppliers ?? [],
-      catalogKey,
-      cfg.supplier_id,
-      navSlug,
-    )
-    return (
-      <div className="rounded-lg border border-surface-border bg-surface-page p-3">
-        <p className="text-[12px] font-semibold uppercase tracking-wide text-brand-navy-500">
-          {title} supplier & pricing
-        </p>
-        <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
-          <Select
-            value={toSelectValue(cfg.supplier_id ?? '')}
-            onValueChange={(raw) => {
-              const newId = fromSelectValue(raw) || null
-              const newName = dropdownSuppliers.find((s) => s.id === newId)?.name ?? null
-              setComponentPricing((prev) => ({
-                ...prev,
-                [key]: {
-                  ...prev[key],
-                  supplier_id: newId,
-                  supplier_name: newName,
-                  temp_price: '',
-                },
-              }))
-              const part = catalogPartForSupplierPrice(key as SupplierPriceComponentKey, pricingCtx)
-              if (newId && part) {
-                void fetchSupplierListPriceInr(newId, part.catalog_table, part.catalog_row_id).then(
-                  (inr) => {
-                    if (inr == null) return
-                    setSupplierListPrices((prev) => ({ ...prev, [key]: inr }))
-                    setComponentPricing((prev) => {
-                      const cur = prev[key]
-                      if (!cur || cur.supplier_id !== newId) return prev
-                      return { ...prev, [key]: { ...cur, temp_price: String(inr) } }
-                    })
-                  },
-                )
-              }
-            }}
-          >
-            <SelectTrigger className="h-10 w-full">
-              <SelectValue placeholder="Select supplier">
-                {cfg.supplier_name}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={SELECT_EMPTY}>
-                <span className="text-muted-foreground">Select…</span>
-              </SelectItem>
-              {dropdownSuppliers.map((s) => (
-                  <SelectItem key={s.id} value={s.id}>
-                    {s.name}
-                    {s.is_preferred ? ' ★' : ''}
-                  </SelectItem>
-                ))}
-            </SelectContent>
-          </Select>
-          <div className="sm:col-span-2 rounded-md border border-surface-border bg-white px-3 py-2 text-[12px] text-surface-muted">
-            Temporary price is editable in Step 5 Review.
-          </div>
-        </div>
-      </div>
-    )
-  }
-
   // ── Stage indicator ───────────────────────────────────────────────────
   // Supplier selection is always the last step before completion.
   const baseSteps = supportsOperatorAccessoryFlow
@@ -1418,8 +1333,6 @@ export function ValveConfigurator({
               </p>
             </div>
           )}
-          {resolvedValve && renderComponentPricing('valve', requiresFittingsAddon ? 'Hose' : 'Valve')}
-
           <div className="flex items-center justify-between">
             <span className="text-[12px] text-surface-muted">
               {specs.catalog_category
@@ -1437,7 +1350,7 @@ export function ValveConfigurator({
                       : 'supplier',
                 )
               }
-              disabled={!resolvedValve || componentNeedsSupplier('valve')}
+              disabled={!resolvedValve}
               className="bg-brand-green-500 text-white hover:bg-brand-green-600"
             >
               {supportsOperatorAccessoryFlow
@@ -1469,8 +1382,6 @@ export function ValveConfigurator({
             onQuantityChange={setFittingEnd1Qty}
             listUnitPrice={(base) => componentListPrice('fitting_end_1', base)}
           />
-          {resolvedFittingEnd1 && renderComponentPricing('fitting_end_1', 'Fitting (End 1)')}
-
           {fittingEnd1Qty === 1 && (
             <>
               <HoseFittingEndPicker
@@ -1480,7 +1391,6 @@ export function ValveConfigurator({
                 onResolvedChange={handleResolvedFittingEnd2}
                 listUnitPrice={(base) => componentListPrice('fitting_end_2', base)}
               />
-              {resolvedFittingEnd2 && renderComponentPricing('fitting_end_2', 'Fitting (End 2)')}
             </>
           )}
 
@@ -1491,13 +1401,7 @@ export function ValveConfigurator({
             <Button
               type="button"
               onClick={() => setStage('supplier')}
-              disabled={
-                !fittingsComplete ||
-                (!!resolvedFittingEnd1 && componentNeedsSupplier('fitting_end_1')) ||
-                (fittingEnd1Qty === 1 &&
-                  !!resolvedFittingEnd2 &&
-                  componentNeedsSupplier('fitting_end_2'))
-              }
+              disabled={!fittingsComplete}
               className="bg-brand-green-500 text-white hover:bg-brand-green-600"
             >
               Next: Review <ChevronRight className="ml-1 size-4" />
@@ -1573,7 +1477,7 @@ export function ValveConfigurator({
               <Button
                 type="button"
                 onClick={() => setStage('actuator')}
-                disabled={availableModels.length === 0 || componentNeedsSupplier('operator')}
+                disabled={availableModels.length === 0}
                 className="bg-brand-green-500 text-white hover:bg-brand-green-600 disabled:opacity-50"
               >
                 Next: Pick Actuator <ChevronRight className="ml-1 size-4" />
@@ -1583,7 +1487,6 @@ export function ValveConfigurator({
               <Button
                 type="button"
                 onClick={() => setStage('accessories')}
-                disabled={componentNeedsSupplier('operator')}
                 className="bg-brand-green-500 text-white hover:bg-brand-green-600"
               >
                 Next: Accessories <ChevronRight className="ml-1 size-4" />
@@ -1593,7 +1496,6 @@ export function ValveConfigurator({
               <Button
                 type="button"
                 onClick={() => setStage('accessories')}
-                disabled={componentNeedsSupplier('operator')}
                 className="bg-brand-green-500 text-white hover:bg-brand-green-600"
               >
                 Next: Accessories <ChevronRight className="ml-1 size-4" />
@@ -1603,7 +1505,6 @@ export function ValveConfigurator({
               <Button
                 type="button"
                 onClick={() => setStage('supplier')}
-                disabled={componentNeedsSupplier('operator')}
                 className="bg-brand-green-500 text-white hover:bg-brand-green-600"
               >
                 Next <ChevronRight className="ml-1 size-4" />
@@ -1674,8 +1575,6 @@ export function ValveConfigurator({
               </p>
             </div>
           )}
-          {operatorKey && renderComponentPricing('operator', 'Operator')}
-
           <div className="flex items-center justify-between">
             <Button type="button" variant="outline" onClick={() => setStage('operator')}>
               <ChevronLeft className="mr-1 size-4" /> Change Operator
@@ -1683,7 +1582,7 @@ export function ValveConfigurator({
             <Button
               type="button"
               onClick={() => setStage('accessories')}
-              disabled={!operatorModel || componentNeedsSupplier('operator')}
+              disabled={!operatorModel}
               className="bg-brand-green-500 text-white hover:bg-brand-green-600 disabled:opacity-50"
             >
               Next: Accessories <ChevronRight className="ml-1 size-4" />
@@ -1715,14 +1614,6 @@ export function ValveConfigurator({
                     : cat.catalogKey === 'limit_switch_box'
                       ? setLsb
                       : setPositioner
-                const pricingKey: SupplierPriceComponentKey =
-                  cat.catalogKey === 'limit_switch_box' ? 'lsb' : cat.catalogKey
-                const pricingLabel =
-                  cat.catalogKey === 'sov'
-                    ? 'SOV'
-                    : cat.catalogKey === 'limit_switch_box'
-                      ? 'LSB'
-                      : 'Positioner'
                 return (
                   <div key={cat.catalogKey}>
                     <AccessoryToggleRow
@@ -1732,7 +1623,6 @@ export function ValveConfigurator({
                       value={value}
                       onChange={onChange}
                     />
-                    {value && renderComponentPricing(pricingKey, pricingLabel)}
                   </div>
                 )
               })}
