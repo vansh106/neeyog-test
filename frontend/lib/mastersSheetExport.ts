@@ -1,7 +1,8 @@
 import * as XLSX from 'xlsx'
 
-import { mastersApi } from '@/lib/api'
+import { mastersApi, suppliersApi } from '@/lib/api'
 import type { MastersSheetRowsParams } from '@/lib/queries'
+import type { SupplierPriceRow } from '@/types'
 
 /** Matches masters category table: omit internal / metadata columns from exports. */
 export const MASTERS_SHEET_EXPORT_HIDE_COLUMNS = new Set([
@@ -60,14 +61,45 @@ export async function fetchAllMastersSheetRows(
   return { columns, items: all }
 }
 
+export type MastersSheetExportSupplierContext = {
+  supplierName: string
+  pricesByRowId: Map<string, number>
+}
+
+export function catalogRowIdForSupplierPrice(row: Record<string, unknown>): string {
+  return String(row.row_id ?? row.id ?? '').trim().toLowerCase()
+}
+
+export function buildSupplierPriceMap(prices: SupplierPriceRow[]): Map<string, number> {
+  const map = new Map<string, number>()
+  for (const r of prices) {
+    const id = String(r.catalog_row_id ?? '').trim().toLowerCase()
+    if (id && Number.isFinite(Number(r.list_price_inr))) {
+      map.set(id, Number(r.list_price_inr))
+    }
+  }
+  return map
+}
+
+export async function fetchSupplierPricesForSheet(
+  supplierId: string,
+  sheet: string,
+): Promise<SupplierPriceRow[]> {
+  return suppliersApi.getSupplierPrices(supplierId, sheet)
+}
+
 /** Builds an .xlsx and triggers a browser download. */
 export function downloadMastersSheetXlsx(
   sheetKey: string,
   columns: string[],
   items: Record<string, unknown>[],
+  supplier?: MastersSheetExportSupplierContext,
 ): void {
   const cols = visibleMastersExportColumns(columns)
   const headerLabels = cols.map(prettifyHeader)
+  if (supplier) {
+    headerLabels.push('Supplier', 'Supplier List Price')
+  }
 
   const rows = items.map((row) => {
     const o: Record<string, string | number> = {}
@@ -82,6 +114,12 @@ export function downloadMastersSheetXlsx(
       } else {
         o[label] = String(raw)
       }
+    }
+    if (supplier) {
+      o.Supplier = supplier.supplierName
+      const rowId = catalogRowIdForSupplierPrice(row)
+      const price = rowId ? supplier.pricesByRowId.get(rowId) : undefined
+      o['Supplier List Price'] = price != null && Number.isFinite(price) ? price : ''
     }
     return o
   })

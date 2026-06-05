@@ -16,6 +16,7 @@ import type {
   QuotationListItem, Quotation, Product,
   HealthResponse, ClientConfig, EmailSyncStatus,
   Accessories,
+  MasterSheetDefaultSupplier,
 } from '@/types'
 
 export function useHealth() {
@@ -224,5 +225,18 @@ export function useMailboxes() {
     queryFn: () => mailboxesApi.list<Record<string, unknown>[]>(),
     enabled: authed,
     staleTime: 60000,
+  })
+}
+
+export function useSheetDefaultSuppliers() {
+  const authed = useAuthStore((s) => Boolean(s.access_token))
+  return useQuery<MasterSheetDefaultSupplier[]>({
+    queryKey: ['sheetDefaultSuppliers'],
+    queryFn: async () => {
+      const res = await mastersApi.listSheetDefaultSuppliers()
+      return res.items ?? []
+    },
+    enabled: authed,
+    staleTime: 60_000,
   })
 }

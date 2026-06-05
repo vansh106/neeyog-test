@@ -129,3 +129,29 @@ export function hoseRequiresFittings(catalogCategory: string | null | undefined)
 export function isFittingCatalogCategory(key: string | null | undefined): boolean {
   return !!key && key.startsWith('fp_fittings_')
 }
+
+/** Masters columns for hose ends — not user cascade picks in manual upload. */
+export const HOSE_FITTING_CASCADE_EXCLUDE = new Set(['end_connection_1', 'end_connection_2'])
+
+export function filterFittingCascadeSteps(steps: { key: string; label: string }[]): {
+  key: string
+  label: string
+}[] {
+  return steps.filter((s) => !HOSE_FITTING_CASCADE_EXCLUDE.has(s.key))
+}
+
+export function hoseFittingsSelectionComplete(
+  end1: unknown,
+  end2: unknown,
+  end1Qty: 1 | 2,
+): boolean {
+  if (!end1) return false
+  return end1Qty === 2 || !!end2
+}
+
+export function fittingCategoryLabel(catalogCategory: string | null | undefined): string {
+  if (!catalogCategory) return ''
+  return (
+    FITTING_CATALOG_OPTIONS.find((c) => c.key === catalogCategory)?.label ?? catalogCategory
+  )
+}

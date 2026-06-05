@@ -23,7 +23,10 @@ import {
 import { cn, formatCurrency, formatPriceOrTbd, isPositivePrice, PRICE_TBD_LABEL } from '@/lib/utils'
 import { useValveCatalog, type CatalogRow, computeDistinctOptions } from '@/hooks/useValveCatalog'
 import { configuratorApi, mastersApi } from '@/lib/api'
-import { pickActiveSupplierId, resolveSupplierForSheet } from '@/lib/sheetDefaultSupplier'
+import {
+  pickActiveSupplierId,
+  resolveSupplierFromSheetDefaults,
+} from '@/lib/sheetDefaultSupplier'
 import {
   catalogPartForSupplierPrice,
   fetchSupplierListPriceInr,
@@ -34,18 +37,21 @@ import ConfiguratorCategoryPicker from '@/components/configurator/ConfiguratorCa
 import {
   type ConfiguratorCatalogPick,
   configuratorLeafLabel,
-  FITTING_CATALOG_OPTIONS,
+  fittingCategoryLabel,
+  hoseFittingsSelectionComplete,
   hoseRequiresFittings,
   isHoseCatalogCategory,
   operatorValveTypeForCategory,
   supportsOperatorAccessoryFlowCategory,
 } from '@/lib/configuratorProductFlow'
-import { useConfiguratorAccessories } from '@/lib/queries'
+import { HoseFittingEndPicker } from '@/components/configurator/HoseFittingEndPicker'
+import { useConfiguratorAccessories, useSheetDefaultSuppliers } from '@/lib/queries'
 import type {
   Accessories,
   AccessoryItem,
   AssembledProduct,
   CascadeStep,
+  MasterSheetDefaultSupplier,
   OperatorKey,
   OperatorModel,
   OperatorOption,
@@ -56,6 +62,56 @@ import type {
 } from '@/types'
 
 const SELECT_EMPTY = '__none__'
+const EMPTY_SHEET_DEFAULT_SUPPLIERS: MasterSheetDefaultSupplier[] = []
+
+function defaultSupplierForComponentKey(
+  key: SupplierPriceComponentKey,
+  suppliers: SupplierResponse[],
+  sheetDefaults: MasterSheetDefaultSupplier[],
+  specs: ValveSpecSelections,
+  fittingEnd1Specs: ValveSpecSelections,
+  fittingEnd2Specs: ValveSpecSelections,
+): SupplierResponse | null {
+  if (!suppliers.length) return null
+  const masconSupplier =
+    suppliers.find((s) => s.is_active && s.name.toLowerCase().includes('mascon')) ?? null
+
+  let catalogTable: string | null = null
+  let navSlug: string | null = null
+  switch (key) {
+    case 'valve':
+      catalogTable = specs.catalog_category
+      navSlug = specs.catalog_nav_slug ?? null
+      if (catalogTable?.startsWith('fp_mascon') && masconSupplier) return masconSupplier
+      break
+    case 'fitting_end_1':
+      catalogTable = fittingEnd1Specs.catalog_category
+      navSlug = fittingEnd1Specs.catalog_nav_slug ?? null
+      break
+    case 'fitting_end_2':
+      catalogTable = fittingEnd2Specs.catalog_category
+      navSlug = fittingEnd2Specs.catalog_nav_slug ?? null
+      break
+    case 'operator':
+      catalogTable = 'operator'
+      break
+    case 'sov':
+      catalogTable = 'sov'
+      break
+    case 'lsb':
+      catalogTable = 'limit_switch_box'
+      break
+    case 'positioner':
+      catalogTable = 'positioner'
+      break
+    default:
+      return null
+  }
+  if (!catalogTable) return null
+  const id = resolveSupplierFromSheetDefaults(sheetDefaults, catalogTable, navSlug, suppliers)
+  if (!id) return null
+  return suppliers.find((s) => s.id === id) ?? null
+}
 
 const toSelectValue = (v: string | null | undefined): string =>
   v != null && String(v).trim() !== '' ? String(v).trim() : SELECT_EMPTY
@@ -151,6 +207,20 @@ type ComponentPricingEntry = {
 }
 
 type ComponentPricingState = Record<string, ComponentPricingEntry>
+
+function componentPricingEntriesEqual(
+  a: ComponentPricingEntry | undefined,
+  b: ComponentPricingEntry,
+): boolean {
+  if (!a) return false
+  return (
+    a.enabled === b.enabled &&
+    a.supplier_id === b.supplier_id &&
+    a.supplier_name === b.supplier_name &&
+    a.temp_price === b.temp_price
+  )
+}
+
 const UNIT_OPTIONS = ['Nos', 'Pcs', 'Set', 'Pair', 'Meter', 'Kg'] as const
 
 function emptySpecs(): ValveSpecSelections {
@@ -308,9 +378,22 @@ export function CompletedProductCard({
         {product.positioner && (
           <p className="text-surface-muted">Positioner: {product.positioner.type}</p>
         )}
-        {product.fitting && (
+        {(product.fitting_end_1 || product.fitting) && (
           <p className="text-surface-muted">
-            Fitting: {[product.fitting.variant_type, product.fitting.size_mm]
+            Fitting (End 1):{' '}
+            {[
+              (product.fitting_end_1 ?? product.fitting)?.variant_type,
+              (product.fitting_end_1 ?? product.fitting)?.size_mm,
+            ]
+              .filter(Boolean)
+              .join(' — ')}
+            {(product.fitting_end_1_qty ?? 1) === 2 ? ' ×2' : ''}
+          </p>
+        )}
+        {product.fitting_end_2 && (
+          <p className="text-surface-muted">
+            Fitting (End 2):{' '}
+            {[product.fitting_end_2.variant_type, product.fitting_end_2.size_mm]
               .filter(Boolean)
               .join(' — ')}
           </p>
@@ -362,12 +445,25 @@ export function ValveConfigurator({
     return emptySpecs()
   })
   const [cascadeSteps, setCascadeSteps] = useState<CascadeStep[]>([])
-  const [fittingSpecs, setFittingSpecs] = useState<ValveSpecSelections>(() => {
-    const f = initialProduct?.fitting
+  const [fittingEnd1Specs, setFittingEnd1Specs] = useState<ValveSpecSelections>(() => {
+    const f = initialProduct?.fitting_end_1 ?? initialProduct?.fitting
     if (!f?.catalog_category) return emptySpecs()
     return valveProductToSpecs(f)
   })
-  const [fittingCascadeSteps, setFittingCascadeSteps] = useState<CascadeStep[]>([])
+  const [fittingEnd2Specs, setFittingEnd2Specs] = useState<ValveSpecSelections>(() => {
+    const f = initialProduct?.fitting_end_2
+    if (!f?.catalog_category) return emptySpecs()
+    return valveProductToSpecs(f)
+  })
+  const [fittingEnd1Qty, setFittingEnd1Qty] = useState<1 | 2>(
+    initialProduct?.fitting_end_1_qty ?? (initialProduct?.fitting_end_2 ? 1 : 1),
+  )
+  const [resolvedFittingEnd1, setResolvedFittingEnd1] = useState<ValveProduct | null>(
+    initialProduct?.fitting_end_1 ?? initialProduct?.fitting ?? null,
+  )
+  const [resolvedFittingEnd2, setResolvedFittingEnd2] = useState<ValveProduct | null>(
+    initialProduct?.fitting_end_2 ?? null,
+  )
 
   const requiresFittingsAddon = hoseRequiresFittings(specs.catalog_category)
   const [operatorOptions, setOperatorOptions] = useState<OperatorOption[]>([])
@@ -382,6 +478,7 @@ export function ValveConfigurator({
 
   const { data: accessoriesData } = useConfiguratorAccessories()
   const accessories: Accessories | null = accessoriesData ?? null
+  const { data: sheetDefaultSuppliers = EMPTY_SHEET_DEFAULT_SUPPLIERS } = useSheetDefaultSuppliers()
 
   const accessoryCategories = useMemo(() => getConfiguratorAccessoryCategories(), [])
 
@@ -403,22 +500,39 @@ export function ValveConfigurator({
   const [supplierId, setSupplierId] = useState<string | null>(initialProduct?.supplier_id ?? null)
 
   useEffect(() => {
-    if (supplierId || !specs.catalog_category) return
-    let cancelled = false
-    ;(async () => {
-      const id = await resolveSupplierForSheet(
-        specs.catalog_category!,
-        specs.catalog_nav_slug,
-        suppliers ?? [],
-      )
-      if (!cancelled && id) setSupplierId(id)
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [supplierId, specs.catalog_category, specs.catalog_nav_slug, suppliers])
+    if (!specs.catalog_category || !(suppliers ?? []).length) return
+    if (initialProduct?.supplier_id) return
+    const id = resolveSupplierFromSheetDefaults(
+      sheetDefaultSuppliers,
+      specs.catalog_category,
+      specs.catalog_nav_slug,
+      suppliers ?? [],
+    )
+    if (id) setSupplierId(id)
+  }, [
+    specs.catalog_category,
+    specs.catalog_nav_slug,
+    suppliers,
+    sheetDefaultSuppliers,
+    initialProduct?.supplier_id,
+  ])
 
-  const [componentPricing, setComponentPricing] = useState<ComponentPricingState>({})
+  const [componentPricing, setComponentPricing] = useState<ComponentPricingState>(() => {
+    const cp = initialProduct?.component_pricing
+    if (!cp) return {}
+    const out: ComponentPricingState = {}
+    for (const [k, v] of Object.entries(cp)) {
+      if (!v?.enabled) continue
+      const key = k === 'fitting' ? 'fitting_end_1' : k
+      out[key] = {
+        enabled: v.enabled,
+        supplier_id: v.supplier_id ?? null,
+        supplier_name: v.supplier_name ?? null,
+        temp_price: v.temp_price != null ? String(v.temp_price) : '',
+      }
+    }
+    return out
+  })
   /** List prices from ``supplier_product_prices`` when catalog rows have no ``price_inr``. */
   const [supplierListPrices, setSupplierListPrices] = useState<
     Partial<Record<SupplierPriceComponentKey, number>>
@@ -461,23 +575,26 @@ export function ValveConfigurator({
 
   const rowCount = catalog.length > 0 ? catalog.length : fullRowCount
 
-  const {
-    catalog: fittingCatalog,
-    isLoading: fittingCatalogLoading,
-    error: fittingCatalogError,
-    loadCatalog: loadFittingCatalog,
-    getOptions: getFittingOptions,
-    resolve: resolveFitting,
-    rowCount: fittingRowCount,
-  } = useValveCatalog(fittingSpecs.catalog_category)
+  const fittingsComplete = hoseFittingsSelectionComplete(
+    resolvedFittingEnd1,
+    resolvedFittingEnd2,
+    fittingEnd1Qty,
+  )
 
-  const fittingCategoryLabel = useMemo(() => {
-    if (!fittingSpecs.catalog_category) return ''
-    return (
-      FITTING_CATALOG_OPTIONS.find((c) => c.key === fittingSpecs.catalog_category)?.label ??
-      fittingSpecs.catalog_category
-    )
-  }, [fittingSpecs.catalog_category])
+  useEffect(() => {
+    if (fittingEnd1Qty === 2) {
+      setFittingEnd2Specs(emptySpecs())
+      setResolvedFittingEnd2(null)
+    }
+  }, [fittingEnd1Qty])
+
+  const handleResolvedFittingEnd1 = useCallback((product: ValveProduct | null) => {
+    setResolvedFittingEnd1(product)
+  }, [])
+
+  const handleResolvedFittingEnd2 = useCallback((product: ValveProduct | null) => {
+    setResolvedFittingEnd2(product)
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -503,31 +620,6 @@ export function ValveConfigurator({
     if (!specs.catalog_category) return
     void loadCatalog(specs.catalog_category)
   }, [specs.catalog_category, loadCatalog])
-
-  useEffect(() => {
-    let cancelled = false
-    const cat = fittingSpecs.catalog_category
-    if (!cat) {
-      setFittingCascadeSteps([])
-      return
-    }
-    mastersApi
-      .getCascadeSchema<CascadeStep[]>(cat)
-      .then((s) => {
-        if (!cancelled) setFittingCascadeSteps(Array.isArray(s) ? s : [])
-      })
-      .catch(() => {
-        if (!cancelled) setFittingCascadeSteps([])
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [fittingSpecs.catalog_category])
-
-  useEffect(() => {
-    if (!fittingSpecs.catalog_category) return
-    void loadFittingCatalog(fittingSpecs.catalog_category)
-  }, [fittingSpecs.catalog_category, loadFittingCatalog])
 
   const stepOptions = useMemo(() => {
     if (!specs.catalog_category || catalog.length === 0 || cascadeSteps.length === 0)
@@ -559,58 +651,25 @@ export function ValveConfigurator({
     return catalogRowToValveProduct(row, categoryDisplayLabel || specs.catalog_category, specs.catalog_category)
   }, [specs, catalog, resolve, cascadeSteps, categoryDisplayLabel])
 
-  const fittingStepOptions = useMemo(() => {
-    if (!fittingSpecs.catalog_category || fittingCatalog.length === 0 || fittingCascadeSteps.length === 0)
-      return {} as Record<string, string[]>
-    const o: Record<string, string[]> = {}
-    for (const step of fittingCascadeSteps) {
-      const field = step.key
-      const prior: Record<string, string> = {}
-      for (const pc of fittingCascadeSteps) {
-        if (pc.key === field) break
-        const v = fittingSpecs.field_values[pc.key]
-        if (v) prior[pc.key] = v
-      }
-      o[field] = getFittingOptions(field, prior)
-    }
-    return o
-  }, [fittingSpecs, fittingCatalog, getFittingOptions, fittingCascadeSteps])
-
-  const resolvedFitting = useMemo((): ValveProduct | null => {
-    if (!fittingSpecs.catalog_category || fittingCatalog.length === 0 || fittingCascadeSteps.length === 0)
-      return null
-    const filters: Record<string, string> = {}
-    for (const step of fittingCascadeSteps) {
-      const v = fittingSpecs.field_values[step.key]
-      if (!v) return null
-      filters[step.key] = v
-    }
-    const row = resolveFitting(filters)
-    if (!row) return null
-    return catalogRowToValveProduct(
-      row,
-      fittingCategoryLabel || fittingSpecs.catalog_category,
-      fittingSpecs.catalog_category,
-    )
-  }, [fittingSpecs, fittingCatalog, resolveFitting, fittingCascadeSteps, fittingCategoryLabel])
-
   const pricingCtx = useMemo(
     () => ({
       resolvedValve,
-      resolvedFitting,
+      resolvedFittingEnd1,
+      resolvedFittingEnd2,
       operatorModel,
       operatorKey,
       sov,
       lsb,
       positioner,
     }),
-    [resolvedValve, resolvedFitting, operatorModel, operatorKey, sov, lsb, positioner],
+    [resolvedValve, resolvedFittingEnd1, resolvedFittingEnd2, operatorModel, operatorKey, sov, lsb, positioner],
   )
 
   const supplierPriceFetchSig = useMemo(() => {
     const keys: SupplierPriceComponentKey[] = [
       'valve',
-      'fitting',
+      'fitting_end_1',
+      'fitting_end_2',
       'operator',
       'sov',
       'lsb',
@@ -634,7 +693,8 @@ export function ValveConfigurator({
     let cancelled = false
     const keys: SupplierPriceComponentKey[] = [
       'valve',
-      'fitting',
+      'fitting_end_1',
+      'fitting_end_2',
       'operator',
       'sov',
       'lsb',
@@ -678,27 +738,19 @@ export function ValveConfigurator({
   )
 
   useEffect(() => {
-    const activeSupplier = supplierId
-      ? (suppliers ?? []).find((s) => s.id === supplierId) ?? null
-      : null
-    const masconSupplier =
-      (suppliers ?? []).find((s) => s.is_active && s.name.toLowerCase().includes('mascon')) ?? null
-    const defaultForCatalog =
-      specs.catalog_category?.startsWith('fp_mascon') && masconSupplier
-        ? masconSupplier
-        : activeSupplier
+    const activeSuppliers = suppliers ?? []
+    const operatorPricingEnabled = operatorKey != null && operatorKey !== 'bare_shaft'
     setComponentPricing((prev) => {
-      const mk = (key: string, enabled: boolean): ComponentPricingEntry => {
+      const mk = (key: SupplierPriceComponentKey, enabled: boolean): ComponentPricingEntry => {
         const p = prev[key]
-        if (key === 'fitting') {
-          return {
-            enabled,
-            supplier_id: p?.supplier_id ?? null,
-            supplier_name: p?.supplier_name ?? null,
-            temp_price: p?.temp_price != null ? String(p.temp_price) : '',
-          }
-        }
-        const defaultSupplier = key === 'valve' ? defaultForCatalog : activeSupplier
+        const defaultSupplier = defaultSupplierForComponentKey(
+          key,
+          activeSuppliers,
+          sheetDefaultSuppliers,
+          specs,
+          fittingEnd1Specs,
+          fittingEnd2Specs,
+        )
         return {
           enabled,
           supplier_id: p?.supplier_id ?? defaultSupplier?.id ?? null,
@@ -706,56 +758,43 @@ export function ValveConfigurator({
           temp_price: p?.temp_price != null ? String(p.temp_price) : '',
         }
       }
-      const operatorPricingEnabled =
-        operatorKey != null && operatorKey !== 'bare_shaft'
-      return {
+      const next: ComponentPricingState = {
         valve: mk('valve', !!resolvedValve),
         operator: mk('operator', operatorPricingEnabled),
         sov: mk('sov', !!sov),
         lsb: mk('lsb', !!lsb),
         positioner: mk('positioner', !!positioner),
-        bracket: mk('bracket', false),
-        fitting: mk('fitting', !!resolvedFitting),
+        bracket: {
+          enabled: false,
+          supplier_id: prev.bracket?.supplier_id ?? null,
+          supplier_name: prev.bracket?.supplier_name ?? null,
+          temp_price: prev.bracket?.temp_price != null ? String(prev.bracket.temp_price) : '',
+        },
+        fitting_end_1: mk('fitting_end_1', !!resolvedFittingEnd1),
+        fitting_end_2: mk('fitting_end_2', fittingEnd1Qty === 1 && !!resolvedFittingEnd2),
       }
+      const keys = Object.keys(next) as Array<keyof typeof next>
+      if (keys.every((k) => componentPricingEntriesEqual(prev[k], next[k]))) return prev
+      return next
     })
   }, [
     resolvedValve,
-    resolvedFitting,
+    resolvedFittingEnd1,
+    resolvedFittingEnd2,
+    fittingEnd1Qty,
     operatorKey,
     sov,
     lsb,
     positioner,
-    supplierId,
     suppliers,
+    sheetDefaultSuppliers,
     specs.catalog_category,
+    specs.catalog_nav_slug,
+    fittingEnd1Specs.catalog_category,
+    fittingEnd1Specs.catalog_nav_slug,
+    fittingEnd2Specs.catalog_category,
+    fittingEnd2Specs.catalog_nav_slug,
   ])
-
-  useEffect(() => {
-    const cat = fittingSpecs.catalog_category
-    if (!cat) return
-    let cancelled = false
-    ;(async () => {
-      const id = await resolveSupplierForSheet(cat, null, suppliers ?? [])
-      if (cancelled || !id) return
-      const name = (suppliers ?? []).find((s) => s.id === id)?.name ?? null
-      setComponentPricing((prev) => {
-        const cur = prev.fitting
-        if (cur?.supplier_id === id) return prev
-        return {
-          ...prev,
-          fitting: {
-            enabled: cur?.enabled ?? false,
-            supplier_id: id,
-            supplier_name: name,
-            temp_price: '',
-          },
-        }
-      })
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [fittingSpecs.catalog_category, suppliers])
 
   useEffect(() => {
     if (catalogLoading || !specs.catalog_category || catalog.length === 0 || cascadeSteps.length === 0) return
@@ -842,12 +881,32 @@ export function ValveConfigurator({
         'valve',
       )
     }
-    if (resolvedFitting) {
-      const fitLabel = [fittingCategoryLabel, resolvedFitting.size_mm].filter(Boolean).join(' ')
+    if (resolvedFittingEnd1) {
+      const unit = componentListPrice('fitting_end_1', resolvedFittingEnd1.base_price)
+      const linePrice = unit != null ? unit * fittingEnd1Qty : null
+      const fitLabel = [
+        fittingCategoryLabel(resolvedFittingEnd1.catalog_category),
+        resolvedFittingEnd1.size_mm,
+      ]
+        .filter(Boolean)
+        .join(' ')
       push(
-        fitLabel || 'Fitting',
-        componentListPrice('fitting', resolvedFitting.base_price),
-        'fitting',
+        `Fitting End 1${fittingEnd1Qty === 2 ? ' (×2)' : ''}${fitLabel ? `: ${fitLabel}` : ''}`,
+        linePrice,
+        'fitting_end_1',
+      )
+    }
+    if (fittingEnd1Qty === 1 && resolvedFittingEnd2) {
+      const fitLabel = [
+        fittingCategoryLabel(resolvedFittingEnd2.catalog_category),
+        resolvedFittingEnd2.size_mm,
+      ]
+        .filter(Boolean)
+        .join(' ')
+      push(
+        `Fitting End 2${fitLabel ? `: ${fitLabel}` : ''}`,
+        componentListPrice('fitting_end_2', resolvedFittingEnd2.base_price),
+        'fitting_end_2',
       )
     }
     if (operatorKey === 'da' || operatorKey === 'sa') {
@@ -863,10 +922,13 @@ export function ValveConfigurator({
     if (lsb) push('Limit switch box', lsbPrice, 'lsb')
     if (positioner) push('Positioner', posPrice, 'positioner')
 
-    const fittingPrice = componentListPrice('fitting', resolvedFitting?.base_price)
+    const fitEnd1Unit = componentListPrice('fitting_end_1', resolvedFittingEnd1?.base_price)
+    const fitEnd2Unit = componentListPrice('fitting_end_2', resolvedFittingEnd2?.base_price)
     const componentBaseByKey: Record<string, number | null> = {
       valve: valvePrice,
-      fitting: fittingPrice,
+      fitting_end_1:
+        fitEnd1Unit != null && resolvedFittingEnd1 ? fitEnd1Unit * fittingEnd1Qty : fitEnd1Unit,
+      fitting_end_2: fitEnd2Unit,
       operator: operatorKey === 'da' || operatorKey === 'sa' ? opPrice : null,
       sov: componentListPrice('sov', sovPrice),
       lsb: componentListPrice('lsb', lsbPrice),
@@ -882,7 +944,8 @@ export function ValveConfigurator({
       const cfg = componentPricing[key]
       const enabled = (() => {
         if (key === 'valve') return !!resolvedValve
-        if (key === 'fitting') return !!resolvedFitting
+        if (key === 'fitting_end_1') return !!resolvedFittingEnd1
+        if (key === 'fitting_end_2') return fittingEnd1Qty === 1 && !!resolvedFittingEnd2
         if (key === 'operator')
           return operatorKey != null && operatorKey !== 'bare_shaft'
         if (key === 'sov') return !!sov
@@ -900,7 +963,8 @@ export function ValveConfigurator({
       .map(([k]) => k)
     const unknownKeyLabels: Record<string, string> = {
       valve: requiresFittingsAddon ? 'Hose' : 'Valve',
-      fitting: 'Fitting',
+      fitting_end_1: 'Fitting (End 1)',
+      fitting_end_2: 'Fitting (End 2)',
       operator: 'Operator',
       sov: 'SOV',
       lsb: 'Limit switch box',
@@ -926,9 +990,10 @@ export function ValveConfigurator({
     }
   }, [
     resolvedValve,
-    resolvedFitting,
+    resolvedFittingEnd1,
+    resolvedFittingEnd2,
+    fittingEnd1Qty,
     categoryDisplayLabel,
-    fittingCategoryLabel,
     requiresFittingsAddon,
     operatorKey,
     operatorModel,
@@ -965,8 +1030,11 @@ export function ValveConfigurator({
 
   const pickCatalogCategory = (pick: ConfiguratorCatalogPick) => {
     setCascadeSteps([])
-    setFittingSpecs(emptySpecs())
-    setFittingCascadeSteps([])
+    setFittingEnd1Specs(emptySpecs())
+    setFittingEnd2Specs(emptySpecs())
+    setFittingEnd1Qty(1)
+    setResolvedFittingEnd1(null)
+    setResolvedFittingEnd2(null)
     const field_values: Record<string, string> = {}
     if (pick.variantType) field_values.variant_type = pick.variantType
     setSpecs({
@@ -976,45 +1044,15 @@ export function ValveConfigurator({
       field_values,
     })
     void loadCatalog(pick.key, true)
-    void (async () => {
-      const id = await resolveSupplierForSheet(pick.key, pick.navSlug ?? null, suppliers ?? [])
-      if (id) setSupplierId(id)
-      else {
-        const fallback = pickActiveSupplierId(suppliers ?? [], null)
-        if (fallback) setSupplierId(fallback)
-      }
-    })()
-  }
-
-  const pickFittingCategory = (key: string) => {
-    setFittingCascadeSteps([])
-    setFittingSpecs({ catalog_category: key, field_values: {} })
-    void loadFittingCatalog(key, true)
-    void (async () => {
-      const id = await resolveSupplierForSheet(key, null, suppliers ?? [])
-      if (!id) return
-      const name = (suppliers ?? []).find((s) => s.id === id)?.name ?? null
-      setSupplierId(id)
-      setComponentPricing((prev) => ({
-        ...prev,
-        fitting: {
-          enabled: prev.fitting?.enabled ?? false,
-          supplier_id: id,
-          supplier_name: name,
-          temp_price: '',
-        },
-      }))
-    })()
-  }
-
-  const pickFittingSpec = (field: string, value: string) => {
-    const ix = fittingCascadeSteps.findIndex((s) => s.key === field)
-    if (ix < 0) return
-    const nextFv = { ...fittingSpecs.field_values, [field]: value || '' }
-    for (const after of fittingCascadeSteps.slice(ix + 1)) {
-      delete nextFv[after.key]
-    }
-    setFittingSpecs({ ...fittingSpecs, field_values: nextFv })
+    const id =
+      resolveSupplierFromSheetDefaults(
+        sheetDefaultSuppliers,
+        pick.key,
+        pick.navSlug ?? null,
+        suppliers ?? [],
+      ) ?? pickActiveSupplierId(suppliers ?? [], null)
+    if (id) setSupplierId(id)
+    setComponentPricing({})
   }
 
   const pickSpec = (field: string, value: string) => {
@@ -1037,20 +1075,33 @@ export function ValveConfigurator({
     }
   }, [resolvedValve, componentListPrice])
 
-  const fittingForAssembly = useMemo((): ValveProduct | null => {
-    if (!resolvedFitting) return null
-    const price = componentListPrice('fitting', resolvedFitting.base_price)
+  const fittingEnd1ForAssembly = useMemo((): ValveProduct | null => {
+    if (!resolvedFittingEnd1) return null
+    const price = componentListPrice('fitting_end_1', resolvedFittingEnd1.base_price)
     return {
-      ...resolvedFitting,
+      ...resolvedFittingEnd1,
       base_price: price,
       has_price: price != null,
     }
-  }, [resolvedFitting, componentListPrice])
+  }, [resolvedFittingEnd1, componentListPrice])
+
+  const fittingEnd2ForAssembly = useMemo((): ValveProduct | null => {
+    if (!resolvedFittingEnd2 || fittingEnd1Qty !== 1) return null
+    const price = componentListPrice('fitting_end_2', resolvedFittingEnd2.base_price)
+    return {
+      ...resolvedFittingEnd2,
+      base_price: price,
+      has_price: price != null,
+    }
+  }, [resolvedFittingEnd2, fittingEnd1Qty, componentListPrice])
 
   const buildAssembled = (): AssembledProduct => ({
     id: initialProduct?.id ?? crypto.randomUUID(),
     valve: valveForAssembly,
-    fitting: requiresFittingsAddon ? fittingForAssembly : null,
+    fitting: requiresFittingsAddon ? fittingEnd1ForAssembly : null,
+    fitting_end_1: requiresFittingsAddon ? fittingEnd1ForAssembly : null,
+    fitting_end_2: requiresFittingsAddon && fittingEnd1Qty === 1 ? fittingEnd2ForAssembly : null,
+    fitting_end_1_qty: requiresFittingsAddon ? fittingEnd1Qty : undefined,
     operator_key: operatorKey,
     operator_model:
       operatorKey === 'da' || operatorKey === 'sa' ? operatorModel : null,
@@ -1093,7 +1144,7 @@ export function ValveConfigurator({
   })
 
   const finishAndEmit = () => {
-    if (requiresFittingsAddon && !resolvedFitting) return
+    if (requiresFittingsAddon && !fittingsComplete) return
     const requiredMissing = Object.values(componentPricing).some(
       (entry) => entry.enabled && (suppliers ?? []).length > 0 && !entry.supplier_id,
     )
@@ -1113,9 +1164,11 @@ export function ValveConfigurator({
     const navSlug =
       key === 'valve'
         ? specs.catalog_nav_slug
-        : key === 'fitting'
-          ? fittingSpecs.catalog_nav_slug
-          : null
+        : key === 'fitting_end_1'
+          ? fittingEnd1Specs.catalog_nav_slug
+          : key === 'fitting_end_2'
+            ? fittingEnd2Specs.catalog_nav_slug
+            : null
     const dropdownSuppliers = suppliersForCatalogCategory(
       suppliers ?? [],
       catalogKey,
@@ -1398,121 +1451,38 @@ export function ValveConfigurator({
         </div>
       )}
 
-      {/* ── STAGE 2: Fitting add-on (qualifying hoses only) ─────────── */}
+      {/* ── STAGE 2: Hose fittings (two ends) ───────────────────────── */}
       {stage === 'fittings' && requiresFittingsAddon && (
         <div className="mt-4 space-y-4">
           <p className="text-[12px] text-surface-muted">
-            Select a fitting type, then narrow to the exact SKU. Fittings are add-ons for Tuder, Thunder,
-            and PVC nylon hoses only.
+            A hose has two ends — pick a fitting for each end. Set quantity to 2 on End 1 if both ends
+            use the same fitting, or quantity 1 and then select End 2 separately.
           </p>
 
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-            {FITTING_CATALOG_OPTIONS.map((c) => {
-              const active = fittingSpecs.catalog_category === c.key
-              return (
-                <button
-                  key={c.key}
-                  type="button"
-                  onClick={() => pickFittingCategory(c.key)}
-                  className={cn(
-                    'rounded-xl border p-3 text-left transition',
-                    active
-                      ? 'border-2 border-brand-green-500 bg-brand-green-50'
-                      : 'border-surface-border bg-white hover:bg-surface-page',
-                  )}
-                >
-                  <p className="text-[13px] font-semibold text-gray-900 leading-snug">
-                    Fittings — {c.label}
-                  </p>
-                </button>
-              )
-            })}
-          </div>
+          <HoseFittingEndPicker
+            title="Hose fitting — End 1"
+            specs={fittingEnd1Specs}
+            onSpecsChange={setFittingEnd1Specs}
+            onResolvedChange={handleResolvedFittingEnd1}
+            showQuantity
+            quantity={fittingEnd1Qty}
+            onQuantityChange={setFittingEnd1Qty}
+            listUnitPrice={(base) => componentListPrice('fitting_end_1', base)}
+          />
+          {resolvedFittingEnd1 && renderComponentPricing('fitting_end_1', 'Fitting (End 1)')}
 
-          {fittingSpecs.catalog_category && fittingCatalogError && (
-            <p className="text-[12px] text-red-600">{fittingCatalogError}</p>
+          {fittingEnd1Qty === 1 && (
+            <>
+              <HoseFittingEndPicker
+                title="Hose fitting — End 2"
+                specs={fittingEnd2Specs}
+                onSpecsChange={setFittingEnd2Specs}
+                onResolvedChange={handleResolvedFittingEnd2}
+                listUnitPrice={(base) => componentListPrice('fitting_end_2', base)}
+              />
+              {resolvedFittingEnd2 && renderComponentPricing('fitting_end_2', 'Fitting (End 2)')}
+            </>
           )}
-
-          {fittingSpecs.catalog_category && fittingCatalogLoading && (
-            <div className="flex items-center gap-2 text-[12px] text-surface-muted">
-              <Loader2 className="size-4 animate-spin" />
-              Loading {fittingCategoryLabel || fittingSpecs.catalog_category} catalog
-              {fittingRowCount > 0 ? ` (${fittingRowCount} rows)` : '…'}
-            </div>
-          )}
-
-          {fittingSpecs.catalog_category &&
-            !fittingCatalogLoading &&
-            fittingCascadeSteps.length > 0 && (
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                {fittingCascadeSteps.map((step, idx) => {
-                  const field = step.key
-                  const opts = fittingStepOptions[field] ?? []
-                  const priorOk =
-                    idx === 0 ||
-                    fittingCascadeSteps.slice(0, idx).every((p) => {
-                      const pOpts = fittingStepOptions[p.key] ?? []
-                      if (pOpts.length <= 1) return true
-                      return !!(
-                        fittingSpecs.field_values[p.key] &&
-                        String(fittingSpecs.field_values[p.key]).trim()
-                      )
-                    })
-                  return (
-                    <div key={field} className="space-y-1.5">
-                      <div className="text-[10px] font-medium uppercase tracking-wide text-[#8A9488]">
-                        {step.label}
-                      </div>
-                      <Select
-                        value={toSelectValue(fittingSpecs.field_values[field] ?? '')}
-                        onValueChange={(raw) => pickFittingSpec(field, fromSelectValue(raw ?? ''))}
-                        disabled={!priorOk}
-                      >
-                        <SelectTrigger
-                          className={SPEC_SELECT_TRIGGER_CLASS}
-                          title={String(fittingSpecs.field_values[field] ?? '').trim() || undefined}
-                        >
-                          <SelectValue
-                            placeholder={
-                              !priorOk ? 'Complete fields above' : `Select ${step.label}`
-                            }
-                          />
-                        </SelectTrigger>
-                        <SelectContent variant="wide" align="start">
-                          <SelectItem value={SELECT_EMPTY}>
-                            <span className="text-muted-foreground">Select…</span>
-                          </SelectItem>
-                          {opts.map((o) => (
-                            <SelectItem key={`${field}:${o}`} value={o} multiline title={o}>
-                              {o}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-
-          {resolvedFitting && (
-            <div className="rounded-xl border border-brand-green-200 bg-brand-green-50 p-4">
-              <p className="text-[13px] font-semibold text-brand-green-700">
-                <Check className="mr-1 inline size-4" />
-                {fittingCategoryLabel}
-                {resolvedFitting.size_mm ? ` — ${resolvedFitting.size_mm}` : ''}
-              </p>
-              <p className="mt-1 text-[12px] text-gray-800">
-                {[resolvedFitting.end_connection_1, resolvedFitting.end_connection_2]
-                  .filter(Boolean)
-                  .join(' / ') || '—'}
-              </p>
-              <p className="mt-2 font-mono text-[13px] text-brand-green-700">
-                Base Price: {priceText(componentListPrice('fitting', resolvedFitting.base_price))}
-              </p>
-            </div>
-          )}
-          {resolvedFitting && renderComponentPricing('fitting', 'Fitting')}
 
           <div className="flex items-center justify-between">
             <Button type="button" variant="outline" onClick={() => setStage('valve_specs')}>
@@ -1521,7 +1491,13 @@ export function ValveConfigurator({
             <Button
               type="button"
               onClick={() => setStage('supplier')}
-              disabled={!resolvedFitting || componentNeedsSupplier('fitting')}
+              disabled={
+                !fittingsComplete ||
+                (!!resolvedFittingEnd1 && componentNeedsSupplier('fitting_end_1')) ||
+                (fittingEnd1Qty === 1 &&
+                  !!resolvedFittingEnd2 &&
+                  componentNeedsSupplier('fitting_end_2'))
+              }
               className="bg-brand-green-500 text-white hover:bg-brand-green-600"
             >
               Next: Review <ChevronRight className="ml-1 size-4" />

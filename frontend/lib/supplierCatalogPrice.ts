@@ -1,7 +1,14 @@
 import { suppliersApi } from '@/lib/api'
 import type { AccessoryItem, OperatorKey, OperatorModel, ValveProduct } from '@/types'
 
-export type SupplierPriceComponentKey = 'valve' | 'fitting' | 'operator' | 'sov' | 'lsb' | 'positioner'
+export type SupplierPriceComponentKey =
+  | 'valve'
+  | 'fitting_end_1'
+  | 'fitting_end_2'
+  | 'operator'
+  | 'sov'
+  | 'lsb'
+  | 'positioner'
 
 export async function fetchSupplierListPriceInr(
   supplierId: string,
@@ -26,7 +33,8 @@ export function catalogPartForSupplierPrice(
   key: SupplierPriceComponentKey,
   ctx: {
     resolvedValve: ValveProduct | null
-    resolvedFitting: ValveProduct | null
+    resolvedFittingEnd1: ValveProduct | null
+    resolvedFittingEnd2: ValveProduct | null
     operatorModel: OperatorModel | null
     operatorKey: OperatorKey | null
     sov: AccessoryItem | null
@@ -40,10 +48,24 @@ export function catalogPartForSupplierPrice(
       catalog_row_id: String(ctx.resolvedValve.id),
     }
   }
-  if (key === 'fitting' && ctx.resolvedFitting?.id && ctx.resolvedFitting.catalog_category) {
+  if (
+    key === 'fitting_end_1' &&
+    ctx.resolvedFittingEnd1?.id &&
+    ctx.resolvedFittingEnd1.catalog_category
+  ) {
     return {
-      catalog_table: ctx.resolvedFitting.catalog_category,
-      catalog_row_id: String(ctx.resolvedFitting.id),
+      catalog_table: ctx.resolvedFittingEnd1.catalog_category,
+      catalog_row_id: String(ctx.resolvedFittingEnd1.id),
+    }
+  }
+  if (
+    key === 'fitting_end_2' &&
+    ctx.resolvedFittingEnd2?.id &&
+    ctx.resolvedFittingEnd2.catalog_category
+  ) {
+    return {
+      catalog_table: ctx.resolvedFittingEnd2.catalog_category,
+      catalog_row_id: String(ctx.resolvedFittingEnd2.id),
     }
   }
   if (

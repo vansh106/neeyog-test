@@ -13,6 +13,8 @@ import { clientsApi, suppliersApi } from '@/lib/api'
 import { ValveConfigurator, CompletedProductCard } from '@/components/configurator/ValveConfigurator'
 import {
   assemblyLabel,
+  assemblyPartComponentKey,
+  assemblyPartUnitMultiplier,
   assembledToLineItem,
   catalogPartsForAssembly,
   operatorLabel,
@@ -321,7 +323,7 @@ type ProductPricingCalc = {
   supplierName: string | null
   ok: boolean
   missing: string[]
-  rows: Array<{ component: string; calc: PriceCalculationResult }>
+  rows: Array<{ component: string; calc: PriceCalculationResult; unitMult?: number }>
   assemblyUnit: number
   lineTotal: number
 }
@@ -842,21 +844,12 @@ export default function ManualEntryForm({
       const out: ProductPricingCalc[] = []
       for (const p of assembledProducts) {
         const supplierId = p.supplier_id
-        const componentKeyForPart = (label: string): string => {
-          const l = label.toLowerCase()
-          if (l === 'valve') return 'valve'
-          if (l === 'operator') return 'operator'
-          if (l === 'sov') return 'sov'
-          if (l.includes('limit switch')) return 'lsb'
-          if (l === 'positioner') return 'positioner'
-          if (l.includes('bracket')) return 'bracket'
-          return ''
-        }
+        const componentKeyForPart = assemblyPartComponentKey
         const parts = catalogPartsForAssembly(p)
         const missing: string[] = []
         if (parts.length === 0) missing.push('Valve configuration')
         if (suppliers.length > 0 && !supplierId) missing.push('Supplier selection')
-        const rows: Array<{ component: string; calc: PriceCalculationResult }> = []
+        const rows: Array<{ component: string; calc: PriceCalculationResult; unitMult?: number }> = []
         if (supplierId || p.component_pricing) {
           for (const part of parts) {
             const compKey = componentKeyForPart(part.label)
@@ -884,12 +877,13 @@ export default function ManualEntryForm({
               customer_discount_pct: 0,
               quantity: p.quantity,
             })
-            rows.push({ component: part.label, calc })
+            const unitMult = assemblyPartUnitMultiplier(part.label, p)
+            rows.push({ component: part.label, calc, unitMult })
           }
         }
         const ok = parts.length > 0 && missing.length === 0
         const assemblyUnit = ok
-          ? rows.reduce((sum, r) => sum + r.calc.final_unit_price, 0)
+          ? rows.reduce((sum, r) => sum + r.calc.final_unit_price * (r.unitMult ?? 1), 0)
           : 0
         const lineTotal = ok ? rows.reduce((sum, r) => sum + r.calc.line_total, 0) : 0
         out.push({

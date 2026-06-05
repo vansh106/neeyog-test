@@ -51,6 +51,26 @@ export function valveCatalogTable(v: ValveProduct | null | undefined): string | 
   return valveTypeToLegacyCatalogTable(v?.type)
 }
 
+/** Maps ``catalogPartsForAssembly`` label → ``component_pricing`` key. */
+export function assemblyPartComponentKey(label: string): string {
+  const l = label.toLowerCase()
+  if (l === 'valve' || l === 'hose') return 'valve'
+  if (l.includes('fitting (end 1')) return 'fitting_end_1'
+  if (l.includes('fitting (end 2')) return 'fitting_end_2'
+  if (l === 'operator') return 'operator'
+  if (l === 'sov') return 'sov'
+  if (l.includes('limit switch')) return 'lsb'
+  if (l === 'positioner') return 'positioner'
+  if (l.includes('bracket')) return 'bracket'
+  return ''
+}
+
+/** Unit count for a catalog part on one hose assembly (End 1 qty 2 → multiplier 2). */
+export function assemblyPartUnitMultiplier(label: string, p: AssembledProduct): number {
+  if (label.toLowerCase().includes('fitting (end 1') && (p.fitting_end_1_qty ?? 1) === 2) return 2
+  return 1
+}
+
 export function catalogPartsForAssembly(p: AssembledProduct): CatalogPart[] {
   const parts: CatalogPart[] = []
   const v = p.valve
@@ -58,12 +78,21 @@ export function catalogPartsForAssembly(p: AssembledProduct): CatalogPart[] {
     const ct = valveCatalogTable(v)
     if (ct) parts.push({ label: 'Hose', catalog_table: ct, catalog_row_id: v.id })
   }
-  const f = p.fitting
-  if (f?.id && f.catalog_category) {
+  const f1 = p.fitting_end_1 ?? p.fitting
+  if (f1?.id && f1.catalog_category) {
+    const qty = p.fitting_end_1_qty ?? 1
     parts.push({
-      label: 'Fitting',
-      catalog_table: f.catalog_category,
-      catalog_row_id: f.id,
+      label: qty === 2 ? 'Fitting (End 1 ×2)' : 'Fitting (End 1)',
+      catalog_table: f1.catalog_category,
+      catalog_row_id: f1.id,
+    })
+  }
+  const f2 = p.fitting_end_2
+  if (f2?.id && f2.catalog_category) {
+    parts.push({
+      label: 'Fitting (End 2)',
+      catalog_table: f2.catalog_category,
+      catalog_row_id: f2.id,
     })
   }
   if ((p.operator_key === 'da' || p.operator_key === 'sa') && p.operator_model?.id) {
@@ -92,14 +121,24 @@ export function catalogPartsForAssembly(p: AssembledProduct): CatalogPart[] {
 
 export function assemblyLabel(p: AssembledProduct): string {
   const v = p.valve
-  const f = p.fitting
-  if (!v && !f) return 'Assembly'
+  const f1 = p.fitting_end_1 ?? p.fitting
+  const f2 = p.fitting_end_2
+  if (!v && !f1 && !f2) return 'Assembly'
   const hosePart = v
     ? [v.type, v.construction, v.valve_size ?? v.size_id_mm].filter(Boolean).join(' — ')
     : ''
-  const fitPart = f
-    ? [f.type, f.variant_type, f.size_mm as string | undefined].filter(Boolean).join(' — ')
+  const fit1Part = f1
+    ? [f1.variant_type, f1.size_mm as string | undefined].filter(Boolean).join(' — ')
     : ''
+  const fit2Part = f2
+    ? [f2.variant_type, f2.size_mm as string | undefined].filter(Boolean).join(' — ')
+    : ''
+  const fitPart =
+    fit1Part && fit2Part
+      ? `${fit1Part} + ${fit2Part}`
+      : fit1Part
+        ? `${fit1Part}${(p.fitting_end_1_qty ?? 1) === 2 ? ' (×2)' : ''}`
+        : fit2Part
   if (hosePart && fitPart) return `${hosePart} + ${fitPart}`
   return hosePart || fitPart || 'Assembly'
 }
@@ -139,10 +178,16 @@ export function assembledToLineItem(
   const hoseName = v
     ? [v.type, v.construction, v.valve_size].filter(Boolean).join(' — ')
     : ''
-  const fittingName = p.fitting
-    ? [p.fitting.variant_type, p.fitting.size_mm, p.fitting.end_connection_1]
+  const f1 = p.fitting_end_1 ?? p.fitting
+  const f2 = p.fitting_end_2
+  const fittingName = f1
+    ? [
+        [f1.variant_type, f1.size_mm].filter(Boolean).join(' — '),
+        (p.fitting_end_1_qty ?? 1) === 2 ? '×2 same end' : null,
+        f2 ? [f2.variant_type, f2.size_mm].filter(Boolean).join(' — ') : null,
+      ]
         .filter(Boolean)
-        .join(' — ')
+        .join(' + ')
     : ''
   const name =
     hoseName && fittingName
@@ -193,14 +238,20 @@ export function assembledToLineItem(
     if (v.seat) cascade.seat = v.seat
     if (v.fasteners) cascade.fasteners = v.fasteners
   }
-  const fit = p.fitting
-  if (fit) {
-    if (fit.variant_type) cascade.fitting_variant_type = fit.variant_type
-    if (fit.end_connection_1) cascade.fitting_end_connection_1 = fit.end_connection_1
-    if (fit.end_connection_2) cascade.fitting_end_connection_2 = fit.end_connection_2
-    if (fit.size_mm) cascade.fitting_size_mm = fit.size_mm
-    if (fit.hose_nipple_moc) cascade.hose_nipple_moc = fit.hose_nipple_moc
-    if (fit.hose_cap_moc) cascade.hose_cap_moc = fit.hose_cap_moc
+  const fit1 = p.fitting_end_1 ?? p.fitting
+  if (fit1) {
+    if (fit1.variant_type) cascade.fitting_end_1_variant_type = fit1.variant_type
+    if (fit1.size_mm) cascade.fitting_end_1_size_mm = fit1.size_mm
+    if (fit1.hose_nipple_moc) cascade.fitting_end_1_hose_nipple_moc = fit1.hose_nipple_moc
+    if (fit1.hose_cap_moc) cascade.fitting_end_1_hose_cap_moc = fit1.hose_cap_moc
+    if (p.fitting_end_1_qty) cascade.fitting_end_1_qty = String(p.fitting_end_1_qty)
+  }
+  const fit2 = p.fitting_end_2
+  if (fit2) {
+    if (fit2.variant_type) cascade.fitting_end_2_variant_type = fit2.variant_type
+    if (fit2.size_mm) cascade.fitting_end_2_size_mm = fit2.size_mm
+    if (fit2.hose_nipple_moc) cascade.fitting_end_2_hose_nipple_moc = fit2.hose_nipple_moc
+    if (fit2.hose_cap_moc) cascade.fitting_end_2_hose_cap_moc = fit2.hose_cap_moc
   }
   cascade.operator = operatorLabel(p.operator_key)
   if (p.operator_model) {

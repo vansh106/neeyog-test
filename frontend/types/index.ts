@@ -729,6 +729,12 @@ export interface AssembledProduct {
   valve: ValveProduct | null
   /** Fitting add-on after qualifying hose selection (``fp_hose_tuder`` / thunder / PVC nylon). */
   fitting?: ValveProduct | null
+  /** Hose end 1 fitting (primary; qty 2 covers both ends with same SKU). */
+  fitting_end_1?: ValveProduct | null
+  /** Hose end 2 fitting when ``fitting_end_1_qty`` is 1. */
+  fitting_end_2?: ValveProduct | null
+  /** Qty of end-1 fitting on the hose assembly (1 = second end needs its own pick). */
+  fitting_end_1_qty?: 1 | 2
   operator_key: OperatorKey | null
   operator_model: OperatorModel | null
   /** Supplier selected for this assembled product (per-product supplier selection). */

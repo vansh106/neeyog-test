@@ -22,8 +22,10 @@ import {
 import type { SupplierPriceRow, SupplierResponse } from '@/types'
 import {
   MASTERS_SHEET_EXPORT_HIDE_COLUMNS,
+  buildSupplierPriceMap,
   downloadMastersSheetXlsx,
   fetchAllMastersSheetRows,
+  fetchSupplierPricesForSheet,
 } from '@/lib/mastersSheetExport'
 import { findMasterNavLeafBySlug, masterNavActiveQueryFromSearchParams } from '@/lib/masterSidebarNav'
 import type { MastersSheetRowsParams } from '@/lib/queries'
@@ -181,13 +183,23 @@ export default function MastersCategoryPage() {
     setExportError(null)
     try {
       const { columns: allCols, items } = await fetchAllMastersSheetRows(category, sheetFilters)
-      downloadMastersSheetXlsx(category, allCols, items)
+      let supplierCtx:
+        | { supplierName: string; pricesByRowId: Map<string, number> }
+        | undefined
+      if (supplierId && supplierLabel) {
+        const prices = await fetchSupplierPricesForSheet(supplierId, category)
+        supplierCtx = {
+          supplierName: supplierLabel,
+          pricesByRowId: buildSupplierPriceMap(prices),
+        }
+      }
+      downloadMastersSheetXlsx(category, allCols, items, supplierCtx)
     } catch (e) {
       setExportError(e instanceof Error ? e.message : 'Export failed')
     } finally {
       setExportBusy(false)
     }
-  }, [category, exportBusy, sheetFilters])
+  }, [category, exportBusy, sheetFilters, supplierId, supplierLabel])
 
   return (
     <PageShell
