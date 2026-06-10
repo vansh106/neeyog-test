@@ -60,7 +60,7 @@ function productCascadeFields(
   keyPrefix = '',
 ): Record<string, string> {
   const out: Record<string, string> = {}
-  const row = product as Record<string, string | null | undefined>
+  const row = product as unknown as Record<string, string | null | undefined>
   for (const field of keys) {
     const raw = row[field]
     if (raw == null || String(raw).trim() === '') continue
