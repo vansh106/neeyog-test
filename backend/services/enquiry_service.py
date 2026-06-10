@@ -736,62 +736,20 @@ async def process_email_matcher(enquiry_id: str, db: AsyncSession) -> dict:
     return out
 
 
-async def process_manual_dropdown(
-    body: dict,
-    db: AsyncSession,
-    *,
-    created_by_user_id: uuid.UUID | None = None,
-    created_by_name: str | None = None,
-) -> dict:
-    """Manual dropdown flow: no parser/matcher/HITL; create enquiry + quote directly."""
+async def _resolve_manual_client_identity(body: dict, db: AsyncSession) -> dict:
+    """Resolve client/branch/employee from manual dropdown request body."""
     from services.client_service import (
         client_for_export,
         create_branch_employee,
         create_company_with_branch,
         get_branch_with_company,
         get_employee_for_branch,
-        increment_branch_enquiry_count,
-        set_company_default_discount,
     )
-    from services.erp_export_service import generate_enquiry_list_excel
-    from services.pdf_service import generate_quotation_pdf
-
-    settings = get_settings()
-    client_json = settings.get_client_json()
-    gst_rate = float(client_json.get("default_gst_rate", 18.0))
-    pf_rate = float(client_json.get("default_pf_rate", 3.0))
-
-    cb_uid = created_by_user_id
-    cb_raw = (created_by_name or "").strip()
-    cb_name = cb_raw[:255] if cb_raw else None
 
     mode = str(body.get("clientMode") or "").strip().lower()
     selected_client_id = body.get("selectedClientId")
     new_client = body.get("newClient") or {}
-    line_items_in = body.get("lineItems") or []
-    notes = str(body.get("notes") or "").strip()
-    priority = str(body.get("priority") or "Normal").strip()
-    target_raw = str(body.get("targetEnquiryId") or body.get("target_enquiry_id") or "").strip()
 
-    existing_enquiry: Enquiry | None = None
-    enquiry_uuid: uuid.UUID
-    if target_raw:
-        try:
-            enquiry_uuid = uuid.UUID(target_raw)
-        except ValueError as exc:
-            raise EnquiryParseError("Invalid target enquiry id") from exc
-        existing_enquiry = await get_enquiry(target_raw, db)
-        qcnt = (
-            await db.execute(
-                select(func.count()).select_from(Quotation).where(Quotation.enquiry_id == enquiry_uuid)
-            )
-        ).scalar_one()
-        if int(qcnt or 0) > 0:
-            raise EnquiryParseError("This enquiry already has a quotation — open the quotation to edit it.")
-    else:
-        enquiry_uuid = uuid.uuid4()
-
-    # Resolve client identity
     client_name = "Customer"
     client_company = ""
     client_email = ""
@@ -883,6 +841,210 @@ async def process_manual_dropdown(
             client_email = employee_for_quote.email or ""
         if employee_for_quote.phone:
             client_phone = employee_for_quote.phone or ""
+
+    return {
+        "mode": mode,
+        "selected_client_id": selected_client_id if isinstance(selected_client_id, str) else None,
+        "client_name": client_name,
+        "client_company": client_company,
+        "client_email": client_email,
+        "client_phone": client_phone,
+        "company_id_uuid": company_id_uuid,
+        "branch_id_uuid": branch_id_uuid,
+        "client_obj": client_obj,
+        "employee_for_quote": employee_for_quote,
+    }
+
+
+async def create_manual_enquiry(
+    body: dict,
+    db: AsyncSession,
+    *,
+    created_by_user_id: uuid.UUID | None = None,
+    created_by_name: str | None = None,
+) -> dict:
+    """Step 1 — create enquiry with client details only; products added later on detail page."""
+    from services.client_service import increment_branch_enquiry_count
+
+    cb_uid = created_by_user_id
+    cb_raw = (created_by_name or "").strip()
+    cb_name = cb_raw[:255] if cb_raw else None
+
+    notes = str(body.get("notes") or "").strip()
+    priority = str(body.get("priority") or "Normal").strip()
+    enquiry_source = str(body.get("source") or "manual").strip().lower() or "manual"
+    if enquiry_source not in ("email", "indiamart", "manual", "referral"):
+        raise EnquiryParseError("source must be one of: email, indiamart, manual, referral")
+
+    resolved = await _resolve_manual_client_identity(body, db)
+    client_name = resolved["client_name"]
+    client_company = resolved["client_company"]
+    client_email = resolved["client_email"]
+    client_phone = resolved["client_phone"]
+    company_id_uuid = resolved["company_id_uuid"]
+    branch_id_uuid = resolved["branch_id_uuid"]
+    employee_for_quote = resolved["employee_for_quote"]
+    mode = resolved["mode"]
+    selected_client_id = resolved["selected_client_id"]
+
+    enquiry_id = uuid.uuid4()
+    manual_client: dict = {"mode": mode}
+    if mode == "existing" and selected_client_id:
+        manual_client["selected_client_id"] = selected_client_id
+    elif mode == "new":
+        nc = body.get("newClient") or {}
+        manual_client["new_client"] = {
+            "company_name": str(nc.get("company_name") or "").strip(),
+            "branch_name": str(nc.get("branch_name") or "Head Office").strip(),
+            "contact_name": str(nc.get("contact_name") or "").strip(),
+            "phone": str(nc.get("phone") or ""),
+            "email": str(nc.get("email") or ""),
+            "city": str(nc.get("city") or "").strip(),
+            "address_line1": str(nc.get("address_line1") or nc.get("address") or "").strip(),
+        }
+
+    parsed_data: dict = {
+        "client_name": client_name,
+        "client_company": client_company,
+        "client_email": client_email,
+        "client_phone": client_phone,
+        "priority": priority,
+        "notes": notes,
+        "manual_client": manual_client,
+        "branch_id": str(branch_id_uuid) if branch_id_uuid else None,
+        "client_employee_id": str(employee_for_quote.id) if employee_for_quote else None,
+        "enquiry_source": enquiry_source,
+    }
+
+    raw_payload = {
+        "source": "manual_dropdown",
+        "enquiry_source": enquiry_source,
+        "stage": "client_only",
+        "priority": priority,
+        "notes": notes,
+        "client": {
+            "name": client_name,
+            "company": client_company,
+            "email": client_email,
+            "phone": client_phone,
+            "client_employee_id": str(employee_for_quote.id) if employee_for_quote else None,
+        },
+    }
+
+    enquiry_no = await allocate_enquiry_number(db)
+    enquiry = Enquiry(
+        id=enquiry_id,
+        client_config="parth_valves",
+        raw_input=json.dumps(raw_payload, ensure_ascii=False),
+        input_type="manual_dropdown",
+        status="received",
+        flow_type="manual",
+        parsed_data=parsed_data,
+        matched_products=[],
+        created_by_user_id=cb_uid,
+        created_by_name=cb_name,
+        enquiry_number=enquiry_no,
+    )
+    if company_id_uuid is not None:
+        enquiry.company_id = company_id_uuid
+    if branch_id_uuid is not None:
+        enquiry.branch_id = branch_id_uuid
+
+    db.add(enquiry)
+    await db.commit()
+    await db.refresh(enquiry)
+
+    if branch_id_uuid is not None:
+        await increment_branch_enquiry_count(str(branch_id_uuid), db)
+
+    audit = AuditLog(
+        id=uuid.uuid4(),
+        entity_type="enquiry",
+        entity_id=enquiry_id,
+        action="manual_enquiry_created",
+        performed_by="user",
+        details={"client_company": client_company, "client_name": client_name},
+    )
+    db.add(audit)
+    await db.commit()
+
+    return {
+        "enquiry_id": str(enquiry_id),
+        "enquiry_number": (enquiry.enquiry_number or "").strip() or None,
+        "status": "received",
+        "flow_type": "manual",
+        "message": "Enquiry created — add products on the enquiry page to generate a quotation",
+        "quotation_id": None,
+        "pdf_available": False,
+        "pdf_path": None,
+        "quote_number": None,
+        "subtotal": None,
+        "total_amount": None,
+        "line_items": [],
+        "ai_reasoning": [],
+        "requires_human_review": False,
+    }
+
+
+async def process_manual_dropdown(
+    body: dict,
+    db: AsyncSession,
+    *,
+    created_by_user_id: uuid.UUID | None = None,
+    created_by_name: str | None = None,
+) -> dict:
+    """Step 2 — add products to an existing enquiry and generate a quotation."""
+    from services.client_service import (
+        client_for_export,
+        increment_branch_enquiry_count,
+        set_company_default_discount,
+    )
+    from services.erp_export_service import generate_enquiry_list_excel
+    from services.pdf_service import generate_quotation_pdf
+
+    settings = get_settings()
+    client_json = settings.get_client_json()
+    gst_rate = float(client_json.get("default_gst_rate", 18.0))
+    pf_rate = float(client_json.get("default_pf_rate", 3.0))
+
+    cb_uid = created_by_user_id
+    cb_raw = (created_by_name or "").strip()
+    cb_name = cb_raw[:255] if cb_raw else None
+
+    line_items_in = body.get("lineItems") or []
+    notes = str(body.get("notes") or "").strip()
+    priority = str(body.get("priority") or "Normal").strip()
+    target_raw = str(body.get("targetEnquiryId") or body.get("target_enquiry_id") or "").strip()
+
+    if not target_raw:
+        raise EnquiryParseError(
+            "targetEnquiryId is required — create an enquiry first, then add products on its detail page."
+        )
+
+    try:
+        enquiry_uuid = uuid.UUID(target_raw)
+    except ValueError as exc:
+        raise EnquiryParseError("Invalid target enquiry id") from exc
+
+    existing_enquiry = await get_enquiry(target_raw, db)
+    qcnt = (
+        await db.execute(
+            select(func.count()).select_from(Quotation).where(Quotation.enquiry_id == enquiry_uuid)
+        )
+    ).scalar_one()
+    if int(qcnt or 0) > 0:
+        raise EnquiryParseError("This enquiry already has a quotation — open the quotation to edit it.")
+
+    resolved = await _resolve_manual_client_identity(body, db)
+    client_name = resolved["client_name"]
+    client_company = resolved["client_company"]
+    client_email = resolved["client_email"]
+    client_phone = resolved["client_phone"]
+    company_id_uuid = resolved["company_id_uuid"]
+    branch_id_uuid = resolved["branch_id_uuid"]
+    client_obj = resolved["client_obj"]
+    employee_for_quote = resolved["employee_for_quote"]
+    selected_client_id = resolved["selected_client_id"]
 
     enquiry_id = enquiry_uuid
 
@@ -996,45 +1158,20 @@ async def process_manual_dropdown(
         "client_employee_id": str(employee_for_quote.id) if employee_for_quote else None,
     }
 
-    if existing_enquiry is not None:
-        enquiry = existing_enquiry
-        prev_pd = dict(enquiry.parsed_data or {})
-        matcher_keep = prev_pd.get("matcher") if isinstance(prev_pd.get("matcher"), dict) else None
-        merged_pd = {**prev_pd, **parsed_data_new}
-        if matcher_keep is not None:
-            merged_pd["matcher"] = matcher_keep
-        enquiry.parsed_data = merged_pd
-        enquiry.matched_products = matched_products
-        enquiry.status = "approved"
-        enquiry.flow_type = "complete"
-        enquiry.company_id = company_id_uuid
-        enquiry.branch_id = branch_id_uuid
-        await db.commit()
-    else:
-        raw_input = json.dumps(raw_payload, ensure_ascii=False)
-        enquiry_no = await allocate_enquiry_number(db)
-        enquiry = Enquiry(
-            id=enquiry_id,
-            client_config="parth_valves",
-            raw_input=raw_input,
-            input_type="manual_dropdown",
-            status="approved",
-            flow_type="complete",
-            parsed_data={
-                **parsed_data_new,
-            },
-            matched_products=matched_products,
-            created_by_user_id=cb_uid,
-            created_by_name=cb_name,
-            enquiry_number=enquiry_no,
-        )
-        if company_id_uuid is not None:
-            enquiry.company_id = company_id_uuid
-        if branch_id_uuid is not None:
-            enquiry.branch_id = branch_id_uuid
-
-        db.add(enquiry)
-        await db.commit()
+    enquiry = existing_enquiry
+    prev_pd = dict(enquiry.parsed_data or {})
+    matcher_keep = prev_pd.get("matcher") if isinstance(prev_pd.get("matcher"), dict) else None
+    merged_pd = {**prev_pd, **parsed_data_new}
+    if matcher_keep is not None:
+        merged_pd["matcher"] = matcher_keep
+    enquiry.parsed_data = merged_pd
+    enquiry.matched_products = matched_products
+    enquiry.status = "approved"
+    enquiry.flow_type = "complete"
+    enquiry.company_id = company_id_uuid
+    enquiry.branch_id = branch_id_uuid
+    enquiry.raw_input = json.dumps(raw_payload, ensure_ascii=False)
+    await db.commit()
 
     quote_number = await allocate_quote_number(db)
     quotation_id = uuid.uuid4()

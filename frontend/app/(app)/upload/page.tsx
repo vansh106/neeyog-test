@@ -2,7 +2,7 @@
 
 import { Suspense, useState, useCallback, useEffect } from 'react'
 import Link from 'next/link'
-import { useSearchParams } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { motion } from 'framer-motion'
 import {
   AlertCircle,
@@ -25,11 +25,19 @@ import ManualEntryForm from '@/components/upload/ManualEntryForm'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
-import { downloadQuotationPdf, enquiriesApi, processManualDropdown, uploadEmailStream } from '@/lib/api'
+import { createManualEnquiry, downloadQuotationPdf, enquiriesApi, uploadEmailStream } from '@/lib/api'
 import { Permissions } from '@/lib/permissions'
 import { useEmailSyncStatus, useTriggerEmailSync } from '@/lib/queries'
 import { cn, formatCurrency, truncateId } from '@/lib/utils'
-import type { EnquiryResponse, AgentEvent, HITLContext, HITLHistoryEntry, ClientVerificationContext, ClientVerificationResponse, ManualEnquiryForm } from '@/types'
+import type {
+  EnquiryResponse,
+  AgentEvent,
+  HITLContext,
+  HITLHistoryEntry,
+  ClientVerificationContext,
+  ClientVerificationResponse,
+  ManualEnquiryCreateForm,
+} from '@/types'
 
 type InputType = 'email' | 'indiamart' | 'manual'
 
@@ -103,6 +111,7 @@ function TotalsBlock({ result }: { result: EnquiryResponseWithTotals }) {
 }
 
 function UploadPageInner() {
+  const router = useRouter()
   const searchParams = useSearchParams()
   const refEnquiryId = searchParams.get('ref')
   const tabParam = searchParams.get('tab')
@@ -225,20 +234,26 @@ function UploadPageInner() {
     await startStreaming(text, inputType)
   }, [text, inputType, startStreaming])
 
-  const handleManualSubmit = useCallback(async (form: ManualEnquiryForm) => {
-    if (isStreaming) return
-    clearRightPanel()
-    setIsStreaming(true)
-    try {
-      const res = await processManualDropdown(form)
-      setFinalResult(res)
-      setEnquiryId(res.enquiry_id ?? null)
-    } catch (e) {
-      setStreamError(e instanceof Error ? e.message : 'Manual process failed')
-    } finally {
-      setIsStreaming(false)
-    }
-  }, [clearRightPanel, isStreaming])
+  const handleCreateManualEnquiry = useCallback(
+    async (form: ManualEnquiryCreateForm) => {
+      if (isStreaming) return
+      clearRightPanel()
+      setIsStreaming(true)
+      try {
+        const res = await createManualEnquiry(form)
+        if (res.enquiry_id) {
+          router.push(`/enquiries/${res.enquiry_id}`)
+          return
+        }
+        setStreamError('Enquiry was created but no id was returned')
+      } catch (e) {
+        setStreamError(e instanceof Error ? e.message : 'Could not create enquiry')
+      } finally {
+        setIsStreaming(false)
+      }
+    },
+    [clearRightPanel, isStreaming, router],
+  )
 
   const handleClear = () => {
     setText('')
@@ -546,7 +561,7 @@ function UploadPageInner() {
                 value="manual"
                 className="h-10 rounded-none px-3 text-[13px] data-active:text-brand-green-600 data-active:after:bg-brand-green-500"
               >
-                Manual Entry
+                New Enquiry
               </TabsTrigger>
             </TabsList>
 
@@ -617,14 +632,20 @@ function UploadPageInner() {
             </TabsContent>
 
             <TabsContent value="manual">
+              <p className="mb-4 text-[13px] text-surface-muted">
+                Select or add a client to create an enquiry. You&apos;ll add products and generate the quotation on
+                the enquiry detail page.
+              </p>
               <PermissionGate
                 permission={Permissions.VIEW_QUOTATIONS}
                 fallback={<p className="text-[13px] text-surface-muted">You do not have permission to submit manual enquiries.</p>}
               >
                 <ManualEntryForm
                   key={refEnquiryId || 'no-email-ref'}
+                  stage="client"
                   isProcessing={isStreaming}
-                  onSubmitManual={handleManualSubmit}
+                  onSubmitManual={() => {}}
+                  onCreateEnquiry={handleCreateManualEnquiry}
                   prefillNotesFromEnquiry={prefillManualNotes}
                 />
               </PermissionGate>

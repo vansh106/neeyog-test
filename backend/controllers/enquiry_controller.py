@@ -54,6 +54,7 @@ class EnquiryListItem(BaseModel):
     status: str
     flow_type: str | None = None
     input_type: str
+    source: str = "manual"
     created_at: str
     created_by_name: str | None = None
     erp_export_available: bool = False
@@ -139,7 +140,42 @@ class ManualNewClientEmployeeRequest(BaseModel):
     designation: str | None = None
 
 
+ENQUIRY_SOURCE_VALUES = frozenset({"email", "indiamart", "manual", "referral"})
+
+
+class ManualEnquiryCreateRequest(BaseModel):
+    """Step 1 of manual flow — client only; products are added on the enquiry detail page."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    clientMode: str
+    selectedClientId: str | None = None
+    newClient: ManualNewClientRequest | None = None
+    priority: str = "Normal"
+    notes: str = ""
+    source: str = "manual"
+    client_employee_id: str | None = Field(None, alias="clientEmployeeId")
+    new_client_employee: ManualNewClientEmployeeRequest | None = Field(None, alias="newClientEmployee")
+
+    @model_validator(mode="after")
+    def validate_fields(self):
+        mode = (self.clientMode or "").strip().lower()
+        if mode not in ("existing", "new"):
+            raise ValueError("clientMode must be 'existing' or 'new'")
+        if mode == "existing" and not self.selectedClientId:
+            raise ValueError("selectedClientId required for existing clientMode")
+        if mode == "new" and not self.newClient:
+            raise ValueError("newClient required for new clientMode")
+        src = (self.source or "").strip().lower()
+        if src not in ENQUIRY_SOURCE_VALUES:
+            raise ValueError("source must be one of: email, indiamart, manual, referral")
+        self.source = src
+        return self
+
+
 class ManualDropdownProcessRequest(BaseModel):
+    """Step 2 of manual flow — add products and generate quotation on an existing enquiry."""
+
     model_config = ConfigDict(populate_by_name=True)
 
     clientMode: str
@@ -150,7 +186,7 @@ class ManualDropdownProcessRequest(BaseModel):
     notes: str = ""
     supplier_pricing: ManualSupplierPricingPayload | None = Field(None, alias="supplierPricing")
     order_totals: ManualOrderTotalsPayload | None = Field(None, alias="orderTotals")
-    target_enquiry_id: str | None = Field(None, alias="targetEnquiryId")
+    target_enquiry_id: str = Field(..., alias="targetEnquiryId")
     #: Branch contact person for this quote (must belong to selected branch unless newClientEmployee creates one).
     client_employee_id: str | None = Field(None, alias="clientEmployeeId")
     new_client_employee: ManualNewClientEmployeeRequest | None = Field(None, alias="newClientEmployee")
@@ -166,6 +202,8 @@ class ManualDropdownProcessRequest(BaseModel):
             raise ValueError("newClient required for new clientMode")
         if not self.lineItems:
             raise ValueError("At least one line item is required")
+        if not (self.target_enquiry_id or "").strip():
+            raise ValueError("targetEnquiryId is required")
         return self
 
 
@@ -293,6 +331,22 @@ def _enquiry_is_sales(e: Enquiry) -> bool:
     return (e.input_type or "").lower() in ("manual", "manual_dropdown")
 
 
+def _enquiry_list_source(e: Enquiry) -> str:
+    """Business source for listing: email, indiamart, manual, referral."""
+    pd = e.parsed_data if isinstance(e.parsed_data, dict) else {}
+    raw = str(pd.get("enquiry_source") or "").strip().lower()
+    if raw in ENQUIRY_SOURCE_VALUES:
+        return raw
+    it = (e.input_type or "").strip().lower()
+    if it in ("email", "email_sync"):
+        return "email"
+    if it == "indiamart":
+        return "indiamart"
+    if it in ("manual", "manual_dropdown"):
+        return "manual"
+    return "email"
+
+
 async def handle_upload_email(
     body: UploadEmailRequest,
     db: AsyncSession,
@@ -406,6 +460,7 @@ async def handle_list_enquiries(
                 status=e.status,
                 flow_type=e.flow_type,
                 input_type=e.input_type,
+                source=_enquiry_list_source(e),
                 created_at=e.created_at.isoformat() if e.created_at else "",
                 created_by_name=(e.created_by_name or "").strip() or None,
                 erp_export_available=bool(getattr(e, "erp_export_path", None)),
@@ -477,12 +532,34 @@ def _quotation_creator_from_user(user: CurrentUser) -> tuple[uuid.UUID | None, s
     return uid, name
 
 
+async def handle_create_manual_enquiry(
+    body: ManualEnquiryCreateRequest,
+    db: AsyncSession,
+    user: CurrentUser,
+) -> EnquiryResponse:
+    """Create a manual enquiry with client details only (no quotation yet)."""
+    try:
+        creator_id, creator_name = _quotation_creator_from_user(user)
+        result = await enquiry_service.create_manual_enquiry(
+            body.model_dump(by_alias=True),
+            db,
+            created_by_user_id=creator_id,
+            created_by_name=creator_name,
+        )
+        return EnquiryResponse(**result)
+    except EnquiryParseError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        logger.exception("Manual enquiry creation failed")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 async def handle_process_manual_dropdown(
     body: ManualDropdownProcessRequest,
     db: AsyncSession,
     user: CurrentUser,
 ) -> EnquiryResponse:
-    """Manual dropdown processing: skip AI pipeline and generate quote directly."""
+    """Add products to an existing manual enquiry and generate a quotation."""
     try:
         creator_id, creator_name = _quotation_creator_from_user(user)
         result = await enquiry_service.process_manual_dropdown(

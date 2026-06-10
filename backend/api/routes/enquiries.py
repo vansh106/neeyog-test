@@ -12,6 +12,7 @@ from controllers.enquiry_controller import (
     EnquiryListItem,
     EnquiryResponse,
     ManualDropdownProcessRequest,
+    ManualEnquiryCreateRequest,
     MatcherProcessResponse,
     UploadEmailRequest,
 )
@@ -46,6 +47,15 @@ async def upload_email_stream_route(
             "Access-Control-Allow-Origin": "*",
         },
     )
+
+
+@router.post("/manual/create", response_model=EnquiryResponse)
+async def manual_enquiry_create_route(
+    body: ManualEnquiryCreateRequest,
+    user: CurrentUser = Depends(require_permission(Permission.VIEW_QUOTATIONS)),
+    db: AsyncSession = Depends(get_db),
+):
+    return await enquiry_controller.handle_create_manual_enquiry(body, db, user)
 
 
 @router.post("/manual/process", response_model=EnquiryResponse)

@@ -1,3 +1,5 @@
+export type EnquirySource = 'email' | 'indiamart' | 'manual' | 'referral'
+
 export interface EnquiryListItem {
   enquiry_id: string
   /** FY + serial (e.g. 262700089); legacy rows may omit. */
@@ -6,6 +8,8 @@ export interface EnquiryListItem {
   status: string
   flow_type: string | null
   input_type: string
+  /** Business source: email, indiamart, manual, referral */
+  source?: EnquirySource | string
   created_at: string
   /** User who created the enquiry (upload / manual); omitted for older rows or inbox sync. */
   created_by_name?: string | null
@@ -434,6 +438,18 @@ export interface ManualLineItem {
   /** When true, quote/PDF show TBD instead of a numeric rate. */
   price_tbd?: boolean
   component_pricing?: Record<string, unknown>
+}
+
+/** Step 1 — client details only (no line items). */
+export interface ManualEnquiryCreateForm {
+  clientMode: 'existing' | 'new'
+  selectedClientId: string | null
+  clientEmployeeId?: string | null
+  newClientEmployee?: ManualEnquiryForm['newClientEmployee']
+  newClient: ManualEnquiryForm['newClient']
+  priority: 'Normal' | 'High' | 'Urgent'
+  notes: string
+  source: EnquirySource
 }
 
 export interface ManualEnquiryForm {

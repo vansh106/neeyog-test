@@ -723,6 +723,30 @@ export async function uploadEmailStream(
   }
 }
 
+export async function createManualEnquiry(
+  body: import('@/types').ManualEnquiryCreateForm,
+): Promise<import('@/types').EnquiryResponse> {
+  const base = (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/$/, '')
+  const url = base ? `${base}/api/enquiries/manual/create` : '/api/enquiries/manual/create'
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { ...bearerHeaders(true) },
+    body: JSON.stringify(body),
+    cache: 'no-store',
+  })
+  if (!res.ok) {
+    let detail = `API error: ${res.status}`
+    try {
+      const err = (await res.json()) as { detail?: string }
+      if (err?.detail) detail = err.detail
+    } catch {
+      /* ignore */
+    }
+    throw new Error(detail)
+  }
+  return (await res.json()) as import('@/types').EnquiryResponse
+}
+
 export async function processManualDropdown(body: import('@/types').ManualEnquiryForm): Promise<import('@/types').EnquiryResponse> {
   const base = (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/$/, '')
   const url = base ? `${base}/api/enquiries/manual/process` : '/api/enquiries/manual/process'
@@ -732,7 +756,16 @@ export async function processManualDropdown(body: import('@/types').ManualEnquir
     body: JSON.stringify(body),
     cache: 'no-store',
   })
-  if (!res.ok) throw new Error(`API error: ${res.status}`)
+  if (!res.ok) {
+    let detail = `API error: ${res.status}`
+    try {
+      const err = (await res.json()) as { detail?: string }
+      if (err?.detail) detail = err.detail
+    } catch {
+      /* ignore */
+    }
+    throw new Error(detail)
+  }
   return (await res.json()) as import('@/types').EnquiryResponse
 }
 

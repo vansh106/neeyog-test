@@ -9,14 +9,8 @@ import StatusBadge from '@/components/ui/StatusBadge'
 import EmptyState from '@/components/ui/EmptyState'
 import { Skeleton } from '@/components/ui/skeleton'
 import { buttonVariants } from '@/components/ui/button'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import EnquiryListingFiltersPanel from '@/components/enquiries/EnquiryListingFilters'
+import { enquirySourceBadgeClass, formatEnquirySourceLabel } from '@/lib/enquirySource'
 import { useEnquiriesListingDataset, useQuotations } from '@/lib/queries'
 import { erpExportUrl } from '@/lib/api'
 import {
@@ -32,14 +26,6 @@ import type { EnquiryListItem } from '@/types'
 type Pipeline = 'all' | 'complete' | 'incomplete' | 'pending' | 'failed'
 
 const PENDING_STATUSES = ['received', 'parsing', 'matching', 'quoting'] as const
-
-const FLOW_OPTIONS = [
-  { value: 'all', label: 'All flows' },
-  { value: 'complete', label: 'Complete' },
-  { value: 'incomplete', label: 'Incomplete' },
-  { value: 'ambiguous', label: 'Ambiguous' },
-  { value: 'not_found', label: 'Not found' },
-]
 
 /** Backend validates `limit` ≤ 500 on GET /api/enquiries/ */
 const LISTING_FETCH_LIMIT = 500
@@ -88,7 +74,6 @@ export default function EnquiriesPage() {
     useState<EnquiryListingFilters>(INITIAL_APPLIED_ENQUIRY_FILTERS)
   const [showSearchOptions, setShowSearchOptions] = useState(false)
   const [pipeline, setPipeline] = useState<Pipeline>('all')
-  const [flowSelect, setFlowSelect] = useState('all')
 
   const {
     data: scopedRows = [],
@@ -109,10 +94,8 @@ export default function EnquiriesPage() {
       list = list.filter((e) => (PENDING_STATUSES as readonly string[]).includes(e.status))
     } else if (pipeline === 'failed') list = list.filter((e) => e.status === 'failed')
 
-    if (flowSelect !== 'all') list = list.filter((e) => e.flow_type === flowSelect)
-
     return list
-  }, [scopedRows, appliedFilters, pipeline, flowSelect])
+  }, [scopedRows, appliedFilters, pipeline])
 
   const chipCounts = useMemo(
     () => ({
@@ -168,23 +151,6 @@ export default function EnquiriesPage() {
           )
         })}
       </div>
-      <div className="min-w-[140px]">
-        <span className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-[#8A9488]">
-          Flow type
-        </span>
-        <Select value={flowSelect} onValueChange={(v) => setFlowSelect(v ?? 'all')}>
-          <SelectTrigger className="h-8 w-full border-[#E2E6DC] bg-white text-[12px]">
-            <SelectValue placeholder="Flow" />
-          </SelectTrigger>
-          <SelectContent>
-            {FLOW_OPTIONS.map((o) => (
-              <SelectItem key={o.value} value={o.value}>
-                {o.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
     </div>
   )
 
@@ -230,7 +196,7 @@ export default function EnquiriesPage() {
                 <tr className="bg-[#F4F5F0] text-[11px] font-medium uppercase tracking-wide text-[#8A9488]">
                   <th className="px-4 py-3">Client</th>
                   <th className="px-4 py-3">Ref</th>
-                  <th className="px-4 py-3">Flow</th>
+                  <th className="px-4 py-3">Source</th>
                   <th className="px-4 py-3">Status</th>
                   <th className="px-4 py-3">Time</th>
                   <th className="px-4 py-3">Created by</th>
@@ -273,7 +239,14 @@ export default function EnquiriesPage() {
                           {(e.enquiry_number || '').trim() || truncateId(e.enquiry_id)}
                         </td>
                         <td className="px-4 py-3">
-                          <StatusBadge status={e.flow_type} />
+                          <span
+                            className={cn(
+                              'inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium whitespace-nowrap',
+                              enquirySourceBadgeClass(e.source),
+                            )}
+                          >
+                            {formatEnquirySourceLabel(e.source)}
+                          </span>
                         </td>
                         <td className="px-4 py-3">
                           <StatusBadge status={e.status} />

@@ -12,6 +12,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
+import { ENQUIRY_SOURCE_OPTIONS } from '@/lib/enquirySource'
 import type { EnquiryListingFilters as Filters } from '@/lib/filterEnquiriesLocal'
 
 const STATUS_OPTIONS = [
@@ -323,6 +324,22 @@ export default function EnquiryListingFilters({
               />
             </FilterCell>
 
+            <FilterCell label="Source :">
+              <Select value={draft.source} onValueChange={(v) => set({ source: v ?? 'ALL' })}>
+                <SelectTrigger className={selectTriggerClass}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ALL">ALL</SelectItem>
+                  {ENQUIRY_SOURCE_OPTIONS.map((o) => (
+                    <SelectItem key={o.value} value={o.value}>
+                      {o.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </FilterCell>
+
             <FilterCell label="Series :">
               <Select value={draft.series} onValueChange={(v) => set({ series: v ?? 'ALL' })}>
                 <SelectTrigger className={selectTriggerClass}>
@@ -337,19 +354,6 @@ export default function EnquiryListingFilters({
                   ))}
                 </SelectContent>
               </Select>
-            </FilterCell>
-
-            <FilterCell
-              label="Sales Enquiry"
-              checkbox={
-                <FilterCheckbox
-                  checked={draft.useSalesEnquiry}
-                  onChange={(v) => set({ useSalesEnquiry: v })}
-                  aria-label="Sales enquiry only"
-                />
-              }
-            >
-              <span className="block h-6 w-full" aria-hidden />
             </FilterCell>
 
             <FilterCell label="" alignEnd>

@@ -25,12 +25,14 @@ import type {
   BranchResponse,
   ClientEmployeeResponse,
   CompanyResponse,
+  ManualEnquiryCreateForm,
   ManualEnquiryForm,
   ManualLineItem,
   PriceCalculationResult,
   SupplierResponse,
 } from '@/types'
-import { CLIENT_INDUSTRY_OPTIONS } from '@/types'
+import { ENQUIRY_SOURCE_OPTIONS } from '@/lib/enquirySource'
+import { CLIENT_INDUSTRY_OPTIONS, type EnquirySource } from '@/types'
 
 const BRANCH_PRIMARY_CONTACT = '__branch_primary__'
 
@@ -48,8 +50,14 @@ type MatcherClientHint = {
   }>
 }
 
+export type ManualFormStage = 'client' | 'products' | 'full'
+
 type Props = {
+  /** ``client`` = create enquiry only; ``products`` = add line items + quote; ``full`` = legacy combined form. */
+  stage?: ManualFormStage
   onSubmitManual: (form: ManualEnquiryForm) => void
+  /** Called when ``stage`` is ``client`` — creates enquiry without products. */
+  onCreateEnquiry?: (form: ManualEnquiryCreateForm) => void
   isProcessing: boolean
   /** When opening Manual Entry from Emails → Process, pre-fills Notes once. */
   prefillNotesFromEnquiry?: string | null
@@ -65,6 +73,10 @@ type Props = {
   matcherClientHint?: MatcherClientHint | null
   /** Bump to remount valve configurator (e.g. clear matcher seed for full manual). */
   matcherSeedVersion?: number
+  /** Read-only client label shown when ``stage`` is ``products``. */
+  clientSummaryLabel?: string | null
+  /** Pre-select quote contact from enquiry ``parsed_data``. */
+  initialClientEmployeeId?: string | null
 }
 
 const SELECT_EMPTY = '__none__'
@@ -547,16 +559,23 @@ function buildEmailText(
 }
 
 export default function ManualEntryForm({
+  stage = 'full',
   onSubmitManual,
+  onCreateEnquiry,
   isProcessing,
   prefillNotesFromEnquiry,
   targetEnquiryId,
   matcherSeed,
   matcherClientHint,
   matcherSeedVersion = 0,
+  clientSummaryLabel,
+  initialClientEmployeeId,
 }: Props) {
+  const showClientSection = stage !== 'products'
+  const showProductsSection = stage !== 'client'
   useWarmupMatcherCatalog(matcherSeed?.catalogKey ?? null)
 
+  const [enquirySource, setEnquirySource] = useState<EnquirySource>('manual')
   const [clientMode, setClientMode] = useState<'existing' | 'new'>('existing')
   const [newClient, setNewClient] = useState({
     company_name: '',
@@ -605,6 +624,11 @@ export default function ManualEntryForm({
       }))
     }
   }, [matcherClientHint])
+
+  useEffect(() => {
+    if (!initialClientEmployeeId || stage === 'client') return
+    setSelectedClientEmployeeId(initialClientEmployeeId)
+  }, [initialClientEmployeeId, stage])
 
   const [companyQuery, setCompanyQuery] = useState('')
   const [debouncedCompanyQuery, setDebouncedCompanyQuery] = useState('')
@@ -1043,26 +1067,38 @@ export default function ManualEntryForm({
 
   function validate(): boolean {
     const e: Record<string, string> = {}
-    if (clientMode === 'existing') {
-      if (!selectedCompany) e.client = 'Please search and select a company'
-      else if (!selectedBranchId) e.client = 'Please select a branch'
-    } else {
-      if ((newClient.company_name || '').trim().length < 2) e.company_name = 'Company name is required'
-      if (!(newClient.branch_name || '').trim()) e.branch_name = 'Branch name is required'
-      if (!(newClient.city || '').trim()) e.city = 'City is required'
-      if (!(newClient.contact_name || '').trim()) e.contact_name = 'Contact name is required'
-      const ph = cleanPhone(newClient.phone || '')
-      if (ph.length !== 10) e.phone = 'Enter a valid 10-digit phone number'
-      if ((newClient.email || '').trim() && !isValidEmail((newClient.email || '').trim())) {
-        e.email = 'Enter a valid email'
+    if (showClientSection) {
+      if (clientMode === 'existing') {
+        if (!selectedCompany) e.client = 'Please search and select a company'
+        else if (!selectedBranchId) e.client = 'Please select a branch'
+      } else {
+        if ((newClient.company_name || '').trim().length < 2) e.company_name = 'Company name is required'
+        if (!(newClient.branch_name || '').trim()) e.branch_name = 'Branch name is required'
+        if (!(newClient.city || '').trim()) e.city = 'City is required'
+        if (!(newClient.contact_name || '').trim()) e.contact_name = 'Contact name is required'
+        const ph = cleanPhone(newClient.phone || '')
+        if (ph.length !== 10) e.phone = 'Enter a valid 10-digit phone number'
+        if ((newClient.email || '').trim() && !isValidEmail((newClient.email || '').trim())) {
+          e.email = 'Enter a valid email'
+        }
       }
     }
-    if (assembledProducts.length === 0) {
-      e.products = 'Please complete at least one valve configurator'
-    }
-    if (supplierRequired) {
-      const missingSupplier = assembledProducts.some((p) => !p.supplier_id)
-      if (missingSupplier) e.supplier = 'Please select a supplier for each product'
+    if (showProductsSection) {
+      if (stage === 'products') {
+        if (clientMode === 'existing' && !selectedBranchId) {
+          e.client = 'Client could not be loaded — refresh the enquiry page'
+        }
+        if (clientMode === 'new' && (newClient.company_name || '').trim().length < 2) {
+          e.client = 'Client could not be loaded — refresh the enquiry page'
+        }
+      }
+      if (assembledProducts.length === 0) {
+        e.products = 'Please complete at least one valve configurator'
+      }
+      if (supplierRequired) {
+        const missingSupplier = assembledProducts.some((p) => !p.supplier_id)
+        if (missingSupplier) e.supplier = 'Please select a supplier for each product'
+      }
     }
     setErrors(e)
     return Object.keys(e).length === 0
@@ -1070,13 +1106,21 @@ export default function ManualEntryForm({
 
   const summaryText = useMemo(() => {
     const clientLabel =
-      clientMode === 'existing'
+      clientSummaryLabel ||
+      (clientMode === 'existing'
         ? selectedCompany && selectedBranch
           ? `${selectedCompany.company_name} — ${selectedBranch.branch_name}`
           : 'Select company & branch'
-        : newClient.company_name || 'New client'
+        : newClient.company_name || 'New client')
+    if (stage === 'client') {
+      return clientLabel && clientLabel !== 'Select company & branch'
+        ? `${clientLabel} — ready to create enquiry`
+        : 'Select or add a client above'
+    }
     if (!clientLabel || assembledProducts.length === 0) {
-      return 'Fill in client and product details above'
+      return stage === 'products'
+        ? 'Configure at least one product above'
+        : 'Fill in client and product details above'
     }
     const est = netOrderTotals?.grand ?? totalEstimate
     const hasTbd = assembledProducts.some(
@@ -1088,16 +1132,79 @@ export default function ManualEntryForm({
     return `${clientLabel} — ${assembledProducts.length} product(s) — ${estLabel}`
   }, [
     clientMode,
+    clientSummaryLabel,
     newClient.company_name,
     assembledProducts.length,
     selectedCompany,
     selectedBranch,
+    stage,
     totalEstimate,
     netOrderTotals?.grand,
   ])
 
+  function buildClientPayload() {
+    const base = {
+      clientMode,
+      selectedClientId: selectedBranchId,
+      newClient: {
+        ...newClient,
+        address: newClient.address_line1 || newClient.address,
+      },
+      priority: 'Normal' as const,
+      notes: (prefillNotesFromEnquiry || '').trim(),
+      source: enquirySource,
+    }
+    if (
+      clientMode === 'existing' &&
+      selectedBranchId &&
+      !selectedBranchId.startsWith('dummy-') &&
+      selectedClientEmployeeId
+    ) {
+      return { ...base, clientEmployeeId: selectedClientEmployeeId }
+    }
+    const nqName = newClientQuoteEmployeeName.trim()
+    if (clientMode === 'new' && nqName) {
+      return {
+        ...base,
+        newClientEmployee: {
+          addressCode: newClientQuoteEmployeeAddressCode.trim() || undefined,
+          fullName: nqName,
+          phone: newClientQuoteEmployeePhone.trim() || undefined,
+          email: newClientQuoteEmployeeEmail.trim() || undefined,
+          department: newClientQuoteEmployeeDepartment.trim() || undefined,
+          designation: newClientQuoteEmployeeDesignation.trim() || undefined,
+        },
+      }
+    }
+    const inlineEmpName = inlineNewEmployeeName.trim()
+    if (
+      clientMode === 'existing' &&
+      selectedBranchId &&
+      !selectedBranchId.startsWith('dummy-') &&
+      inlineEmpName &&
+      !selectedClientEmployeeId
+    ) {
+      return {
+        ...base,
+        newClientEmployee: {
+          addressCode: inlineNewEmployeeAddressCode.trim() || undefined,
+          fullName: inlineEmpName,
+          phone: inlineNewEmployeePhone.trim() || undefined,
+          email: inlineNewEmployeeEmail.trim() || undefined,
+          department: inlineNewEmployeeDepartment.trim() || undefined,
+          designation: inlineNewEmployeeDesignation.trim() || undefined,
+        },
+      }
+    }
+    return base
+  }
+
   async function submit() {
     if (!validate()) return
+    if (stage === 'client') {
+      onCreateEnquiry?.(buildClientPayload())
+      return
+    }
     const form: ManualEnquiryForm = {
       ...(targetEnquiryId ? { targetEnquiryId } : {}),
       clientMode,
@@ -1192,9 +1299,54 @@ export default function ManualEntryForm({
     onSubmitManual(form)
   }
 
+  const submitLabel =
+    stage === 'client'
+      ? isProcessing
+        ? 'Creating…'
+        : 'Create Enquiry →'
+      : stage === 'products'
+        ? isProcessing
+          ? 'Generating…'
+          : 'Generate Quotation →'
+        : isProcessing
+          ? 'Processing…'
+          : 'Process →'
+
   return (
     <div className="space-y-5">
+      {stage === 'products' && clientSummaryLabel ? (
+        <div className="rounded-lg border border-brand-navy-200 bg-brand-navy-50/40 px-4 py-3">
+          <p className="text-[10px] font-medium uppercase tracking-wide text-[#8A9488]">Client</p>
+          <p className="mt-1 text-[14px] font-semibold text-gray-900">{clientSummaryLabel}</p>
+        </div>
+      ) : null}
+
+      {stage === 'client' ? (
+        <section className="rounded-xl border border-surface-border bg-white p-5 shadow-sm">
+          <div className="text-[10px] font-medium uppercase tracking-wide text-[#8A9488]">Source</div>
+          <p className="mt-1 text-[12px] text-surface-muted">
+            How did this enquiry reach you?
+          </p>
+          <Select
+            value={enquirySource}
+            onValueChange={(v) => setEnquirySource((v as EnquirySource) || 'manual')}
+          >
+            <SelectTrigger className="mt-3 h-10 w-full border-surface-border bg-white text-[13px]">
+              <SelectValue placeholder="Select source" />
+            </SelectTrigger>
+            <SelectContent>
+              {ENQUIRY_SOURCE_OPTIONS.map((o) => (
+                <SelectItem key={o.value} value={o.value}>
+                  {o.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </section>
+      ) : null}
+
       {/* ── Client Details ─────────────────────────────────────────── */}
+      {showClientSection ? (
       <section className="rounded-xl border border-surface-border bg-white p-5 shadow-sm border-t-2 border-t-brand-navy-200">
         <div className="flex items-center justify-between gap-3">
           <h2 className="text-[15px] font-semibold text-gray-900">Client Details</h2>
@@ -1801,8 +1953,11 @@ export default function ManualEntryForm({
           </div>
         )}
       </section>
+      ) : null}
 
       {/* ── Products (valve configurator) ───────────────────────────── */}
+      {showProductsSection ? (
+      <>
       <section className="rounded-xl border border-surface-border bg-white p-5 shadow-sm border-t-2 border-t-brand-gold-200">
         <h2 className="text-[15px] font-semibold text-gray-900">Products Requested</h2>
 
@@ -2175,16 +2330,22 @@ export default function ManualEntryForm({
           )}
         </section>
       )}
+      </>
+      ) : null}
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-[13px] text-surface-muted">{summaryText}</p>
         <Button
           type="button"
           onClick={submit}
-          disabled={isProcessing || (supplierRequired && !pricingReady)}
+          disabled={
+            isProcessing ||
+            (showProductsSection && supplierRequired && !pricingReady) ||
+            (stage === 'client' && !onCreateEnquiry)
+          }
           className="h-12 bg-brand-green-500 text-white hover:bg-brand-green-600"
         >
-          {isProcessing ? 'Processing…' : 'Process →'}
+          {submitLabel}
         </Button>
       </div>
     </div>

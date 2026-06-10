@@ -2,7 +2,7 @@
 
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
-import { useParams } from 'next/navigation'
+import { useParams, useRouter } from 'next/navigation'
 import { ChevronRight, Download, FileText, Loader2, Mail, Sparkles } from 'lucide-react'
 import PageShell from '@/components/layout/PageShell'
 import StatusBadge from '@/components/ui/StatusBadge'
@@ -283,6 +283,7 @@ function clarificationHint(err: string | null): boolean {
 }
 
 export default function EnquiryDetailPage() {
+  const router = useRouter()
   const params = useParams()
   const id =
     typeof params?.id === 'string'
@@ -442,6 +443,59 @@ export default function EnquiryDetailPage() {
     return { catalogKey: matcherCatalogKey, filledCascade: matcherFilled }
   }, [fullManualOverride, matcherCatalogKey, matcher?.line_items, matcherFilled])
 
+  const manualClientHint = useMemo(() => {
+    if (!parsed) return null
+    const mc = parsed.manual_client
+    if (mc && typeof mc === 'object') {
+      const m = mc as Record<string, unknown>
+      if (m.mode === 'existing' && typeof m.selected_client_id === 'string') {
+        return { mode: 'existing' as const, selectedClientId: m.selected_client_id }
+      }
+      const nc = m.new_client
+      if (m.mode === 'new' && nc && typeof nc === 'object') {
+        const n = nc as Record<string, unknown>
+        return {
+          mode: 'new' as const,
+          newClient: {
+            company_name: typeof n.company_name === 'string' ? n.company_name : '',
+            branch_name: typeof n.branch_name === 'string' ? n.branch_name : 'Head Office',
+            contact_name: typeof n.contact_name === 'string' ? n.contact_name : '',
+            phone: typeof n.phone === 'string' ? n.phone : '',
+            email: typeof n.email === 'string' ? n.email : '',
+            city: typeof n.city === 'string' ? n.city : '',
+            address_line1: typeof n.address_line1 === 'string' ? n.address_line1 : '',
+          },
+        }
+      }
+    }
+    if (typeof parsed.branch_id === 'string' && parsed.branch_id.trim()) {
+      return { mode: 'existing' as const, selectedClientId: parsed.branch_id.trim() }
+    }
+    return null
+  }, [parsed])
+
+  const clientSummaryLabel = useMemo(() => {
+    const co =
+      (typeof parsed?.client_company === 'string' && parsed.client_company.trim()) ||
+      (ext?.display_company || '').trim() ||
+      ''
+    const cn = typeof parsed?.client_name === 'string' ? parsed.client_name.trim() : ''
+    if (co && cn) return `${co} — ${cn}`
+    return co || cn || null
+  }, [ext?.display_company, parsed])
+
+  const initialClientEmployeeId = useMemo(() => {
+    const v = parsed?.client_employee_id
+    return typeof v === 'string' && v.trim() ? v.trim() : null
+  }, [parsed])
+
+  const isManualPendingQuote = useMemo(() => {
+    if (quoteId) return false
+    const inputType = (ext?.input_type || '').toLowerCase()
+    const flow = (ext?.flow_type || '').toLowerCase()
+    return inputType === 'manual_dropdown' || flow === 'manual'
+  }, [ext?.flow_type, ext?.input_type, quoteId])
+
   const matcherClientHint = useMemo(() => {
     if (!matcher) return null
     const c = matcher.client
@@ -527,16 +581,19 @@ export default function EnquiryDetailPage() {
       setManualBusy(true)
       setManualError(null)
       try {
-        await processManualDropdown({ ...form, targetEnquiryId: id })
+        const res = await processManualDropdown({ ...form, targetEnquiryId: id })
         await qc.invalidateQueries({ queryKey: ['enquiry', id] })
         setShowManualCompletion(false)
+        if (res.quotation_id) {
+          router.push(`/quotations/${res.quotation_id}`)
+        }
       } catch (e) {
         setManualError(e instanceof Error ? e.message : 'Could not save quotation')
       } finally {
         setManualBusy(false)
       }
     },
-    [id, qc],
+    [id, qc, router],
   )
 
   const openRevertDraft = useCallback(async () => {
@@ -630,6 +687,28 @@ export default function EnquiryDetailPage() {
         <div className="space-y-6 lg:col-span-7">
           {clientContext && (
             <ClientVerificationPanel />
+          )}
+
+          {isManualPendingQuote && (
+            <section className="rounded-xl border border-brand-green-200 bg-white p-5 shadow-sm">
+              <h2 className="text-[15px] font-semibold text-gray-900">Add products &amp; generate quotation</h2>
+              <p className="mt-1 text-[13px] text-surface-muted">
+                Configure products using the manual dropdown, then generate the quotation for this enquiry.
+              </p>
+              {manualError && <p className="mt-3 text-[12px] text-red-600">{manualError}</p>}
+              <div className="mt-4">
+                <ManualEntryForm
+                  stage="products"
+                  onSubmitManual={submitManualFromEnquiry}
+                  isProcessing={manualBusy}
+                  targetEnquiryId={id}
+                  matcherClientHint={manualClientHint}
+                  clientSummaryLabel={clientSummaryLabel}
+                  initialClientEmployeeId={initialClientEmployeeId}
+                  matcherSeedVersion={0}
+                />
+              </div>
+            </section>
           )}
 
           {emailLikeSource && (

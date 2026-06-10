@@ -42,6 +42,7 @@ export type EnquiryListingFilters = {
   useItemNoDesc: boolean
   itemNoDesc: string
   series: string
+  source: string
   useSalesEnquiry: boolean
 }
 
@@ -65,6 +66,7 @@ export const EMPTY_ENQUIRY_LISTING_FILTERS: EnquiryListingFilters = {
   useItemNoDesc: false,
   itemNoDesc: '',
   series: 'ALL',
+  source: 'ALL',
   useSalesEnquiry: false,
 }
 
@@ -167,6 +169,11 @@ export function filterEnquiriesLocal(
   if (f.series && f.series !== 'ALL') {
     const s = f.series.trim()
     out = out.filter((row) => (row.series || '') === s)
+  }
+
+  if (f.source && f.source !== 'ALL') {
+    const src = norm(f.source)
+    out = out.filter((row) => norm(row.source || '') === src)
   }
 
   if (f.useSalesEnquiry) {
