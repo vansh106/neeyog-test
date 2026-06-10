@@ -21,6 +21,34 @@ from services.masters_service import CASCADE_STEPS, CATEGORY_LABEL_BY_KEY, SHEET
 
 # Prefer longer / more specific phrases first.
 _CATALOG_SCAN_ORDER: list[tuple[str, list[str]]] = [
+    ("fp_hose_tuder", ["tuder hose", "tuder hoses", " hose tuder"]),
+    ("fp_hose_thunder", ["thunder hose", "pvc thunder"]),
+    ("fp_hose_pvc_nylon_food_grade", ["food grade hose", "food grade pvc", "pvc nylon food"]),
+    ("fp_hose_pvc_nylon_non_toxic", ["non toxic hose", "non-toxic hose", "pvc nylon"]),
+    ("fp_hose_red_silicon", ["red silicon", "red silicone hose", "silicon hose"]),
+    ("fp_hose_pu", ["pu hose", "polyurethane hose"]),
+    ("fp_ball_valve_casco_3_piece_3_way_l_port", ["casco 3 way", "casco 3-way", "3 way l port"]),
+    ("fp_ball_valve_casco_3_piece_ext_stem", ["casco 3 piece ext", "casco extended stem"]),
+    ("fp_ball_valve_casco_3_piece", ["casco 3 piece", "casco 3-piece"]),
+    ("fp_ball_valve_casco_2_piece", ["casco 2 piece", "casco 2-piece"]),
+    ("fp_ball_valve_casco_1_piece_multi_end", ["casco 1 piece", "casco one piece"]),
+    ("fp_ball_valve_unison_3_piece_3_way_l_port", ["unison 3 way", "unison 3-way"]),
+    ("fp_ball_valve_unison_3_piece", ["unison 3 piece", "unison 3-piece"]),
+    ("fp_ball_valve_unison_2_piece_iso_pads", ["unison 2 piece", "unison iso"]),
+    ("fp_ball_valve_unison_1_piece_multi_end", ["unison 1 piece", "unison one piece"]),
+    ("fp_needle_valve", ["needle valve"]),
+    ("fp_nrv_non_slam", ["non slam", "non-slam", "nrv non"]),
+    ("fp_nrv_wafer_check", ["wafer check", "nrv wafer"]),
+    ("fp_nrv_inline_check", ["inline check", "nrv inline", "check valve"]),
+    ("fp_safety_sv_tc_end", ["safety valve tc", "sv tc end"]),
+    ("fp_safety_sv_bsp_f", ["safety valve bsp", "sv bsp"]),
+    ("fp_sampling_sv_tc_end", ["sampling valve"]),
+    ("fp_sight_glass_double_window", ["double window sight", "sight glass double"]),
+    ("fp_sight_glass_inline_ic_casted", ["sight glass inline", "ic casted sight"]),
+    ("fp_strainer_y_300", ["strainer y #300", "strainer 300", "y strainer 300"]),
+    ("fp_strainer_y_150", ["strainer y #150", "strainer 150", "y strainer"]),
+    ("fp_fbv_ball_type", ["flush bottom ball", "fbv ball"]),
+    ("fp_fbv_y_type", ["flush bottom y", "fbv y type"]),
     ("fp_mascon_manual_butt_weld", ["manual butt weld", "butt weld mascon", "mascon manual butt"]),
     ("fp_mascon_manual_tc_end", ["manual tc end", "mascon manual tc"]),
     ("fp_mascon_pneumatic_tc_end", ["pneumatic tc end", "mascon pneumatic tc"]),
@@ -33,8 +61,7 @@ _CATALOG_SCAN_ORDER: list[tuple[str, list[str]]] = [
     ("fp_mascon_angle_sc_flanged", ["angle sc flanged", "mascon angle sc"]),
     ("fp_mascon_angle_butt_weld", ["angle butt weld", "mascon angle butt"]),
     ("fp_mascon_angle_tc_end", ["angle tc end", "mascon angle tc"]),
-    ("butterfly_valve", ["butterfly"]),
-    ("ball_valve", ["ball valve", " ball "]),
+    ("butterfly_valve", ["butterfly valve", "butterfly"]),
 ]
 
 _SKIP_COLS = frozenset({"id", "sr_no", "source_file", "created_at", "updated_at"})
@@ -83,7 +110,104 @@ def _pick_catalog_key(text: str) -> tuple[str, str]:
         return "fp_mascon_manual_butt_weld", CATEGORY_LABEL_BY_KEY.get(
             "fp_mascon_manual_butt_weld", "Mascon (default sheet)"
         )
+    # Generic ball valve when make / piece count not specified
+    if "ball valve" in t or re.search(r"\bball\s+valv", t):
+        if "casco" in t:
+            return "fp_ball_valve_casco_2_piece", CATEGORY_LABEL_BY_KEY.get(
+                "fp_ball_valve_casco_2_piece", "Ball valve — Casco"
+            )
+        if "unison" in t:
+            return "fp_ball_valve_unison_2_piece_iso_pads", CATEGORY_LABEL_BY_KEY.get(
+                "fp_ball_valve_unison_2_piece_iso_pads", "Ball valve — Unison"
+            )
+        return "fp_ball_valve_casco_2_piece", CATEGORY_LABEL_BY_KEY.get(
+            "fp_ball_valve_casco_2_piece", "Ball valve (default sheet)"
+        )
     return "", ""
+
+
+_HOSE_FITTING_REQUIRED = frozenset(
+    {
+        "fp_hose_tuder",
+        "fp_hose_thunder",
+        "fp_hose_pvc_nylon_non_toxic",
+        "fp_hose_pvc_nylon_food_grade",
+    }
+)
+
+
+def _classify_email_intent(text: str) -> str:
+    """quotation_rfq | non_rfq | unclear."""
+    from services.email_inbox_filters import raw_input_is_quotation_work_related
+
+    if not raw_input_is_quotation_work_related(text):
+        return "non_rfq"
+    t = _norm_text(text)
+    commerce = any(
+        w in t
+        for w in (
+            "rfq",
+            "quotation",
+            "quote",
+            "enquiry",
+            "inquiry",
+            "requirement",
+            "require",
+            "supply",
+            "offer your best",
+            "price",
+            "rate",
+        )
+    )
+    product = any(
+        w in t
+        for w in (
+            "valve",
+            "hose",
+            "actuator",
+            "butterfly",
+            "ball",
+            "diaphragm",
+            "strainer",
+            "sight glass",
+            "prv",
+            "safety",
+            "dn ",
+            "mm",
+        )
+    )
+    if commerce and product:
+        return "quotation_rfq"
+    if commerce or product:
+        return "unclear"
+    return "non_rfq"
+
+
+def _recommend_revert_to_client(
+    *,
+    intent: str,
+    catalog_key: str,
+    product_completeness: str,
+    missing_cascade_keys: list[str],
+    ambiguous_groups: list[dict],
+) -> tuple[bool, str]:
+    if intent == "non_rfq":
+        return False, "Not a quotation enquiry — no client follow-up needed."
+    if intent == "unclear":
+        return True, "Email lacks clear product or RFQ context — ask the buyer to specify valve/hose type and sizes."
+    if not catalog_key:
+        return True, "Could not determine product family from the email — ask which valve or hose sheet applies."
+    if product_completeness == "complete":
+        return False, ""
+    critical = {"valve_size", "size_id_mm", "size_mm", "end_connection", "construction"}
+    miss = set(missing_cascade_keys or [])
+    if miss & critical:
+        return True, "Key sizing or end-connection details are missing — request DN/size and end connection from the buyer."
+    if ambiguous_groups:
+        return True, "Multiple valid material/spec options — ask the buyer to confirm seat/diaphragm/MOC."
+    if miss:
+        return True, "Some specification fields could not be resolved — request the missing details from the buyer."
+    return False, ""
 
 
 def _model_columns(model: type) -> list[str]:
@@ -289,6 +413,25 @@ async def _match_segment_cascade(
 
 async def run_matcher_for_enquiry(enquiry: Enquiry, db: AsyncSession) -> dict[str, Any]:
     raw = (enquiry.raw_input or "").strip()
+    intent = _classify_email_intent(raw)
+
+    if intent == "non_rfq":
+        return {
+            "version": 2,
+            "email_intent": intent,
+            "product_completeness": "not_applicable",
+            "confidence": 0.0,
+            "catalog_key": None,
+            "product_label": None,
+            "recommend_revert": False,
+            "revert_reason": "This message is not a buyer RFQ.",
+            "line_items": [],
+            "missing_cascade_keys": [],
+            "ambiguous_groups": [],
+            "filled_cascade": {},
+            "client": {"mode": "suggested_new"},
+            "notes": "Skipped matching — not quotation-related mail.",
+        }
 
     catalog_key, product_label = _pick_catalog_key(raw)
     steps = list(CASCADE_STEPS.get(catalog_key, [])) if catalog_key else []
@@ -399,13 +542,41 @@ async def run_matcher_for_enquiry(enquiry: Enquiry, db: AsyncSession) -> dict[st
     if len(line_items) > 1:
         conf = max(0.15, conf - 0.03)
     conf = max(0.15, min(0.97, conf))
+    if intent == "unclear":
+        conf = min(conf, 0.35)
+
+    recommend_revert, revert_reason = _recommend_revert_to_client(
+        intent=intent,
+        catalog_key=catalog_key,
+        product_completeness=product_completeness,
+        missing_cascade_keys=missing_cascade_keys,
+        ambiguous_groups=ambiguous_groups,
+    )
+    hose_fittings_required = catalog_key in _HOSE_FITTING_REQUIRED
+    hose_fittings_note = (
+        "Hose fittings are required for this hose type — complete fittings manually after hose is matched."
+        if hose_fittings_required
+        else None
+    )
+    if hose_fittings_required and product_completeness == "complete":
+        product_completeness = "incomplete"
+        recommend_revert = True
+        revert_reason = (
+            revert_reason
+            or "Hose RFQ matched — fittings for both ends must be confirmed before quoting."
+        )
 
     return {
         "version": 2,
+        "email_intent": intent,
         "product_completeness": product_completeness,
         "confidence": round(conf, 3),
         "catalog_key": catalog_key or None,
         "product_label": product_label or None,
+        "recommend_revert": recommend_revert,
+        "revert_reason": revert_reason or None,
+        "hose_fittings_required": hose_fittings_required,
+        "hose_fittings_note": hose_fittings_note,
         "rfq_line_count": len(line_items),
         "cascade_steps": [{"key": s, "label": s.replace("_", " ").title()} for s in steps],
         "filled_cascade": filled_cascade,
@@ -441,7 +612,13 @@ async def persist_matcher_on_enquiry(enquiry_id: str, db: AsyncSession) -> Enqui
     if not str(pd.get("client_company") or "").strip():
         pd["client_company"] = infer_company_from_email_raw(e.raw_input or "") or "Unknown"
     e.confidence_score = float(payload.get("confidence") or 0)
-    e.flow_type = "product_complete" if payload.get("product_completeness") == "complete" else "product_incomplete"
+    pc = str(payload.get("product_completeness") or "")
+    if pc == "complete":
+        e.flow_type = "product_complete"
+    elif pc == "not_applicable":
+        e.flow_type = "not_quotation"
+    else:
+        e.flow_type = "product_incomplete"
     e.status = "matcher_ready"
     fc = payload.get("filled_cascade") or {}
     lix = payload.get("line_items") if isinstance(payload.get("line_items"), list) else []

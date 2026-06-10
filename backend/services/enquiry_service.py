@@ -90,6 +90,35 @@ _DESC_FIELDS: list[tuple[str, str]] = [
     ("stem", "Stem"),
     ("seat", "Seat"),
     ("fasteners", "Fasteners"),
+    ("hose_length", "Length"),
+    ("size_id_mm", "Size Id Mm"),
+    ("temperature_range", "Temperature Range"),
+    ("wall_thickness", "Wall Thickness"),
+    ("fitting_end_1", "Fitting End 1"),
+    ("fitting_end_1_qty", "Fitting End 1 Qty"),
+    ("fitting_end_1_variant_type", "Fitting End 1 Variant Type"),
+    ("fitting_end_1_end_connection_1", "Fitting End 1 End Connection 1"),
+    ("fitting_end_1_end_connection_2", "Fitting End 1 End Connection 2"),
+    ("fitting_end_1_size_mm", "Fitting End 1 Size Mm"),
+    ("fitting_end_1_hose_nipple_moc", "Fitting End 1 Hose Nipple Moc"),
+    ("fitting_end_1_hose_cap_moc", "Fitting End 1 Hose Cap Moc"),
+    ("fitting_end_1_sms_nut_moc", "Fitting End 1 Sms Nut Moc"),
+    ("fitting_end_1_tc_od", "Fitting End 1 Tc Od"),
+    ("fitting_end_1_din_nut_moc", "Fitting End 1 Din Nut Moc"),
+    ("fitting_end_1_swivel_nut_moc", "Fitting End 1 Swivel Nut Moc"),
+    ("fitting_end_1_flange_nut_moc", "Fitting End 1 Flange Nut Moc"),
+    ("fitting_end_2", "Fitting End 2"),
+    ("fitting_end_2_variant_type", "Fitting End 2 Variant Type"),
+    ("fitting_end_2_end_connection_1", "Fitting End 2 End Connection 1"),
+    ("fitting_end_2_end_connection_2", "Fitting End 2 End Connection 2"),
+    ("fitting_end_2_size_mm", "Fitting End 2 Size Mm"),
+    ("fitting_end_2_hose_nipple_moc", "Fitting End 2 Hose Nipple Moc"),
+    ("fitting_end_2_hose_cap_moc", "Fitting End 2 Hose Cap Moc"),
+    ("fitting_end_2_sms_nut_moc", "Fitting End 2 Sms Nut Moc"),
+    ("fitting_end_2_tc_od", "Fitting End 2 Tc Od"),
+    ("fitting_end_2_din_nut_moc", "Fitting End 2 Din Nut Moc"),
+    ("fitting_end_2_swivel_nut_moc", "Fitting End 2 Swivel Nut Moc"),
+    ("fitting_end_2_flange_nut_moc", "Fitting End 2 Flange Nut Moc"),
     ("operator", "Operator"),
     ("operator_model", "Operator Model"),
     ("operator_size", "Operator Size"),
@@ -100,13 +129,31 @@ _DESC_FIELDS: list[tuple[str, str]] = [
 ]
 
 
+def _cascade_field_label(key: str) -> str:
+    for k, label in _DESC_FIELDS:
+        if k == key:
+            return label
+    return key.replace("_", " ").title()
+
+
 def _build_structured_description(name: str, cascade: dict) -> str:
     lines = [f"Product : {name or 'Product'}"]
+    seen: set[str] = set()
+    if not isinstance(cascade, dict):
+        cascade = {}
     for key, label in _DESC_FIELDS:
-        v = str(cascade.get(key) or "").strip() if isinstance(cascade, dict) else ""
+        v = str(cascade.get(key) or "").strip()
         if not v:
             continue
+        seen.add(key)
         lines.append(f"{label} : {v}")
+    for key in cascade:
+        if key in seen:
+            continue
+        v = str(cascade.get(key) or "").strip()
+        if not v:
+            continue
+        lines.append(f"{_cascade_field_label(key)} : {v}")
     return "\n".join(lines)
 
 
@@ -594,11 +641,46 @@ async def try_automatic_quotation_from_matcher(enquiry: Enquiry, db: AsyncSessio
     return await process_manual_dropdown(body, db)
 
 
+async def _latest_quotation_for_enquiry(
+    enquiry_id: uuid.UUID,
+    db: AsyncSession,
+) -> Quotation | None:
+    result = await db.execute(
+        select(Quotation)
+        .where(Quotation.enquiry_id == enquiry_id)
+        .order_by(Quotation.created_at.desc())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
 async def process_email_matcher(enquiry_id: str, db: AsyncSession) -> dict:
     """Run deterministic matcher; auto-quote when product is complete and uniquely resolved."""
     from services.email_matcher_service import persist_matcher_on_enquiry
 
     e = await get_enquiry(enquiry_id, db)
+    existing_q = await _latest_quotation_for_enquiry(e.id, db)
+    if existing_q is not None:
+        pd = e.parsed_data if isinstance(e.parsed_data, dict) else {}
+        pd = {**pd, "quotation_id": str(existing_q.id)}
+        e.parsed_data = pd
+        if not e.processing_completed_at:
+            e.processing_completed_at = datetime.now(timezone.utc)
+        await db.commit()
+        await db.refresh(e)
+        return {
+            "enquiry_id": str(e.id),
+            "enquiry_number": (e.enquiry_number or "").strip() or None,
+            "status": e.status,
+            "flow_type": e.flow_type,
+            "message": "This email already has a quotation — open it to review or edit.",
+            "quotation_id": str(existing_q.id),
+            "quote_number": existing_q.quote_number,
+            "already_quoted": True,
+            "requires_human_review": False,
+            "matcher": pd.get("matcher") if isinstance(pd.get("matcher"), dict) else {},
+        }
+
     now = datetime.now(timezone.utc)
     e.processing_started_at = now
     await db.commit()
@@ -618,15 +700,16 @@ async def process_email_matcher(enquiry_id: str, db: AsyncSession) -> dict:
     m = pd.get("matcher") if isinstance(pd.get("matcher"), dict) else {}
     conf = float(m.get("confidence") or e.confidence_score or 0)
 
-    msg = (
-        "Quotation generated from matcher"
-        if quote_block and quote_block.get("quotation_id")
-        else (
-            "Product specification is incomplete — complete on the enquiry page"
-            if (e.flow_type or "") == "product_incomplete"
-            else "Matcher finished"
-        )
-    )
+    if (e.flow_type or "") == "not_quotation":
+        msg = "Not a quotation enquiry — no product match attempted."
+    elif quote_block and quote_block.get("quotation_id"):
+        msg = "Quotation generated from matcher"
+    elif m.get("recommend_revert"):
+        msg = str(m.get("revert_reason") or "More details needed — use Revert to client on the enquiry page.")
+    elif (e.flow_type or "") == "product_incomplete":
+        msg = "Product specification is incomplete — complete on the enquiry page"
+    else:
+        msg = "Matcher finished"
 
     out: dict = {
         "enquiry_id": str(e.id),

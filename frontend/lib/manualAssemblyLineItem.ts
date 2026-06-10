@@ -10,6 +10,78 @@ import type {
   ValveProduct,
 } from '@/types'
 import { isPositivePrice } from '@/lib/utils'
+import { isHoseCatalogCategory } from '@/lib/configuratorProductFlow'
+import {
+  formatHoseLength,
+  hoseLengthToMeters,
+  type HoseLengthUnit,
+} from '@/lib/hoseLengthPricing'
+
+const HOSE_CASCADE_KEYS = [
+  'variant_type',
+  'size_id_mm',
+  'temperature_range',
+  'wall_thickness',
+] as const
+
+const VALVE_CASCADE_KEYS = [
+  'variant_type',
+  'product_sheet',
+  'construction',
+  'valve_size',
+  'bore_type',
+  'end_connection',
+  'pressure',
+  'body',
+  'ball_disc',
+  'ball',
+  'stem',
+  'seat',
+  'fasteners',
+] as const
+
+const FITTING_CASCADE_KEYS = [
+  'variant_type',
+  'end_connection_1',
+  'end_connection_2',
+  'size_mm',
+  'hose_nipple_moc',
+  'hose_cap_moc',
+  'sms_nut_moc',
+  'tc_od',
+  'din_nut_moc',
+  'swivel_nut_moc',
+  'flange_nut_moc',
+] as const
+
+function productCascadeFields(
+  product: ValveProduct,
+  keys: readonly string[],
+  keyPrefix = '',
+): Record<string, string> {
+  const out: Record<string, string> = {}
+  const row = product as Record<string, string | null | undefined>
+  for (const field of keys) {
+    const raw = row[field]
+    if (raw == null || String(raw).trim() === '') continue
+    const cascadeKey = keyPrefix ? `${keyPrefix}_${field}` : field
+    out[cascadeKey] = String(raw).trim()
+  }
+  return out
+}
+
+function assemblyProductTitle(p: AssembledProduct): string {
+  const v = p.valve
+  if (!v) return 'Assembly'
+  if (isHoseCatalogCategory(v.catalog_category)) {
+    const parts = [v.type, v.variant_type, v.size_id_mm].filter(Boolean)
+    if (p.hose_length != null) {
+      parts.push(formatHoseLength(p.hose_length, (p.hose_length_unit ?? 'm') as HoseLengthUnit))
+    }
+    return parts.join(' — ') || 'Hose'
+  }
+  return [v.type, v.construction, v.valve_size].filter(Boolean).join(' — ') || 'Product'
+}
 
 export function uuidv4(): string {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID()
@@ -67,7 +139,11 @@ export function assemblyPartComponentKey(label: string): string {
 
 /** Unit count for a catalog part on one hose assembly (End 1 qty 2 → multiplier 2). */
 export function assemblyPartUnitMultiplier(label: string, p: AssembledProduct): number {
-  if (label.toLowerCase().includes('fitting (end 1') && (p.fitting_end_1_qty ?? 1) === 2) return 2
+  const l = label.toLowerCase()
+  if (l === 'hose' && p.hose_length != null && p.hose_length > 0) {
+    return hoseLengthToMeters(p.hose_length, (p.hose_length_unit ?? 'm') as HoseLengthUnit)
+  }
+  if (l.includes('fitting (end 1') && (p.fitting_end_1_qty ?? 1) === 2) return 2
   return 1
 }
 
@@ -125,14 +201,25 @@ export function assemblyLabel(p: AssembledProduct): string {
   const f2 = p.fitting_end_2
   if (!v && !f1 && !f2) return 'Assembly'
   const hosePart = v
-    ? [v.type, v.construction, v.valve_size ?? v.size_id_mm].filter(Boolean).join(' — ')
+    ? [
+        [v.type, v.construction, v.valve_size ?? v.size_id_mm].filter(Boolean).join(' — '),
+        p.hose_length != null
+          ? formatHoseLength(p.hose_length, (p.hose_length_unit ?? 'm') as HoseLengthUnit)
+          : null,
+      ]
+        .filter(Boolean)
+        .join(' — ')
     : ''
-  const fit1Part = f1
-    ? [f1.variant_type, f1.size_mm as string | undefined].filter(Boolean).join(' — ')
-    : ''
-  const fit2Part = f2
-    ? [f2.variant_type, f2.size_mm as string | undefined].filter(Boolean).join(' — ')
-    : ''
+  const fit1Part = p.fitting_end_1_bare
+    ? 'Bare fitting'
+    : f1
+      ? [f1.variant_type, f1.size_mm as string | undefined].filter(Boolean).join(' — ')
+      : ''
+  const fit2Part = p.fitting_end_2_bare
+    ? 'Bare fitting'
+    : f2
+      ? [f2.variant_type, f2.size_mm as string | undefined].filter(Boolean).join(' — ')
+      : ''
   const fitPart =
     fit1Part && fit2Part
       ? `${fit1Part} + ${fit2Part}`
@@ -175,24 +262,7 @@ export function assembledToLineItem(
     ? [v.body, v.ball_disc ?? v.ball, v.stem, v.seat, v.fasteners].filter(Boolean)
     : []
   const material = materialParts.join(' / ') || ''
-  const hoseName = v
-    ? [v.type, v.construction, v.valve_size].filter(Boolean).join(' — ')
-    : ''
-  const f1 = p.fitting_end_1 ?? p.fitting
-  const f2 = p.fitting_end_2
-  const fittingName = f1
-    ? [
-        [f1.variant_type, f1.size_mm].filter(Boolean).join(' — '),
-        (p.fitting_end_1_qty ?? 1) === 2 ? '×2 same end' : null,
-        f2 ? [f2.variant_type, f2.size_mm].filter(Boolean).join(' — ') : null,
-      ]
-        .filter(Boolean)
-        .join(' + ')
-    : ''
-  const name =
-    hoseName && fittingName
-      ? `${hoseName} + ${fittingName}`
-      : hoseName || fittingName || 'Assembly'
+  const name = assemblyProductTitle(p)
 
   const catalogTable = v ? valveCatalogTable(v) : null
   const rawCatalogId = v?.id ?? uuidv4()
@@ -215,7 +285,7 @@ export function assembledToLineItem(
     id: catalogId,
     name,
     size_inch: parseSizeInch(v?.valve_size ?? null),
-    size_mm: parseSizeMm(v?.valve_size ?? null),
+    size_mm: parseSizeMm(v?.valve_size ?? v?.size_id_mm ?? null),
     material,
     base_price: resolvedUnit,
     unit: p.unit || 'Nos',
@@ -224,39 +294,41 @@ export function assembledToLineItem(
 
   const cascade: Record<string, string> = {}
   if (v) {
-    if (v.variant_type) cascade.variant_type = v.variant_type
-    if (v.product_sheet) cascade.product_sheet = v.product_sheet
-    if (v.construction) cascade.construction = v.construction
-    if (v.valve_size) cascade.valve_size = v.valve_size
-    if (v.bore_type) cascade.bore_type = v.bore_type
-    if (v.end_connection) cascade.end_connection = v.end_connection
-    if (v.pressure) cascade.pressure = v.pressure
-    if (v.body) cascade.body = v.body
-    if (v.ball_disc) cascade.ball_disc = v.ball_disc
-    if (v.ball) cascade.ball = v.ball
-    if (v.stem) cascade.stem = v.stem
-    if (v.seat) cascade.seat = v.seat
-    if (v.fasteners) cascade.fasteners = v.fasteners
+    if (isHoseCatalogCategory(v.catalog_category)) {
+      Object.assign(cascade, productCascadeFields(v, HOSE_CASCADE_KEYS))
+    } else {
+      Object.assign(cascade, productCascadeFields(v, VALVE_CASCADE_KEYS))
+    }
   }
-  const fit1 = p.fitting_end_1 ?? p.fitting
-  if (fit1) {
-    if (fit1.variant_type) cascade.fitting_end_1_variant_type = fit1.variant_type
-    if (fit1.size_mm) cascade.fitting_end_1_size_mm = fit1.size_mm
-    if (fit1.hose_nipple_moc) cascade.fitting_end_1_hose_nipple_moc = fit1.hose_nipple_moc
-    if (fit1.hose_cap_moc) cascade.fitting_end_1_hose_cap_moc = fit1.hose_cap_moc
-    if (p.fitting_end_1_qty) cascade.fitting_end_1_qty = String(p.fitting_end_1_qty)
+  if (p.hose_length != null) {
+    cascade.hose_length = formatHoseLength(
+      p.hose_length,
+      (p.hose_length_unit ?? 'm') as HoseLengthUnit,
+    )
   }
-  const fit2 = p.fitting_end_2
-  if (fit2) {
-    if (fit2.variant_type) cascade.fitting_end_2_variant_type = fit2.variant_type
-    if (fit2.size_mm) cascade.fitting_end_2_size_mm = fit2.size_mm
-    if (fit2.hose_nipple_moc) cascade.fitting_end_2_hose_nipple_moc = fit2.hose_nipple_moc
-    if (fit2.hose_cap_moc) cascade.fitting_end_2_hose_cap_moc = fit2.hose_cap_moc
+  if (p.fitting_end_1_bare) {
+    cascade.fitting_end_1 = 'Bare fitting'
+  } else {
+    const fit1 = p.fitting_end_1 ?? p.fitting
+    if (fit1) {
+      Object.assign(cascade, productCascadeFields(fit1, FITTING_CASCADE_KEYS, 'fitting_end_1'))
+      if ((p.fitting_end_1_qty ?? 1) === 2) cascade.fitting_end_1_qty = '2'
+    }
   }
-  cascade.operator = operatorLabel(p.operator_key)
-  if (p.operator_model) {
-    cascade.operator_model = p.operator_model.model_name
-    if (p.operator_model.size) cascade.operator_size = p.operator_model.size
+  if (p.fitting_end_2_bare) {
+    cascade.fitting_end_2 = 'Bare fitting'
+  } else {
+    const fit2 = p.fitting_end_2
+    if (fit2) {
+      Object.assign(cascade, productCascadeFields(fit2, FITTING_CASCADE_KEYS, 'fitting_end_2'))
+    }
+  }
+  if (p.operator_key) {
+    cascade.operator = operatorLabel(p.operator_key)
+    if (p.operator_model) {
+      cascade.operator_model = p.operator_model.model_name
+      if (p.operator_model.size) cascade.operator_size = p.operator_model.size
+    }
   }
   if (p.sov) cascade.sov = p.sov.type
   if (p.limit_switch_box) cascade.limit_switch_box = p.limit_switch_box.type

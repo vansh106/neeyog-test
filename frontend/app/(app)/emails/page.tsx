@@ -368,33 +368,58 @@ export default function EmailsPage() {
                 <LiveAgentTimeline events={agentEvents} isStreaming={isStreaming} />
 
                 <div className="flex flex-wrap justify-end gap-2">
-                  <button
-                    type="button"
-                    disabled={processBusy || !selected}
-                    onClick={async () => {
-                      if (!selected) return
-                      setProcessBusy(true)
-                      setError(null)
-                      try {
-                        await enquiriesApi.processEmailMatcher(selected)
-                        router.push(`/enquiries/${selected}`)
-                      } catch (e) {
-                        setError(e instanceof Error ? e.message : 'Process failed')
-                      } finally {
-                        setProcessBusy(false)
+                  {selectedItem?.has_quotation ? (
+                    <button
+                      type="button"
+                      onClick={() => router.push(`/enquiries/${selected}`)}
+                      className="rounded-md bg-brand-green-500 px-3 py-2 text-[12px] font-medium text-white hover:bg-brand-green-600 inline-flex items-center gap-2"
+                    >
+                      <CheckCircle2 className="size-3.5" />
+                      Open quotation
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={processBusy || !selected || !!selectedItem?.inbox_processed}
+                      title={
+                        selectedItem?.inbox_processed
+                          ? 'Already processed — open the enquiry to continue'
+                          : undefined
                       }
-                    }}
-                    className="rounded-md bg-brand-green-500 px-3 py-2 text-[12px] font-medium text-white hover:bg-brand-green-600 disabled:opacity-50 disabled:pointer-events-none inline-flex items-center gap-2"
-                  >
-                    {processBusy ? (
-                      <>
-                        <Loader2 className="size-3.5 animate-spin" />
-                        Matching…
-                      </>
-                    ) : (
-                      'Process'
-                    )}
-                  </button>
+                      onClick={async () => {
+                        if (!selected) return
+                        setProcessBusy(true)
+                        setError(null)
+                        try {
+                          const res = await enquiriesApi.processEmailMatcher<{
+                            already_quoted?: boolean
+                            quotation_id?: string
+                          }>(selected)
+                          if (res?.already_quoted && res.quotation_id) {
+                            router.push(`/enquiries/${selected}`)
+                            return
+                          }
+                          router.push(`/enquiries/${selected}`)
+                        } catch (e) {
+                          setError(e instanceof Error ? e.message : 'Process failed')
+                        } finally {
+                          setProcessBusy(false)
+                        }
+                      }}
+                      className="rounded-md bg-brand-green-500 px-3 py-2 text-[12px] font-medium text-white hover:bg-brand-green-600 disabled:opacity-50 disabled:pointer-events-none inline-flex items-center gap-2"
+                    >
+                      {processBusy ? (
+                        <>
+                          <Loader2 className="size-3.5 animate-spin" />
+                          Matching…
+                        </>
+                      ) : selectedItem?.inbox_processed ? (
+                        'Processed'
+                      ) : (
+                        'Process'
+                      )}
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => router.push(`/enquiries/${selected}`)}

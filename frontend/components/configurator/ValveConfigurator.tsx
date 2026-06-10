@@ -37,12 +37,20 @@ import {
   type ConfiguratorCatalogPick,
   configuratorLeafLabel,
   fittingCategoryLabel,
+  BARE_FITTING_CATALOG_KEY,
   hoseFittingsSelectionComplete,
   hoseRequiresFittings,
+  isBareFittingSelection,
   isHoseCatalogCategory,
   operatorValveTypeForCategory,
   supportsOperatorAccessoryFlowCategory,
 } from '@/lib/configuratorProductFlow'
+import {
+  formatHoseLength,
+  hosePriceForLength,
+  parseHoseLengthInput,
+  type HoseLengthUnit,
+} from '@/lib/hoseLengthPricing'
 import { HoseFittingEndPicker } from '@/components/configurator/HoseFittingEndPicker'
 import { useConfiguratorAccessories, useSheetDefaultSuppliers } from '@/lib/queries'
 import type {
@@ -164,6 +172,11 @@ function catalogRowToValveProduct(
     end_connection_2: g('end_connection_2'),
     hose_nipple_moc: g('hose_nipple_moc'),
     hose_cap_moc: g('hose_cap_moc'),
+    sms_nut_moc: g('sms_nut_moc'),
+    tc_od: g('tc_od'),
+    din_nut_moc: g('din_nut_moc'),
+    swivel_nut_moc: g('swivel_nut_moc'),
+    flange_nut_moc: g('flange_nut_moc'),
     rating: g('rating'),
     temperature_range: g('temperature_range'),
     wall_thickness: g('wall_thickness'),
@@ -377,24 +390,34 @@ export function CompletedProductCard({
         {product.positioner && (
           <p className="text-surface-muted">Positioner: {product.positioner.type}</p>
         )}
-        {(product.fitting_end_1 || product.fitting) && (
+        {(product.fitting_end_1_bare || product.fitting_end_1 || product.fitting) && (
           <p className="text-surface-muted">
             Fitting (End 1):{' '}
-            {[
-              (product.fitting_end_1 ?? product.fitting)?.variant_type,
-              (product.fitting_end_1 ?? product.fitting)?.size_mm,
-            ]
-              .filter(Boolean)
-              .join(' — ')}
+            {product.fitting_end_1_bare
+              ? 'Bare fitting'
+              : [
+                  (product.fitting_end_1 ?? product.fitting)?.variant_type,
+                  (product.fitting_end_1 ?? product.fitting)?.size_mm,
+                ]
+                  .filter(Boolean)
+                  .join(' — ')}
             {(product.fitting_end_1_qty ?? 1) === 2 ? ' ×2' : ''}
           </p>
         )}
-        {product.fitting_end_2 && (
+        {(product.fitting_end_2_bare || product.fitting_end_2) && (
           <p className="text-surface-muted">
             Fitting (End 2):{' '}
-            {[product.fitting_end_2.variant_type, product.fitting_end_2.size_mm]
-              .filter(Boolean)
-              .join(' — ')}
+            {product.fitting_end_2_bare
+              ? 'Bare fitting'
+              : [product.fitting_end_2?.variant_type, product.fitting_end_2?.size_mm]
+                  .filter(Boolean)
+                  .join(' — ')}
+          </p>
+        )}
+        {product.hose_length != null && (
+          <p className="text-surface-muted">
+            Length:{' '}
+            {formatHoseLength(product.hose_length, product.hose_length_unit ?? 'm')}
           </p>
         )}
       </div>
@@ -445,11 +468,17 @@ export function ValveConfigurator({
   })
   const [cascadeSteps, setCascadeSteps] = useState<CascadeStep[]>([])
   const [fittingEnd1Specs, setFittingEnd1Specs] = useState<ValveSpecSelections>(() => {
+    if (initialProduct?.fitting_end_1_bare) {
+      return { catalog_category: BARE_FITTING_CATALOG_KEY, field_values: {} }
+    }
     const f = initialProduct?.fitting_end_1 ?? initialProduct?.fitting
     if (!f?.catalog_category) return emptySpecs()
     return valveProductToSpecs(f)
   })
   const [fittingEnd2Specs, setFittingEnd2Specs] = useState<ValveSpecSelections>(() => {
+    if (initialProduct?.fitting_end_2_bare) {
+      return { catalog_category: BARE_FITTING_CATALOG_KEY, field_values: {} }
+    }
     const f = initialProduct?.fitting_end_2
     if (!f?.catalog_category) return emptySpecs()
     return valveProductToSpecs(f)
@@ -463,8 +492,17 @@ export function ValveConfigurator({
   const [resolvedFittingEnd2, setResolvedFittingEnd2] = useState<ValveProduct | null>(
     initialProduct?.fitting_end_2 ?? null,
   )
+  const [hoseLength, setHoseLength] = useState<string>(
+    initialProduct?.hose_length != null ? String(initialProduct.hose_length) : '1',
+  )
+  const [hoseLengthUnit, setHoseLengthUnit] = useState<HoseLengthUnit>(
+    initialProduct?.hose_length_unit ?? 'm',
+  )
 
   const requiresFittingsAddon = hoseRequiresFittings(specs.catalog_category)
+  const isHoseSelection = isHoseCatalogCategory(specs.catalog_category)
+  const parsedHoseLength = useMemo(() => parseHoseLengthInput(hoseLength), [hoseLength])
+  const hoseLengthValid = !isHoseSelection || parsedHoseLength != null
   const [operatorOptions, setOperatorOptions] = useState<OperatorOption[]>([])
   const [daOps, setDaOps] = useState<OperatorModel[]>([])
   const [saOps, setSaOps] = useState<OperatorModel[]>([])
@@ -575,7 +613,9 @@ export function ValveConfigurator({
   const rowCount = catalog.length > 0 ? catalog.length : fullRowCount
 
   const fittingsComplete = hoseFittingsSelectionComplete(
+    fittingEnd1Specs,
     resolvedFittingEnd1,
+    fittingEnd2Specs,
     resolvedFittingEnd2,
     fittingEnd1Qty,
   )
@@ -716,7 +756,16 @@ export function ValveConfigurator({
             if (!cur) return prev
             const existing = (cur.temp_price ?? '').trim()
             if (existing && Number(existing) > 0) return prev
-            return { ...prev, [key]: { ...cur, temp_price: String(inr) } }
+            let priceToSet = inr
+            if (
+              key === 'valve' &&
+              isHoseSelection &&
+              parsedHoseLength != null
+            ) {
+              const adjusted = hosePriceForLength(inr, parsedHoseLength, hoseLengthUnit)
+              if (adjusted != null) priceToSet = adjusted
+            }
+            return { ...prev, [key]: { ...cur, temp_price: String(priceToSet) } }
           })
         }
       }
@@ -725,7 +774,7 @@ export function ValveConfigurator({
     return () => {
       cancelled = true
     }
-  }, [supplierPriceFetchSig, pricingCtx])
+  }, [supplierPriceFetchSig, pricingCtx, isHoseSelection, parsedHoseLength, hoseLengthUnit])
 
   const componentListPrice = useCallback(
     (key: SupplierPriceComponentKey, catalogBase: number | null | undefined): number | null => {
@@ -735,6 +784,22 @@ export function ValveConfigurator({
     },
     [supplierListPrices],
   )
+
+  // Supplier list price for hoses is per meter — keep review temp_price in sync with length.
+  useEffect(() => {
+    if (!isHoseSelection || parsedHoseLength == null) return
+    const perMeter = supplierListPrices.valve
+    if (!isPositivePrice(perMeter)) return
+    const adjusted = hosePriceForLength(perMeter, parsedHoseLength, hoseLengthUnit)
+    if (adjusted == null) return
+    const next = String(Math.round(adjusted * 100) / 100)
+    setComponentPricing((prev) => {
+      const cur = prev.valve
+      if (!cur?.enabled) return prev
+      if (cur.temp_price === next) return prev
+      return { ...prev, valve: { ...cur, temp_price: next } }
+    })
+  }, [isHoseSelection, parsedHoseLength, hoseLengthUnit, supplierListPrices.valve])
 
   useEffect(() => {
     const activeSuppliers = suppliers ?? []
@@ -850,7 +915,13 @@ export function ValveConfigurator({
 
   // ── Derived: running unit price (pure on frontend) ────────────────────
   const priceInfo = useMemo(() => {
-    const valvePrice = componentListPrice('valve', resolvedValve?.base_price)
+    const valvePricePerMeter = componentListPrice('valve', resolvedValve?.base_price)
+    const valvePrice =
+      isHoseSelection && parsedHoseLength != null
+        ? hosePriceForLength(valvePricePerMeter, parsedHoseLength, hoseLengthUnit)
+        : isHoseSelection
+          ? null
+          : valvePricePerMeter
     const opPrice = componentListPrice('operator', operatorModel?.base_price)
     const sovPrice = sov?.price ?? null
     const lsbPrice = lsb?.price ?? null
@@ -874,8 +945,12 @@ export function ValveConfigurator({
 
     if (resolvedValve) {
       const sizeLabel = resolvedValve.valve_size ?? resolvedValve.size_id_mm ?? ''
+      const lengthSuffix =
+        isHoseSelection && parsedHoseLength != null
+          ? ` — ${formatHoseLength(parsedHoseLength, hoseLengthUnit)}`
+          : ''
       push(
-        `${categoryDisplayLabel || resolvedValve.type}${sizeLabel ? ` ${sizeLabel}` : ''}`,
+        `${categoryDisplayLabel || resolvedValve.type}${sizeLabel ? ` ${sizeLabel}` : ''}${lengthSuffix}`,
         valvePrice,
         'valve',
       )
@@ -955,7 +1030,15 @@ export function ValveConfigurator({
       })()
       if (!enabled) continue
       const temp = cfg ? parseTemp(cfg.temp_price) : null
-      componentFinalByKey[key] = temp ?? base
+      let resolved = temp ?? base
+      if (key === 'valve' && isHoseSelection && parsedHoseLength != null && temp != null) {
+        const perMeter =
+          supplierListPrices.valve ?? componentListPrice('valve', resolvedValve?.base_price)
+        if (perMeter != null && Math.abs(temp - perMeter) < 0.015) {
+          resolved = hosePriceForLength(perMeter, parsedHoseLength, hoseLengthUnit) ?? base
+        }
+      }
+      componentFinalByKey[key] = resolved
     }
     const componentUnknowns = Object.entries(componentFinalByKey)
       .filter(([, price]) => price == null)
@@ -994,6 +1077,9 @@ export function ValveConfigurator({
     fittingEnd1Qty,
     categoryDisplayLabel,
     requiresFittingsAddon,
+    isHoseSelection,
+    parsedHoseLength,
+    hoseLengthUnit,
     operatorKey,
     operatorModel,
     sov,
@@ -1001,6 +1087,7 @@ export function ValveConfigurator({
     positioner,
     componentPricing,
     componentListPrice,
+    supplierListPrices.valve,
     customerDiscountPct,
   ])
 
@@ -1034,6 +1121,8 @@ export function ValveConfigurator({
     setFittingEnd1Qty(1)
     setResolvedFittingEnd1(null)
     setResolvedFittingEnd2(null)
+    setHoseLength('1')
+    setHoseLengthUnit('m')
     const field_values: Record<string, string> = {}
     if (pick.variantType) field_values.variant_type = pick.variantType
     setSpecs({
@@ -1098,8 +1187,22 @@ export function ValveConfigurator({
     id: initialProduct?.id ?? crypto.randomUUID(),
     valve: valveForAssembly,
     fitting: requiresFittingsAddon ? fittingEnd1ForAssembly : null,
-    fitting_end_1: requiresFittingsAddon ? fittingEnd1ForAssembly : null,
-    fitting_end_2: requiresFittingsAddon && fittingEnd1Qty === 1 ? fittingEnd2ForAssembly : null,
+    fitting_end_1:
+      requiresFittingsAddon && !isBareFittingSelection(fittingEnd1Specs.catalog_category)
+        ? fittingEnd1ForAssembly
+        : null,
+    fitting_end_1_bare:
+      requiresFittingsAddon && isBareFittingSelection(fittingEnd1Specs.catalog_category),
+    fitting_end_2:
+      requiresFittingsAddon &&
+      fittingEnd1Qty === 1 &&
+      !isBareFittingSelection(fittingEnd2Specs.catalog_category)
+        ? fittingEnd2ForAssembly
+        : null,
+    fitting_end_2_bare:
+      requiresFittingsAddon &&
+      fittingEnd1Qty === 1 &&
+      isBareFittingSelection(fittingEnd2Specs.catalog_category),
     fitting_end_1_qty: requiresFittingsAddon ? fittingEnd1Qty : undefined,
     operator_key: operatorKey,
     operator_model:
@@ -1133,6 +1236,8 @@ export function ValveConfigurator({
     positioner,
     bracket: null,
     include_bracket: false,
+    hose_length: isHoseSelection && parsedHoseLength != null ? parsedHoseLength : undefined,
+    hose_length_unit: isHoseSelection ? hoseLengthUnit : undefined,
     quantity: Math.max(1, Math.floor(quantity || 1)),
     unit: unit || 'Nos',
     customer_discount_pct: Number.isFinite(Number(customerDiscountPct)) ? Number(customerDiscountPct) : null,
@@ -1144,12 +1249,27 @@ export function ValveConfigurator({
 
   const finishAndEmit = () => {
     if (requiresFittingsAddon && !fittingsComplete) return
+    if (!hoseLengthValid) return
     const requiredMissing = Object.values(componentPricing).some(
       (entry) => entry.enabled && (suppliers ?? []).length > 0 && !entry.supplier_id,
     )
     if (requiredMissing) return
     onProductComplete(buildAssembled())
     setStage('complete')
+  }
+
+  const goBackFromReview = () => {
+    if (supportsOperatorAccessoryFlow) {
+      if (isDaSa) setStage('actuator')
+      else if (operatorUnlocksAccessories) setStage('accessories')
+      else setStage('operator')
+      return
+    }
+    if (requiresFittingsAddon) {
+      setStage('fittings')
+      return
+    }
+    setStage('valve_specs')
   }
   // ── Stage indicator ───────────────────────────────────────────────────
   // Supplier selection is always the last step before completion.
@@ -1314,6 +1434,41 @@ export function ValveConfigurator({
             </div>
           )}
 
+          {isHoseSelection && (
+            <div className="grid gap-1">
+              <span className="text-[11px] font-medium uppercase tracking-wide text-surface-muted">
+                Length
+              </span>
+              <div className="flex gap-2">
+                <Input
+                  type="number"
+                  min="0"
+                  step="any"
+                  inputMode="decimal"
+                  value={hoseLength}
+                  onChange={(e) => setHoseLength(e.target.value)}
+                  placeholder="e.g. 10"
+                  className="min-w-0 flex-1"
+                />
+                <Select
+                  value={hoseLengthUnit}
+                  onValueChange={(v) => setHoseLengthUnit(v as HoseLengthUnit)}
+                >
+                  <SelectTrigger className="w-[140px] shrink-0">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="m">meters (m)</SelectItem>
+                    <SelectItem value="cm">cm</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {!hoseLengthValid && hoseLength.trim() !== '' && (
+                <p className="text-[12px] text-red-600">Enter a length greater than 0.</p>
+              )}
+            </div>
+          )}
+
           {resolvedValve && (
             <div className="rounded-xl border border-brand-green-200 bg-brand-green-50 p-4">
               <p className="text-[13px] font-semibold text-brand-green-700">
@@ -1329,7 +1484,26 @@ export function ValveConfigurator({
                 {[resolvedValve.end_connection, resolvedValve.pressure].filter(Boolean).join(' | ') || '—'}
               </p>
               <p className="mt-2 font-mono text-[13px] text-brand-green-700">
-                Base Price: {priceText(componentListPrice('valve', resolvedValve.base_price))}
+                {isHoseSelection ? (
+                  <>
+                    List price: {priceText(componentListPrice('valve', resolvedValve.base_price))} / m
+                    {parsedHoseLength != null && (
+                      <>
+                        {' '}
+                        · Hose price ({formatHoseLength(parsedHoseLength, hoseLengthUnit)}):{' '}
+                        {priceText(
+                          hosePriceForLength(
+                            componentListPrice('valve', resolvedValve.base_price),
+                            parsedHoseLength,
+                            hoseLengthUnit,
+                          ),
+                        )}
+                      </>
+                    )}
+                  </>
+                ) : (
+                  <>Base Price: {priceText(componentListPrice('valve', resolvedValve.base_price))}</>
+                )}
               </p>
             </div>
           )}
@@ -1350,7 +1524,7 @@ export function ValveConfigurator({
                       : 'supplier',
                 )
               }
-              disabled={!resolvedValve}
+              disabled={!resolvedValve || !hoseLengthValid}
               className="bg-brand-green-500 text-white hover:bg-brand-green-600"
             >
               {supportsOperatorAccessoryFlow
@@ -1368,8 +1542,9 @@ export function ValveConfigurator({
       {stage === 'fittings' && requiresFittingsAddon && (
         <div className="mt-4 space-y-4">
           <p className="text-[12px] text-surface-muted">
-            A hose has two ends — pick a fitting for each end. Set quantity to 2 on End 1 if both ends
-            use the same fitting, or quantity 1 and then select End 2 separately.
+            A hose has two ends — pick a fitting for each end, or choose Bare Fitting for an end with
+            no fitting. Set quantity to 2 on End 1 if both ends use the same choice, or quantity 1
+            and then select End 2 separately.
           </p>
 
           <HoseFittingEndPicker
@@ -1691,15 +1866,7 @@ export function ValveConfigurator({
           />
 
           <div className="flex items-center justify-between">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => {
-                if (requiresFittingsAddon) setStage('fittings')
-                else if (operatorUnlocksAccessories) setStage('accessories')
-                else setStage('operator')
-              }}
-            >
+            <Button type="button" variant="outline" onClick={goBackFromReview}>
               <ChevronLeft className="mr-1 size-4" /> Back
             </Button>
             <Button

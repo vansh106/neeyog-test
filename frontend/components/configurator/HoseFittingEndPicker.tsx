@@ -14,9 +14,11 @@ import { cn, formatCurrency, isPositivePrice } from '@/lib/utils'
 import { computeDistinctOptions, useValveCatalog, type CatalogRow } from '@/hooks/useValveCatalog'
 import { mastersApi } from '@/lib/api'
 import {
+  BARE_FITTING_CATALOG_KEY,
   filterFittingCascadeSteps,
   FITTING_CATALOG_OPTIONS,
   fittingCategoryLabel,
+  isBareFittingSelection,
 } from '@/lib/configuratorProductFlow'
 import type { CascadeStep, ValveProduct, ValveSpecSelections } from '@/types'
 
@@ -72,6 +74,11 @@ function catalogRowToValveProduct(
     end_connection_2: g('end_connection_2'),
     hose_nipple_moc: g('hose_nipple_moc'),
     hose_cap_moc: g('hose_cap_moc'),
+    sms_nut_moc: g('sms_nut_moc'),
+    tc_od: g('tc_od'),
+    din_nut_moc: g('din_nut_moc'),
+    swivel_nut_moc: g('swivel_nut_moc'),
+    flange_nut_moc: g('flange_nut_moc'),
     rating: g('rating'),
     temperature_range: g('temperature_range'),
     wall_thickness: g('wall_thickness'),
@@ -115,7 +122,13 @@ export function HoseFittingEndPicker({
     getOptions,
     resolve,
     rowCount,
-  } = useValveCatalog(specs.catalog_category)
+  } = useValveCatalog(
+    specs.catalog_category && !isBareFittingSelection(specs.catalog_category)
+      ? specs.catalog_category
+      : null,
+  )
+
+  const bareSelected = isBareFittingSelection(specs.catalog_category)
 
   const categoryLabel = useMemo(
     () => fittingCategoryLabel(specs.catalog_category),
@@ -125,7 +138,7 @@ export function HoseFittingEndPicker({
   useEffect(() => {
     let cancelled = false
     const cat = specs.catalog_category
-    if (!cat) {
+    if (!cat || isBareFittingSelection(cat)) {
       setCascadeSteps([])
       return
     }
@@ -143,7 +156,7 @@ export function HoseFittingEndPicker({
   }, [specs.catalog_category])
 
   useEffect(() => {
-    if (!specs.catalog_category) return
+    if (!specs.catalog_category || isBareFittingSelection(specs.catalog_category)) return
     void loadCatalog(specs.catalog_category)
   }, [specs.catalog_category, loadCatalog])
 
@@ -166,7 +179,12 @@ export function HoseFittingEndPicker({
   }, [specs, catalog, getOptions, visibleCascadeSteps])
 
   const resolved = useMemo((): ValveProduct | null => {
-    if (!specs.catalog_category || catalog.length === 0 || visibleCascadeSteps.length === 0) {
+    if (
+      !specs.catalog_category ||
+      isBareFittingSelection(specs.catalog_category) ||
+      catalog.length === 0 ||
+      visibleCascadeSteps.length === 0
+    ) {
       return null
     }
     const filters: Record<string, string> = {}
@@ -217,6 +235,10 @@ export function HoseFittingEndPicker({
   const pickCategory = (key: string) => {
     onSpecsChange({ catalog_category: key, field_values: {} })
     void loadCatalog(key, true)
+  }
+
+  const pickBareFitting = () => {
+    onSpecsChange({ catalog_category: BARE_FITTING_CATALOG_KEY, field_values: {} })
   }
 
   const pickSpec = (field: string, value: string) => {
@@ -282,13 +304,36 @@ export function HoseFittingEndPicker({
             </button>
           )
         })}
+        <button
+          type="button"
+          onClick={pickBareFitting}
+          className={cn(
+            'rounded-xl border p-3 text-left transition',
+            bareSelected
+              ? 'border-2 border-brand-green-500 bg-brand-green-50'
+              : 'border-surface-border bg-white hover:bg-surface-page',
+          )}
+        >
+          <p className="text-[13px] font-semibold text-gray-900 leading-snug">Bare Fitting</p>
+          <p className="mt-0.5 text-[11px] text-surface-muted">No fitting on this hose end</p>
+        </button>
       </div>
 
-      {specs.catalog_category && catalogError && (
+      {bareSelected && (
+        <div className="rounded-xl border border-brand-green-200 bg-brand-green-50 p-4">
+          <p className="text-[13px] font-semibold text-brand-green-700">
+            <Check className="mr-1 inline size-4" />
+            Bare fitting — no fitting on this hose end
+            {showQuantity && quantity === 2 ? ' (both ends)' : ''}
+          </p>
+        </div>
+      )}
+
+      {specs.catalog_category && !bareSelected && catalogError && (
         <p className="text-[12px] text-red-600">{catalogError}</p>
       )}
 
-      {specs.catalog_category && catalogLoading && (
+      {specs.catalog_category && !bareSelected && catalogLoading && (
         <div className="flex items-center gap-2 text-[12px] text-surface-muted">
           <Loader2 className="size-4 animate-spin" />
           Loading {categoryLabel || specs.catalog_category} catalog
@@ -296,7 +341,7 @@ export function HoseFittingEndPicker({
         </div>
       )}
 
-      {specs.catalog_category && !catalogLoading && visibleCascadeSteps.length > 0 && (
+      {specs.catalog_category && !bareSelected && !catalogLoading && visibleCascadeSteps.length > 0 && (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           {visibleCascadeSteps.map((step, idx) => {
             const field = step.key

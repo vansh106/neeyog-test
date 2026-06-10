@@ -46,6 +46,27 @@ def is_quotation_work_related(
         "thank you for subscribing",
         "reset your password",
         "verify your email",
+        # Calendar / meeting / personal — not buyer RFQs
+        "google meet",
+        "meet.google.com",
+        "zoom.us",
+        "microsoft teams",
+        "teams meeting",
+        "calendar invitation",
+        "invitation from google calendar",
+        "accepted:",
+        "declined:",
+        "interview",
+        "backend interview",
+        "notes: meeting",
+        "notes: '",
+        "gemini",
+        "has shared a document",
+        "out of office",
+        "automatic reply",
+        "auto-reply",
+        "delivery status notification",
+        "mail delivery failed",
     ]
 
     portal_terms = _csv_terms(cfg.email_portal_signal_terms)
@@ -62,6 +83,13 @@ def is_quotation_work_related(
     if is_marketing and not (product and has_size_hint):
         return False
 
+    # Subject-led meeting / notes mail (e.g. Gemini "Notes: Meeting on …")
+    subj = (subject or "").strip().lower()
+    if subj.startswith("notes:") or subj.startswith("accepted:") or subj.startswith("declined:"):
+        return False
+    if "meeting on" in subj and not (commerce and product):
+        return False
+
     if portal:
         if commerce or product:
             return True
@@ -75,6 +103,10 @@ def is_quotation_work_related(
     # Short RFQs: price/quote language + sizing without the word "valve"
     if commerce and has_size_hint:
         return True
+
+    # Commerce-only without product/size is usually not a valve RFQ (internal mail, follow-ups).
+    if commerce and not product and not has_size_hint:
+        return False
 
     return False
 

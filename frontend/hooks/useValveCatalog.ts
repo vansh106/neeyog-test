@@ -75,6 +75,15 @@ function cellMatchesSelected(rowVal: unknown, selected: string): boolean {
   return String(rowVal).trim() === selected.trim()
 }
 
+/** Ascending order for cascade dropdowns (sizes, DN, mm labels, etc.). */
+export function compareCatalogOptionValues(a: string, b: string): number {
+  return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' })
+}
+
+export function sortCatalogOptions(values: string[]): string[] {
+  return [...values].sort(compareCatalogOptionValues)
+}
+
 /** Distinct non-empty values for `field` after applying `priorFilters` (AND). */
 export function computeDistinctOptions(catalog: CatalogRow[], field: string, priorFilters: Filters): string[] {
   const filtered = catalog.filter((row) => {
@@ -96,7 +105,7 @@ export function computeDistinctOptions(catalog: CatalogRow[], field: string, pri
     seen.add(str)
     result.push(str)
   }
-  return result.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
+  return sortCatalogOptions(result)
 }
 
 /** First row matching all non-empty filters, or null if none. */

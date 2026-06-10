@@ -636,6 +636,11 @@ export interface ValveProduct {
   end_connection_2?: string | null
   hose_nipple_moc?: string | null
   hose_cap_moc?: string | null
+  sms_nut_moc?: string | null
+  tc_od?: string | null
+  din_nut_moc?: string | null
+  swivel_nut_moc?: string | null
+  flange_nut_moc?: string | null
   bore_type: string | null
   end_connection: string | null
   pressure: string | null
@@ -731,8 +736,12 @@ export interface AssembledProduct {
   fitting?: ValveProduct | null
   /** Hose end 1 fitting (primary; qty 2 covers both ends with same SKU). */
   fitting_end_1?: ValveProduct | null
+  /** End 1 explicitly has no fitting. */
+  fitting_end_1_bare?: boolean
   /** Hose end 2 fitting when ``fitting_end_1_qty`` is 1. */
   fitting_end_2?: ValveProduct | null
+  /** End 2 explicitly has no fitting. */
+  fitting_end_2_bare?: boolean
   /** Qty of end-1 fitting on the hose assembly (1 = second end needs its own pick). */
   fitting_end_1_qty?: 1 | 2
   operator_key: OperatorKey | null
@@ -757,6 +766,9 @@ export interface AssembledProduct {
   positioner: AccessoryItem | null
   bracket: BracketCoupler | null
   include_bracket: boolean
+  /** Cut length for hose products (masters price is per meter). */
+  hose_length?: number | null
+  hose_length_unit?: 'm' | 'cm' | null
   quantity: number
   unit?: string | null
   customer_discount_pct?: number | null
