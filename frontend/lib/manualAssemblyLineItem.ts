@@ -10,7 +10,17 @@ import type {
   ValveProduct,
 } from '@/types'
 import { isPositivePrice } from '@/lib/utils'
-import { isHoseCatalogCategory } from '@/lib/configuratorProductFlow'
+import { isTemporaryAccessory } from '@/lib/accessoriesNav'
+import {
+  isHoseCatalogCategory,
+  isOthersCatalogCategory,
+  isTemporaryCatalogCategory,
+} from '@/lib/configuratorProductFlow'
+import {
+  damperDisplayTitle,
+  damperFieldsForKey,
+  isDamperCatalogCategory,
+} from '@/lib/damperSchema'
 import {
   formatHoseLength,
   hoseLengthToMeters,
@@ -73,6 +83,15 @@ function productCascadeFields(
 function assemblyProductTitle(p: AssembledProduct): string {
   const v = p.valve
   if (!v) return 'Assembly'
+  if (p.is_temporary || isTemporaryCatalogCategory(v.catalog_category)) {
+    return (v.temporary_description ?? v.type).trim() || 'Temporary product'
+  }
+  if (isOthersCatalogCategory(v.catalog_category)) {
+    return v.type?.trim() || 'Other product'
+  }
+  if (v.catalog_category && isDamperCatalogCategory(v.catalog_category)) {
+    return damperDisplayTitle(v.catalog_category, v.damper_field_values ?? {})
+  }
   if (isHoseCatalogCategory(v.catalog_category)) {
     const parts = [v.type, v.variant_type, v.size_id_mm].filter(Boolean)
     if (p.hose_length != null) {
@@ -102,6 +121,10 @@ export function operatorLabel(k: OperatorKey | null): string {
       return 'Single Acting (SA)'
     case 'electric_actuator':
       return 'Electric Actuator'
+    case 'pneumatic_rack_pinion':
+      return 'Pneumatic Rack and Pinion Actuator'
+    case 'pneumatic_cylinder':
+      return 'Pneumatic Cylinder'
     default:
       return '—'
   }
@@ -150,7 +173,7 @@ export function assemblyPartUnitMultiplier(label: string, p: AssembledProduct): 
 export function catalogPartsForAssembly(p: AssembledProduct): CatalogPart[] {
   const parts: CatalogPart[] = []
   const v = p.valve
-  if (v?.id) {
+  if (v?.id && !isTemporaryCatalogCategory(v.catalog_category)) {
     const ct = valveCatalogTable(v)
     if (ct) parts.push({ label: 'Hose', catalog_table: ct, catalog_row_id: v.id })
   }
@@ -174,16 +197,22 @@ export function catalogPartsForAssembly(p: AssembledProduct): CatalogPart[] {
   if ((p.operator_key === 'da' || p.operator_key === 'sa') && p.operator_model?.id) {
     parts.push({ label: 'Operator', catalog_table: 'operator', catalog_row_id: p.operator_model.id })
   }
-  if (p.sov?.id) parts.push({ label: 'SOV', catalog_table: 'sov', catalog_row_id: p.sov.id })
-  if (p.limit_switch_box?.id) {
+  if (p.sov?.id && !isTemporaryAccessory(p.sov)) {
+    parts.push({ label: 'SOV', catalog_table: 'sov', catalog_row_id: p.sov.id })
+  }
+  if (p.limit_switch_box?.id && !isTemporaryAccessory(p.limit_switch_box)) {
     parts.push({
       label: 'Limit switch',
       catalog_table: 'limit_switch_box',
       catalog_row_id: p.limit_switch_box.id,
     })
   }
-  if (p.positioner?.id) {
-    parts.push({ label: 'Positioner', catalog_table: 'positioner', catalog_row_id: p.positioner.id })
+  if (p.positioner?.id && !isTemporaryAccessory(p.positioner)) {
+    parts.push({
+      label: 'Positioner',
+      catalog_table: 'positioner',
+      catalog_row_id: p.positioner.id,
+    })
   }
   if (p.include_bracket && p.bracket?.id) {
     parts.push({
@@ -200,6 +229,9 @@ export function assemblyLabel(p: AssembledProduct): string {
   const f1 = p.fitting_end_1 ?? p.fitting
   const f2 = p.fitting_end_2
   if (!v && !f1 && !f2) return 'Assembly'
+  if (p.is_temporary || (v && isTemporaryCatalogCategory(v.catalog_category))) {
+    return (v?.temporary_description ?? v?.type ?? 'Temporary product').trim()
+  }
   const hosePart = v
     ? [
         [v.type, v.construction, v.valve_size ?? v.size_id_mm].filter(Boolean).join(' — '),
@@ -294,7 +326,21 @@ export function assembledToLineItem(
 
   const cascade: Record<string, string> = {}
   if (v) {
-    if (isHoseCatalogCategory(v.catalog_category)) {
+    if (p.is_temporary || isTemporaryCatalogCategory(v.catalog_category)) {
+      const desc = (v.temporary_description ?? v.type).trim()
+      if (desc) cascade.description = desc
+      if (p.temporary_product_family) cascade.product_family = p.temporary_product_family
+    } else if (isOthersCatalogCategory(v.catalog_category)) {
+      if (v.type) cascade.description = v.type.trim()
+    } else if (isDamperCatalogCategory(v.catalog_category)) {
+      const fv = v.damper_field_values ?? {}
+      for (const f of damperFieldsForKey(v.catalog_category!)) {
+        const val = fv[f.key]?.trim()
+        if (!val) continue
+        const cascadeKey = f.sub_label ? `${f.key}` : f.key
+        cascade[cascadeKey] = val
+      }
+    } else if (isHoseCatalogCategory(v.catalog_category)) {
       Object.assign(cascade, productCascadeFields(v, HOSE_CASCADE_KEYS))
     } else {
       Object.assign(cascade, productCascadeFields(v, VALVE_CASCADE_KEYS))
@@ -330,16 +376,37 @@ export function assembledToLineItem(
       if (p.operator_model.size) cascade.operator_size = p.operator_model.size
     }
   }
-  if (p.sov) cascade.sov = p.sov.type
-  if (p.limit_switch_box) cascade.limit_switch_box = p.limit_switch_box.type
-  if (p.positioner) cascade.positioner = p.positioner.type
+  if (p.sov) {
+    cascade.sov = isTemporaryAccessory(p.sov)
+      ? `${p.sov.temporary_description ?? p.sov.type} (custom)`
+      : p.sov.type
+  }
+  if (p.limit_switch_box) {
+    cascade.limit_switch_box = isTemporaryAccessory(p.limit_switch_box)
+      ? `${p.limit_switch_box.temporary_description ?? p.limit_switch_box.type} (custom)`
+      : p.limit_switch_box.type
+  }
+  if (p.positioner) {
+    cascade.positioner = isTemporaryAccessory(p.positioner)
+      ? `${p.positioner.temporary_description ?? p.positioner.type} (custom)`
+      : p.positioner.type
+  }
   if (p.include_bracket && p.bracket) cascade.bracket_coupler = `Included (${p.bracket.size})`
   if (p.supplier_name) cascade.supplier = p.supplier_name
   if (p.supplier_id) cascade.supplier_id = p.supplier_id
 
+  const category =
+    p.is_temporary || isTemporaryCatalogCategory(v?.catalog_category)
+      ? 'temporary_product'
+      : isOthersCatalogCategory(v?.catalog_category)
+        ? v?.catalog_category ?? 'others'
+        : isDamperCatalogCategory(v?.catalog_category)
+          ? v?.catalog_category ?? 'fp_damper'
+          : catalogTable ?? 'unknown'
+
   return {
     id: p.id,
-    category: catalogTable ?? 'unknown',
+    category,
     cascadeSelections: cascade,
     selectedProduct: sel,
     quantity: p.quantity,

@@ -478,6 +478,14 @@ export const MASTER_SIDEBAR_NAV: MasterNavNode[] = [
   },
   {
     kind: 'group',
+    label: 'Dampers',
+    children: [
+      { kind: 'leaf', key: 'fp_damper_butterfly', label: 'Butterfly Damper' },
+      { kind: 'leaf', key: 'fp_damper_multi_louver', label: 'Multi-Louver Damper' },
+    ],
+  },
+  {
+    kind: 'group',
     label: 'Hose Fittings',
     children: [
       { kind: 'leaf', key: 'fp_fittings_sms_nut', label: 'SMS Nut' },

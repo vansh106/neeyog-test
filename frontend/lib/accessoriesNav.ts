@@ -101,6 +101,29 @@ export type AccessorySelectGroup = {
   items: AccessoryItem[]
 }
 
+export const TEMPORARY_ACCESSORY_ID_PREFIX = 'temporary_accessory:'
+
+export function isTemporaryAccessory(item: AccessoryItem | null | undefined): boolean {
+  if (!item) return false
+  return item.is_temporary === true || item.id.startsWith(TEMPORARY_ACCESSORY_ID_PREFIX)
+}
+
+export function buildTemporaryAccessory(
+  description: string,
+  price: number,
+  stableId?: string,
+): AccessoryItem {
+  const desc = description.trim()
+  return {
+    id: stableId ?? `${TEMPORARY_ACCESSORY_ID_PREFIX}${crypto.randomUUID()}`,
+    sr_no: 0,
+    type: desc,
+    price,
+    is_temporary: true,
+    temporary_description: desc,
+  }
+}
+
 export function groupAccessoryItems(
   items: AccessoryItem[],
   subcategories: AccessorySubcategory[],

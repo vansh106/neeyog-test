@@ -75,13 +75,13 @@ export function catalogPartForSupplierPrice(
   ) {
     return { catalog_table: 'operator', catalog_row_id: String(ctx.operatorModel.id) }
   }
-  if (key === 'sov' && ctx.sov?.id) {
+  if (key === 'sov' && ctx.sov?.id && !ctx.sov.id.startsWith('temporary_accessory:')) {
     return { catalog_table: 'sov', catalog_row_id: String(ctx.sov.id) }
   }
-  if (key === 'lsb' && ctx.lsb?.id) {
+  if (key === 'lsb' && ctx.lsb?.id && !ctx.lsb.id.startsWith('temporary_accessory:')) {
     return { catalog_table: 'limit_switch_box', catalog_row_id: String(ctx.lsb.id) }
   }
-  if (key === 'positioner' && ctx.positioner?.id) {
+  if (key === 'positioner' && ctx.positioner?.id && !ctx.positioner.id.startsWith('temporary_accessory:')) {
     return { catalog_table: 'positioner', catalog_row_id: String(ctx.positioner.id) }
   }
   return null

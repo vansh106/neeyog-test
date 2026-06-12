@@ -6,6 +6,7 @@ import { usePathname, useSearchParams } from 'next/navigation'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
+import OthersSidebarNav from '@/components/layout/OthersSidebarNav'
 import {
   MASTER_SIDEBAR_NAV,
   findMasterNavPathForKey,
@@ -167,6 +168,7 @@ export default function MastersSidebarNav() {
           togglePath={togglePath}
         />
       ))}
+      <OthersSidebarNav />
     </div>
   )
 }

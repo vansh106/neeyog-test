@@ -46,6 +46,13 @@ export interface EnquiryResponse {
   }>
 }
 
+export interface EmailApprovalInfo {
+  status: 'pending' | 'approved' | 'rejected' | 'not_applicable' | string
+  decided_at?: string | null
+  decided_by_name?: string | null
+  notes?: string | null
+}
+
 export interface EnquiryDetail {
   enquiry_id: string
   enquiry_number?: string | null
@@ -63,6 +70,9 @@ export interface EnquiryDetail {
   inbox_processed?: boolean
   processing_started_at?: string | null
   processing_completed_at?: string | null
+  email_approval?: EmailApprovalInfo | null
+  requires_email_approval?: boolean
+  is_email_agent_enquiry?: boolean
 }
 
 export interface QuotationLineItem {
@@ -637,6 +647,8 @@ export type OperatorKey =
   | 'da'
   | 'sa'
   | 'electric_actuator'
+  | 'pneumatic_rack_pinion'
+  | 'pneumatic_cylinder'
 
 export interface ValveProduct {
   id: string
@@ -673,6 +685,10 @@ export interface ValveProduct {
   product_sheet?: string | null
   base_price: number | null
   has_price: boolean
+  /** Free-text description when ``catalog_category`` is ``__temporary_product__``. */
+  temporary_description?: string | null
+  /** Matrix damper spec picks (``fp_damper_*`` sheets). */
+  damper_field_values?: Record<string, string> | null
 }
 
 export interface OperatorModel {
@@ -699,6 +715,9 @@ export interface AccessoryItem {
   sr_no: number
   type: string
   price: number | null
+  /** Free-text accessory not in catalog (quotation-specific). */
+  is_temporary?: boolean
+  temporary_description?: string | null
 }
 
 export interface Accessories {
@@ -741,6 +760,8 @@ export interface ValveSpecSelections {
   catalog_variant_type?: string | null
   /** Disambiguates nav label when several leaves share the same catalog key. */
   catalog_nav_slug?: string | null
+  /** Display label for dynamic Others sheets. */
+  catalog_display_label?: string | null
   /** Values keyed by DB / cascade field name. */
   field_values: Record<string, string>
 }
@@ -785,6 +806,10 @@ export interface AssembledProduct {
   /** Cut length for hose products (masters price is per meter). */
   hose_length?: number | null
   hose_length_unit?: 'm' | 'cm' | null
+  /** True when the main product is a free-text temporary line (not from catalog). */
+  is_temporary?: boolean
+  /** Product family context for temporary products. */
+  temporary_product_family?: 'Valves' | 'Hoses' | 'Dampers' | 'Others' | null
   quantity: number
   unit?: string | null
   customer_discount_pct?: number | null
@@ -792,6 +817,31 @@ export interface AssembledProduct {
   has_unknown_prices: boolean
   unknown_components: string[]
   price_breakdown: Array<{ component: string; price: number | null }>
+}
+
+export interface OthersSheet {
+  id: string
+  category_id: string
+  name: string
+  catalog_key: string
+  sort_order: number
+  row_count?: number
+}
+
+export interface OthersCategory {
+  id: string
+  name: string
+  sort_order: number
+  sheets: OthersSheet[]
+}
+
+export interface OthersSheetRow {
+  id: string
+  row_id: string
+  sheet_id: string
+  sr_no: number | null
+  description: string | null
+  price_inr: number | null
 }
 
 export interface MasterSheetDefaultSupplier {

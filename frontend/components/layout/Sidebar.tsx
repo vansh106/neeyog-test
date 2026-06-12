@@ -24,7 +24,7 @@ import { SIDEBAR_WIDTH, useUIStore } from '@/lib/store'
 import { useEmailStore } from '@/stores/emailStore'
 import { Permissions } from '@/lib/permissions'
 import { useAuthStore } from '@/stores/authStore'
-import MastersSidebarNav from '@/components/layout/MastersSidebarNav'
+import MastersSidebarSection from '@/components/layout/MastersSidebarSection'
 
 type NavIcon = typeof LayoutDashboard
 
@@ -145,27 +145,7 @@ export default function Sidebar() {
                   )}
                 </button>
 
-                {!sidebarCollapsed && mastersOpen && (
-                  <div className="mt-1 ml-2 space-y-0.5">
-                    <Link
-                      href="/masters?tab=edit"
-                      className={cn(
-                        'flex items-center gap-3 px-3 py-2 rounded-md text-[12px] transition-colors',
-                        pathname === '/masters' &&
-                          (typeof window !== 'undefined'
-                            ? new URLSearchParams(window.location.search).get('tab') === 'edit'
-                            : false)
-                          ? 'bg-surface-sidebar2 text-white'
-                          : 'text-[#8AAF8E] hover:bg-surface-sidebar2 hover:text-white',
-                      )}
-                    >
-                      <span className="truncate">Edit Masters</span>
-                    </Link>
-                    <Suspense fallback={<div className="px-3 py-2 text-[11px] text-[#8AAF8E]">Loading…</div>}>
-                      <MastersSidebarNav />
-                    </Suspense>
-                  </div>
-                )}
+                {!sidebarCollapsed && mastersOpen && <MastersSidebarSection />}
               </div>
             )
           }

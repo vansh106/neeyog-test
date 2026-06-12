@@ -377,14 +377,30 @@ export default function EmailsPage() {
                       <CheckCircle2 className="size-3.5" />
                       Open quotation
                     </button>
+                  ) : (selectedItem?.status || '').toLowerCase() === 'pending_email_approval' ? (
+                    <button
+                      type="button"
+                      onClick={() => router.push(`/enquiries/${selected}`)}
+                      className="rounded-md bg-amber-500 px-3 py-2 text-[12px] font-medium text-white hover:bg-amber-600 inline-flex items-center gap-2"
+                    >
+                      <Clock className="size-3.5" />
+                      Approve on enquiry page
+                    </button>
                   ) : (
                     <button
                       type="button"
-                      disabled={processBusy || !selected || !!selectedItem?.inbox_processed}
+                      disabled={
+                        processBusy ||
+                        !selected ||
+                        !!selectedItem?.inbox_processed ||
+                        (selectedItem?.status || '').toLowerCase() === 'email_rejected'
+                      }
                       title={
-                        selectedItem?.inbox_processed
-                          ? 'Already processed — open the enquiry to continue'
-                          : undefined
+                        (selectedItem?.status || '').toLowerCase() === 'email_rejected'
+                          ? 'This email was rejected'
+                          : selectedItem?.inbox_processed
+                            ? 'Already processed — open the enquiry to continue'
+                            : undefined
                       }
                       onClick={async () => {
                         if (!selected) return

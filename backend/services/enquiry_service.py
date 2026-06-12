@@ -310,6 +310,62 @@ def _calc_totals(
     return normalized, subtotal, gst_amount, pf_amount, total_amount
 
 
+EMAIL_AGENT_INPUT_TYPES = frozenset({"email", "email_sync", "indiamart"})
+
+
+def is_email_agent_enquiry(e: Enquiry) -> bool:
+    return (e.input_type or "").strip().lower() in EMAIL_AGENT_INPUT_TYPES
+
+
+def email_approval_record(e: Enquiry) -> dict:
+    """Return ``email_approval`` block from parsed_data with sensible defaults."""
+    pd = e.parsed_data if isinstance(e.parsed_data, dict) else {}
+    raw = pd.get("email_approval")
+    if isinstance(raw, dict):
+        return dict(raw)
+    st = (e.status or "").strip().lower()
+    if st == "pending_email_approval":
+        return {"status": "pending"}
+    if st == "email_rejected":
+        return {"status": "rejected"}
+    if st == "email_approved" or pd.get("matcher") or e.processing_started_at:
+        return {"status": "approved"}
+    if is_email_agent_enquiry(e):
+        return {"status": "pending"}
+    return {"status": "not_applicable"}
+
+
+def requires_email_approval(e: Enquiry) -> bool:
+    if not is_email_agent_enquiry(e):
+        return False
+    return (email_approval_record(e).get("status") or "").strip().lower() == "pending"
+
+
+def is_email_approved_for_matcher(e: Enquiry) -> bool:
+    if not is_email_agent_enquiry(e):
+        return True
+    st = (email_approval_record(e).get("status") or "").strip().lower()
+    if st == "approved":
+        return True
+    if st == "rejected":
+        return False
+    # Legacy rows that already ran matcher before approval gate existed.
+    pd = e.parsed_data if isinstance(e.parsed_data, dict) else {}
+    if pd.get("matcher") or e.processing_started_at:
+        return True
+    return False
+
+
+def _initial_email_enquiry_fields(input_type: str) -> tuple[str, dict | None]:
+    it = (input_type or "").strip().lower()
+    if it in EMAIL_AGENT_INPUT_TYPES:
+        return (
+            "pending_email_approval",
+            {"email_approval": {"status": "pending"}},
+        )
+    return "received", None
+
+
 async def create_enquiry(
     email_text: str,
     input_type: str = "email",
@@ -328,6 +384,7 @@ async def create_enquiry(
     cb_uid = created_by_user_id
     cb_raw = (created_by_name or "").strip()
     cb_name = cb_raw[:255] if cb_raw else None
+    initial_status, initial_parsed = _initial_email_enquiry_fields(input_type)
 
     if db:
         eno = await allocate_enquiry_number(db)
@@ -336,7 +393,8 @@ async def create_enquiry(
             client_config="parth_valves",
             raw_input=email_text.strip(),
             input_type=input_type,
-            status="received",
+            status=initial_status,
+            parsed_data=initial_parsed,
             mailbox_id=mailbox_id,
             created_by_user_id=cb_uid,
             created_by_name=cb_name,
@@ -352,7 +410,8 @@ async def create_enquiry(
                 client_config="parth_valves",
                 raw_input=email_text.strip(),
                 input_type=input_type,
-                status="received",
+                status=initial_status,
+                parsed_data=initial_parsed,
                 mailbox_id=mailbox_id,
                 created_by_user_id=cb_uid,
                 created_by_name=cb_name,
@@ -654,11 +713,114 @@ async def _latest_quotation_for_enquiry(
     return result.scalar_one_or_none()
 
 
+async def decide_email_approval(
+    enquiry_id: str,
+    decision: str,
+    db: AsyncSession,
+    *,
+    decided_by_user_id: uuid.UUID | None = None,
+    decided_by_name: str | None = None,
+    notes: str = "",
+) -> dict:
+    """Approve or reject an inbound email enquiry before product matching."""
+    dec = (decision or "").strip().lower()
+    if dec not in ("approve", "reject"):
+        raise EnquiryParseError("decision must be 'approve' or 'reject'")
+
+    e = await get_enquiry(enquiry_id, db)
+    if not is_email_agent_enquiry(e):
+        raise EnquiryParseError("Email approval applies only to email / IndiaMart enquiries")
+
+    approval = email_approval_record(e)
+    cur = (approval.get("status") or "").strip().lower()
+    if cur == "rejected":
+        raise EnquiryParseError("This email enquiry was already rejected")
+    if cur == "approved" and is_email_approved_for_matcher(e):
+        if dec == "reject":
+            raise EnquiryParseError("Cannot reject an enquiry that is already approved and processed")
+        if e.processing_started_at or (isinstance(e.parsed_data, dict) and e.parsed_data.get("matcher")):
+            existing_q = await _latest_quotation_for_enquiry(e.id, db)
+            pd = e.parsed_data if isinstance(e.parsed_data, dict) else {}
+            return {
+                "enquiry_id": str(e.id),
+                "enquiry_number": (e.enquiry_number or "").strip() or None,
+                "status": e.status,
+                "flow_type": e.flow_type,
+                "message": "Email already approved — matcher has run.",
+                "email_approval": email_approval_record(e),
+                "quotation_id": str(existing_q.id) if existing_q else pd.get("quotation_id"),
+                "already_processed": True,
+            }
+
+    now = datetime.now(timezone.utc)
+    actor = (decided_by_name or "").strip() or None
+    pd = dict(e.parsed_data or {})
+    pd["email_approval"] = {
+        "status": "approved" if dec == "approve" else "rejected",
+        "decided_at": now.isoformat(),
+        "decided_by_name": actor,
+        "decided_by_user_id": str(decided_by_user_id) if decided_by_user_id else None,
+        "notes": (notes or "").strip() or None,
+    }
+    e.parsed_data = pd
+
+    if dec == "reject":
+        e.status = "email_rejected"
+        e.flow_type = "rejected"
+        e.error_message = (notes or "").strip() or "Email enquiry rejected — product matching skipped."
+        await db.commit()
+        await db.refresh(e)
+        audit = AuditLog(
+            id=uuid.uuid4(),
+            entity_type="enquiry",
+            entity_id=e.id,
+            action="email_enquiry_rejected",
+            performed_by=actor or "user",
+            details={"notes": notes or None},
+        )
+        db.add(audit)
+        await db.commit()
+        return {
+            "enquiry_id": str(e.id),
+            "enquiry_number": (e.enquiry_number or "").strip() or None,
+            "status": e.status,
+            "flow_type": e.flow_type,
+            "message": "Email enquiry rejected — no product matching will run.",
+            "email_approval": email_approval_record(e),
+            "quotation_id": None,
+            "already_processed": False,
+        }
+
+    e.status = "email_approved"
+    await db.commit()
+    await db.refresh(e)
+
+    audit = AuditLog(
+        id=uuid.uuid4(),
+        entity_type="enquiry",
+        entity_id=e.id,
+        action="email_enquiry_approved",
+        performed_by=actor or "user",
+        details={"notes": notes or None},
+    )
+    db.add(audit)
+    await db.commit()
+
+    matcher_result = await process_email_matcher(enquiry_id, db)
+    matcher_result["email_approval"] = email_approval_record(await get_enquiry(enquiry_id, db))
+    matcher_result["already_processed"] = False
+    return matcher_result
+
+
 async def process_email_matcher(enquiry_id: str, db: AsyncSession) -> dict:
     """Run deterministic matcher; auto-quote when product is complete and uniquely resolved."""
     from services.email_matcher_service import persist_matcher_on_enquiry
 
     e = await get_enquiry(enquiry_id, db)
+    if is_email_agent_enquiry(e) and not is_email_approved_for_matcher(e):
+        raise EnquiryParseError(
+            "This email must be approved on the enquiry detail page before product matching can run."
+        )
     existing_q = await _latest_quotation_for_enquiry(e.id, db)
     if existing_q is not None:
         pd = e.parsed_data if isinstance(e.parsed_data, dict) else {}
@@ -1381,14 +1543,20 @@ async def get_enquiry(enquiry_id: str, db: AsyncSession) -> Enquiry:
 
 def enquiry_inbox_pipeline_processed(e: Enquiry) -> bool:
     """True once AI/manual pipeline has touched the enquiry or a quote exists."""
+    st = (e.status or "").strip().lower()
+    if st == "pending_email_approval":
+        return False
+    if st == "email_rejected":
+        return True
+    if requires_email_approval(e):
+        return False
     pd = e.parsed_data if isinstance(e.parsed_data, dict) else {}
     has_quotation = bool(getattr(e, "branch_id", None)) or bool(pd.get("quotation_id"))
-    st = (e.status or "").strip().lower()
     return bool(
         e.processing_started_at is not None
         or e.processing_completed_at is not None
         or has_quotation
-        or (st and st != "received")
+        or (st and st not in ("received", "email_approved"))
     )
 
 
@@ -1484,7 +1652,10 @@ def _format_for_inbox(e: Enquiry) -> dict:
                 break
 
     awaiting_human = bool(
-        getattr(e, "client_verification_status", None) == "pending" or e.status == "pending_approval"
+        getattr(e, "client_verification_status", None) == "pending"
+        or e.status == "pending_approval"
+        or e.status == "pending_email_approval"
+        or requires_email_approval(e)
     )
 
     has_quotation = bool(getattr(e, "branch_id", None)) or bool(

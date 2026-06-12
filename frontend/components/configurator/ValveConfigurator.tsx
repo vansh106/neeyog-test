@@ -1,10 +1,11 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Check, ChevronLeft, ChevronRight, Loader2, Pencil, Trash2 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import {
   Select,
   SelectContent,
@@ -16,8 +17,12 @@ import {
 } from '@/components/ui/select'
 import {
   accessoryItemsForCategory,
+  buildTemporaryAccessory,
   getConfiguratorAccessoryCategories,
   groupAccessoryItems,
+  isTemporaryAccessory,
+  TEMPORARY_ACCESSORY_ID_PREFIX,
+  type AccessoryCatalogKey,
   type AccessorySubcategory,
 } from '@/lib/accessoriesNav'
 import { cn, formatCurrency, formatPriceOrTbd, isPositivePrice, PRICE_TBD_LABEL } from '@/lib/utils'
@@ -32,7 +37,9 @@ import {
   fetchSupplierListPriceInr,
   type SupplierPriceComponentKey,
 } from '@/lib/supplierCatalogPrice'
-import ConfiguratorCategoryPicker from '@/components/configurator/ConfiguratorCategoryPicker'
+import ConfiguratorCategoryPicker, {
+  type ConfiguratorProductFamily,
+} from '@/components/configurator/ConfiguratorCategoryPicker'
 import {
   type ConfiguratorCatalogPick,
   configuratorLeafLabel,
@@ -42,8 +49,11 @@ import {
   hoseRequiresFittings,
   isBareFittingSelection,
   isHoseCatalogCategory,
+  isOthersCatalogCategory,
+  isTemporaryCatalogCategory,
   operatorValveTypeForCategory,
   supportsOperatorAccessoryFlowCategory,
+  TEMPORARY_PRODUCT_CATALOG_KEY,
 } from '@/lib/configuratorProductFlow'
 import {
   formatHoseLength,
@@ -51,7 +61,14 @@ import {
   parseHoseLengthInput,
   type HoseLengthUnit,
 } from '@/lib/hoseLengthPricing'
+import DamperSpecFields from '@/components/configurator/DamperSpecFields'
 import { HoseFittingEndPicker } from '@/components/configurator/HoseFittingEndPicker'
+import {
+  damperDisplayTitle,
+  damperSpecsComplete,
+  isDamperCatalogCategory,
+  mergeDamperOperatorOptions,
+} from '@/lib/damperSchema'
 import { useConfiguratorAccessories, useSheetDefaultSuppliers } from '@/lib/queries'
 import type {
   Accessories,
@@ -254,6 +271,14 @@ function inferCatalogCategoryFromValve(v: ValveProduct): string | null {
 /** Rehydrate cascade state from a saved catalog row (legacy rows may omit ``catalog_category``). */
 function valveProductToSpecs(v: ValveProduct): ValveSpecSelections {
   const catalog_category = v.catalog_category ?? inferCatalogCategoryFromValve(v)
+  if (catalog_category && isDamperCatalogCategory(catalog_category)) {
+    return {
+      catalog_category,
+      catalog_variant_type: null,
+      catalog_nav_slug: null,
+      field_values: { ...(v.damper_field_values ?? {}) },
+    }
+  }
   const field_values: Record<string, string> = {}
   const pairs: [string, string | null | undefined][] = [
     ['variant_type', v.variant_type],
@@ -293,6 +318,14 @@ function stripMasconPrefix(label: string): string {
   return label.replace(/^Mascon\s*—\s*/i, '').trim()
 }
 
+const PRICE_ON_REQUEST_OPERATOR_KEYS = new Set<OperatorKey>([
+  'manual',
+  'gear_box',
+  'electric_actuator',
+  'pneumatic_rack_pinion',
+  'pneumatic_cylinder',
+])
+
 function OperatorKeyLabel(key: OperatorKey | null): string {
   switch (key) {
     case 'bare_shaft':
@@ -307,6 +340,10 @@ function OperatorKeyLabel(key: OperatorKey | null): string {
       return 'Single Acting (SA)'
     case 'electric_actuator':
       return 'Electric Actuator'
+    case 'pneumatic_rack_pinion':
+      return 'Pneumatic Rack and Pinion Actuator'
+    case 'pneumatic_cylinder':
+      return 'Pneumatic Cylinder'
     default:
       return '—'
   }
@@ -362,17 +399,28 @@ export function CompletedProductCard({
       </div>
 
       <div className="mt-3 space-y-1 text-[13px]">
-        {v && (
+        {product.is_temporary || isTemporaryCatalogCategory(v?.catalog_category) ? (
           <>
-            <p className="font-semibold text-gray-900">
-              {v.type}, {v.construction ?? ''}
-              {v.valve_size ? `, ${v.valve_size}` : ''}
+            <p className="text-[11px] font-medium uppercase tracking-wide text-brand-gold-700">
+              Temporary product
             </p>
-            {mat && <p className="text-surface-muted">{mat}</p>}
-            <p className="text-surface-muted">
-              {[v.end_connection, v.pressure].filter(Boolean).join(' | ')}
+            <p className="font-semibold text-gray-900">
+              {(v?.temporary_description ?? v?.type ?? 'Temporary product').trim()}
             </p>
           </>
+        ) : (
+          v && (
+            <>
+              <p className="font-semibold text-gray-900">
+                {v.type}, {v.construction ?? ''}
+                {v.valve_size ? `, ${v.valve_size}` : ''}
+              </p>
+              {mat && <p className="text-surface-muted">{mat}</p>}
+              <p className="text-surface-muted">
+                {[v.end_connection, v.pressure].filter(Boolean).join(' | ')}
+              </p>
+            </>
+          )
         )}
         {product.supplier_name && (
           <p className="text-surface-muted">
@@ -383,12 +431,23 @@ export function CompletedProductCard({
           Operator: {OperatorKeyLabel(product.operator_key)}
           {product.operator_model ? ` — ${product.operator_model.model_name}` : ''}
         </p>
-        {product.sov && <p className="text-surface-muted">SOV: {product.sov.type}</p>}
+        {product.sov && (
+          <p className="text-surface-muted">
+            SOV: {product.sov.type}
+            {isTemporaryAccessory(product.sov) ? ' (custom)' : ''}
+          </p>
+        )}
         {product.limit_switch_box && (
-          <p className="text-surface-muted">LSB: {product.limit_switch_box.type}</p>
+          <p className="text-surface-muted">
+            LSB: {product.limit_switch_box.type}
+            {isTemporaryAccessory(product.limit_switch_box) ? ' (custom)' : ''}
+          </p>
         )}
         {product.positioner && (
-          <p className="text-surface-muted">Positioner: {product.positioner.type}</p>
+          <p className="text-surface-muted">
+            Positioner: {product.positioner.type}
+            {isTemporaryAccessory(product.positioner) ? ' (custom)' : ''}
+          </p>
         )}
         {(product.fitting_end_1_bare || product.fitting_end_1 || product.fitting) && (
           <p className="text-surface-muted">
@@ -456,7 +515,50 @@ export function ValveConfigurator({
   suppliers = [],
 }: Props) {
   const [stage, setStage] = useState<Stage>('valve_specs')
+  const [isTemporaryProduct, setIsTemporaryProduct] = useState(
+    () =>
+      initialProduct?.is_temporary === true ||
+      isTemporaryCatalogCategory(initialProduct?.valve?.catalog_category),
+  )
+  const [temporaryDescription, setTemporaryDescription] = useState(() => {
+    if (
+      initialProduct?.is_temporary ||
+      isTemporaryCatalogCategory(initialProduct?.valve?.catalog_category)
+    ) {
+      return (
+        initialProduct?.valve?.temporary_description ??
+        initialProduct?.valve?.type ??
+        ''
+      ).trim()
+    }
+    return ''
+  })
+  const [temporaryFamily, setTemporaryFamily] = useState<ConfiguratorProductFamily | null>(
+    () => initialProduct?.temporary_product_family ?? null,
+  )
+  const temporaryProductIdRef = useRef(
+    initialProduct?.valve?.id?.startsWith('temporary_product:')
+      ? initialProduct.valve.id
+      : `temporary_product:${crypto.randomUUID()}`,
+  )
+  const damperProductIdRef = useRef<string | null>(
+    initialProduct?.valve?.catalog_category &&
+      isDamperCatalogCategory(initialProduct.valve.catalog_category)
+      ? initialProduct.valve.id
+      : null,
+  )
   const [specs, setSpecs] = useState<ValveSpecSelections>(() => {
+    if (
+      initialProduct?.is_temporary ||
+      isTemporaryCatalogCategory(initialProduct?.valve?.catalog_category)
+    ) {
+      return {
+        catalog_category: TEMPORARY_PRODUCT_CATALOG_KEY,
+        catalog_variant_type: null,
+        catalog_nav_slug: null,
+        field_values: {},
+      }
+    }
     if (initialProduct?.valve) return valveProductToSpecs(initialProduct.valve)
     if (initialSpecSeed?.catalog_category) {
       return {
@@ -499,8 +601,13 @@ export function ValveConfigurator({
     initialProduct?.hose_length_unit ?? 'm',
   )
 
-  const requiresFittingsAddon = hoseRequiresFittings(specs.catalog_category)
-  const isHoseSelection = isHoseCatalogCategory(specs.catalog_category)
+  const requiresFittingsAddon =
+    !isTemporaryProduct && hoseRequiresFittings(specs.catalog_category)
+  const isHoseSelection = !isTemporaryProduct && isHoseCatalogCategory(specs.catalog_category)
+  const isDamperSelection =
+    !isTemporaryProduct && isDamperCatalogCategory(specs.catalog_category)
+  /** Main product line (temporary or damper) has no catalog price — entered on review. */
+  const requiresManualProductPrice = isTemporaryProduct || isDamperSelection
   const parsedHoseLength = useMemo(() => parseHoseLengthInput(hoseLength), [hoseLength])
   const hoseLengthValid = !isHoseSelection || parsedHoseLength != null
   const [operatorOptions, setOperatorOptions] = useState<OperatorOption[]>([])
@@ -576,22 +683,37 @@ export function ValveConfigurator({
   >({})
 
   const categoryDisplayLabel = useMemo(() => {
+    if (isTemporaryProduct) return 'Temporary product'
     if (!specs.catalog_category) return ''
     return stripMasconPrefix(
       configuratorLeafLabel(specs.catalog_category, {
         navSlug: specs.catalog_nav_slug,
         variantType: specs.catalog_variant_type,
+        displayLabel: specs.catalog_display_label,
       }),
     )
-  }, [specs.catalog_category, specs.catalog_nav_slug, specs.catalog_variant_type])
+  }, [
+    isTemporaryProduct,
+    specs.catalog_category,
+    specs.catalog_nav_slug,
+    specs.catalog_variant_type,
+    specs.catalog_display_label,
+  ])
 
   const categorySelection = useMemo(
     () => ({
-      key: specs.catalog_category,
+      key: isTemporaryProduct ? null : specs.catalog_category,
+      label: specs.catalog_display_label ?? null,
       variantType: specs.catalog_variant_type ?? null,
       navSlug: specs.catalog_nav_slug ?? null,
     }),
-    [specs.catalog_category, specs.catalog_variant_type, specs.catalog_nav_slug],
+    [
+      isTemporaryProduct,
+      specs.catalog_category,
+      specs.catalog_display_label,
+      specs.catalog_variant_type,
+      specs.catalog_nav_slug,
+    ],
   )
 
   const {
@@ -638,7 +760,7 @@ export function ValveConfigurator({
   useEffect(() => {
     let cancelled = false
     const cat = specs.catalog_category
-    if (!cat) {
+    if (!cat || isTemporaryCatalogCategory(cat) || isDamperCatalogCategory(cat)) {
       setCascadeSteps([])
       return
     }
@@ -656,7 +778,12 @@ export function ValveConfigurator({
   }, [specs.catalog_category])
 
   useEffect(() => {
-    if (!specs.catalog_category) return
+    if (
+      !specs.catalog_category ||
+      isTemporaryCatalogCategory(specs.catalog_category) ||
+      isDamperCatalogCategory(specs.catalog_category)
+    )
+      return
     void loadCatalog(specs.catalog_category)
   }, [specs.catalog_category, loadCatalog])
 
@@ -678,6 +805,52 @@ export function ValveConfigurator({
   }, [specs, catalog, getOptions, cascadeSteps])
 
   const resolvedValve = useMemo((): ValveProduct | null => {
+    if (isTemporaryProduct) {
+      const desc = temporaryDescription.trim()
+      if (!desc) return null
+      return {
+        id: temporaryProductIdRef.current,
+        type: desc,
+        catalog_category: TEMPORARY_PRODUCT_CATALOG_KEY,
+        temporary_description: desc,
+        construction: null,
+        valve_size: null,
+        bore_type: null,
+        end_connection: null,
+        pressure: null,
+        body: null,
+        stem: null,
+        seat: null,
+        fasteners: null,
+        base_price: null,
+        has_price: false,
+      }
+    }
+    if (isDamperCatalogCategory(specs.catalog_category)) {
+      const cat = specs.catalog_category!
+      if (!damperSpecsComplete(cat, specs.field_values)) return null
+      if (!damperProductIdRef.current) {
+        damperProductIdRef.current = `${cat}:${crypto.randomUUID()}`
+      }
+      const fv = specs.field_values
+      return {
+        id: damperProductIdRef.current,
+        type: damperDisplayTitle(cat, fv),
+        catalog_category: cat,
+        construction: null,
+        valve_size: fv.size?.trim() || null,
+        bore_type: null,
+        end_connection: null,
+        pressure: null,
+        body: null,
+        stem: null,
+        seat: null,
+        fasteners: null,
+        damper_field_values: { ...fv },
+        base_price: null,
+        has_price: false,
+      }
+    }
     if (!specs.catalog_category || catalog.length === 0 || cascadeSteps.length === 0) return null
     const filters: Record<string, string> = {}
     for (const step of cascadeSteps) {
@@ -687,8 +860,11 @@ export function ValveConfigurator({
     }
     const row = resolve(filters)
     if (!row) return null
-    return catalogRowToValveProduct(row, categoryDisplayLabel || specs.catalog_category, specs.catalog_category)
-  }, [specs, catalog, resolve, cascadeSteps, categoryDisplayLabel])
+    const displayType = isOthersCatalogCategory(specs.catalog_category)
+      ? String(row.description ?? categoryDisplayLabel).trim() || categoryDisplayLabel
+      : categoryDisplayLabel || specs.catalog_category
+    return catalogRowToValveProduct(row, displayType, specs.catalog_category)
+  }, [isTemporaryProduct, temporaryDescription, specs, catalog, resolve, cascadeSteps, categoryDisplayLabel])
 
   const pricingCtx = useMemo(
     () => ({
@@ -861,7 +1037,16 @@ export function ValveConfigurator({
   ])
 
   useEffect(() => {
-    if (catalogLoading || !specs.catalog_category || catalog.length === 0 || cascadeSteps.length === 0) return
+    if (
+      isTemporaryProduct ||
+      isDamperSelection ||
+      catalogLoading ||
+      !specs.catalog_category ||
+      isTemporaryCatalogCategory(specs.catalog_category) ||
+      catalog.length === 0 ||
+      cascadeSteps.length === 0
+    )
+      return
     setSpecs((prev) => {
       if (!prev.catalog_category) return prev
       let nextFv = { ...prev.field_values }
@@ -885,7 +1070,7 @@ export function ValveConfigurator({
       }
       return changed ? { ...prev, field_values: nextFv } : prev
     })
-  }, [specs.catalog_category, specs.field_values, catalog, catalogLoading, cascadeSteps])
+  }, [isTemporaryProduct, specs.catalog_category, specs.field_values, catalog, catalogLoading, cascadeSteps])
 
   // ── Fetch operators once the valve is resolved (and we're past specs) ─
   useEffect(() => {
@@ -902,7 +1087,12 @@ export function ValveConfigurator({
           resolvedValve.valve_size ?? '',
           resolvedValve.catalog_category ?? specs.catalog_category ?? null,
         )
-        setOperatorOptions(res.operator_options ?? [])
+        setOperatorOptions(
+          mergeDamperOperatorOptions(
+            res.operator_options ?? [],
+            resolvedValve.catalog_category ?? specs.catalog_category,
+          ),
+        )
         setDaOps(res.da_operators ?? [])
         setSaOps(res.sa_operators ?? [])
       } catch {
@@ -949,11 +1139,10 @@ export function ValveConfigurator({
         isHoseSelection && parsedHoseLength != null
           ? ` — ${formatHoseLength(parsedHoseLength, hoseLengthUnit)}`
           : ''
-      push(
-        `${categoryDisplayLabel || resolvedValve.type}${sizeLabel ? ` ${sizeLabel}` : ''}${lengthSuffix}`,
-        valvePrice,
-        'valve',
-      )
+      const valveLabel = isTemporaryProduct
+        ? temporaryDescription.trim() || 'Temporary product'
+        : `${categoryDisplayLabel || resolvedValve.type}${sizeLabel ? ` ${sizeLabel}` : ''}${lengthSuffix}`
+      push(valveLabel, valvePrice, 'valve')
     }
     if (resolvedFittingEnd1) {
       const unit = componentListPrice('fitting_end_1', resolvedFittingEnd1.base_price)
@@ -991,6 +1180,11 @@ export function ValveConfigurator({
     } else if (operatorKey === 'manual') push('Manual operator', null, 'operator')
     else if (operatorKey === 'gear_box') push('Gear box', null, 'operator')
     else if (operatorKey === 'electric_actuator') push('Electric actuator', null, 'operator')
+    else if (operatorKey === 'pneumatic_rack_pinion') {
+      push('Pneumatic Rack and Pinion Actuator', null, 'operator')
+    } else if (operatorKey === 'pneumatic_cylinder') {
+      push('Pneumatic Cylinder', null, 'operator')
+    }
 
     if (sov) push('SOV', sovPrice, 'sov')
     if (lsb) push('Limit switch box', lsbPrice, 'lsb')
@@ -1044,7 +1238,13 @@ export function ValveConfigurator({
       .filter(([, price]) => price == null)
       .map(([k]) => k)
     const unknownKeyLabels: Record<string, string> = {
-      valve: requiresFittingsAddon ? 'Hose' : 'Valve',
+      valve: isTemporaryProduct
+        ? 'Product'
+        : isDamperSelection
+          ? 'Damper'
+          : requiresFittingsAddon
+            ? 'Hose'
+            : 'Valve',
       fitting_end_1: 'Fitting (End 1)',
       fitting_end_2: 'Fitting (End 2)',
       operator: 'Operator',
@@ -1076,6 +1276,9 @@ export function ValveConfigurator({
     resolvedFittingEnd2,
     fittingEnd1Qty,
     categoryDisplayLabel,
+    isTemporaryProduct,
+    isDamperSelection,
+    temporaryDescription,
     requiresFittingsAddon,
     isHoseSelection,
     parsedHoseLength,
@@ -1092,7 +1295,8 @@ export function ValveConfigurator({
   ])
 
   const isDaSa = operatorKey === 'da' || operatorKey === 'sa'
-  const supportsOperatorAccessoryFlow = supportsOperatorAccessoryFlowCategory(specs.catalog_category)
+  const supportsOperatorAccessoryFlow =
+    !isTemporaryProduct && supportsOperatorAccessoryFlowCategory(specs.catalog_category)
   const operatorUnlocksAccessories =
     supportsOperatorAccessoryFlow && operatorKey !== null && operatorKey !== 'bare_shaft'
   const canFinishNow = supportsOperatorAccessoryFlow && operatorKey === 'bare_shaft'
@@ -1109,12 +1313,19 @@ export function ValveConfigurator({
   }, [supportsOperatorAccessoryFlow, stage])
 
   // ── Handlers ──────────────────────────────────────────────────────────
-  const clearCatalogSelection = () => {
+  const clearTemporaryProduct = () => {
+    setIsTemporaryProduct(false)
+    setTemporaryDescription('')
+    setTemporaryFamily(null)
     setCascadeSteps([])
     setSpecs(emptySpecs())
+    setComponentPricing({})
   }
 
-  const pickCatalogCategory = (pick: ConfiguratorCatalogPick) => {
+  const pickTemporaryProduct = (family: ConfiguratorProductFamily) => {
+    setIsTemporaryProduct(true)
+    setTemporaryFamily(family)
+    setTemporaryDescription('')
     setCascadeSteps([])
     setFittingEnd1Specs(emptySpecs())
     setFittingEnd2Specs(emptySpecs())
@@ -1123,15 +1334,57 @@ export function ValveConfigurator({
     setResolvedFittingEnd2(null)
     setHoseLength('1')
     setHoseLengthUnit('m')
+    setOperatorKey(null)
+    setOperatorModel(null)
+    setSov(null)
+    setLsb(null)
+    setPositioner(null)
+    setSpecs({
+      catalog_category: TEMPORARY_PRODUCT_CATALOG_KEY,
+      catalog_variant_type: null,
+      catalog_nav_slug: null,
+      field_values: {},
+    })
+    setComponentPricing({})
+  }
+
+  const clearCatalogSelection = () => {
+    if (isTemporaryProduct) {
+      clearTemporaryProduct()
+      return
+    }
+    damperProductIdRef.current = null
+    setCascadeSteps([])
+    setSpecs(emptySpecs())
+  }
+
+  const pickCatalogCategory = (pick: ConfiguratorCatalogPick) => {
+    setIsTemporaryProduct(false)
+    setTemporaryDescription('')
+    setTemporaryFamily(null)
+    setCascadeSteps([])
+    setFittingEnd1Specs(emptySpecs())
+    setFittingEnd2Specs(emptySpecs())
+    setFittingEnd1Qty(1)
+    setResolvedFittingEnd1(null)
+    setResolvedFittingEnd2(null)
+    setHoseLength('1')
+    setHoseLengthUnit('m')
+    damperProductIdRef.current = isDamperCatalogCategory(pick.key)
+      ? `${pick.key}:${crypto.randomUUID()}`
+      : null
     const field_values: Record<string, string> = {}
     if (pick.variantType) field_values.variant_type = pick.variantType
     setSpecs({
       catalog_category: pick.key,
       catalog_variant_type: pick.variantType ?? null,
       catalog_nav_slug: pick.navSlug ?? null,
+      catalog_display_label: pick.label ?? null,
       field_values,
     })
-    void loadCatalog(pick.key, true)
+    if (!isDamperCatalogCategory(pick.key)) {
+      void loadCatalog(pick.key, true)
+    }
     const id =
       resolveSupplierFromSheetDefaults(
         sheetDefaultSuppliers,
@@ -1151,6 +1404,13 @@ export function ValveConfigurator({
       delete nextFv[after.key]
     }
     setSpecs({ ...specs, field_values: nextFv })
+  }
+
+  const pickDamperField = (field: string, value: string) => {
+    setSpecs((prev) => ({
+      ...prev,
+      field_values: { ...prev.field_values, [field]: value },
+    }))
   }
 
   const valveForAssembly = useMemo((): ValveProduct | null => {
@@ -1238,6 +1498,8 @@ export function ValveConfigurator({
     include_bracket: false,
     hose_length: isHoseSelection && parsedHoseLength != null ? parsedHoseLength : undefined,
     hose_length_unit: isHoseSelection ? hoseLengthUnit : undefined,
+    is_temporary: isTemporaryProduct,
+    temporary_product_family: isTemporaryProduct ? temporaryFamily : null,
     quantity: Math.max(1, Math.floor(quantity || 1)),
     unit: unit || 'Nos',
     customer_discount_pct: Number.isFinite(Number(customerDiscountPct)) ? Number(customerDiscountPct) : null,
@@ -1248,6 +1510,13 @@ export function ValveConfigurator({
   })
 
   const finishAndEmit = () => {
+    if (isTemporaryProduct || isDamperSelection) {
+      if (isTemporaryProduct && !temporaryDescription.trim()) return
+      if (!resolvedValve || priceInfo.has_unknown_prices) return
+      onProductComplete(buildAssembled())
+      setStage('complete')
+      return
+    }
     if (requiresFittingsAddon && !fittingsComplete) return
     if (!hoseLengthValid) return
     const requiredMissing = Object.values(componentPricing).some(
@@ -1303,11 +1572,15 @@ export function ValveConfigurator({
                   : totalSteps
   const stageTitle =
     stage === 'valve_specs'
-      ? `Step 1 of ${totalSteps} — Select ${
-          specs.catalog_category && isHoseCatalogCategory(specs.catalog_category)
-            ? 'Hose'
-            : 'Product'
-        } specifications`
+      ? isTemporaryProduct
+        ? `Step 1 of ${totalSteps} — Temporary product`
+        : `Step 1 of ${totalSteps} — Select ${
+            specs.catalog_category && isHoseCatalogCategory(specs.catalog_category)
+              ? 'Hose'
+              : isDamperSelection
+                ? 'Damper'
+                : 'Product'
+          } specifications`
       : stage === 'fittings'
         ? `Step 2 of ${totalSteps} — Select Fitting`
         : !supportsOperatorAccessoryFlow
@@ -1372,13 +1645,41 @@ export function ValveConfigurator({
             selection={categorySelection}
             onSelect={pickCatalogCategory}
             onClearSelection={clearCatalogSelection}
+            temporaryActive={isTemporaryProduct}
+            onSelectTemporary={pickTemporaryProduct}
+            onClearTemporary={clearTemporaryProduct}
           />
 
-          {specs.catalog_category && catalogError && (
+          {isTemporaryProduct && (
+            <div className="space-y-1.5">
+              <label
+                htmlFor={`temp-product-desc-${productIndex}`}
+                className="text-[10px] font-medium uppercase tracking-wide text-[#8A9488]"
+              >
+                Product description
+              </label>
+              <Textarea
+                id={`temp-product-desc-${productIndex}`}
+                value={temporaryDescription}
+                onChange={(e) => setTemporaryDescription(e.target.value)}
+                placeholder="Describe the product (size, material, end connections, etc.)"
+                rows={4}
+                className="min-h-[96px] resize-y"
+              />
+            </div>
+          )}
+
+          {!isTemporaryProduct &&
+            !isDamperSelection &&
+            specs.catalog_category &&
+            catalogError && (
             <p className="text-[12px] text-red-600">{catalogError}</p>
           )}
 
-          {specs.catalog_category && catalogLoading && (
+          {!isTemporaryProduct &&
+            !isDamperSelection &&
+            specs.catalog_category &&
+            catalogLoading && (
             <div className="flex items-center gap-2 text-[12px] text-surface-muted">
               <Loader2 className="size-4 animate-spin" />
               Loading {categoryDisplayLabel || specs.catalog_category} catalog
@@ -1386,7 +1687,19 @@ export function ValveConfigurator({
             </div>
           )}
 
-          {specs.catalog_category && !catalogLoading && cascadeSteps.length > 0 && (
+          {isDamperSelection && specs.catalog_category && (
+            <DamperSpecFields
+              catalogKey={specs.catalog_category}
+              fieldValues={specs.field_values}
+              onFieldChange={pickDamperField}
+            />
+          )}
+
+          {!isTemporaryProduct &&
+            !isDamperSelection &&
+            specs.catalog_category &&
+            !catalogLoading &&
+            cascadeSteps.length > 0 && (
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               {cascadeSteps.map((step, idx) => {
                 const field = step.key
@@ -1470,19 +1783,42 @@ export function ValveConfigurator({
           )}
 
           {resolvedValve && (
-            <div className="rounded-xl border border-brand-green-200 bg-brand-green-50 p-4">
-              <p className="text-[13px] font-semibold text-brand-green-700">
+            <div
+              className={cn(
+                'rounded-xl border p-4',
+                isTemporaryProduct
+                  ? 'border-brand-gold-200 bg-brand-gold-50'
+                  : 'border-brand-green-200 bg-brand-green-50',
+              )}
+            >
+              <p
+                className={cn(
+                  'text-[13px] font-semibold',
+                  isTemporaryProduct ? 'text-brand-gold-800' : 'text-brand-green-700',
+                )}
+              >
                 <Check className="mr-1 inline size-4" />
-                {resolvedValve.type}
-                {resolvedValve.construction ? ` — ${resolvedValve.construction}` : ''}
+                {isTemporaryProduct
+                  ? 'Temporary product ready for review'
+                  : resolvedValve.type}
+                {!isTemporaryProduct && resolvedValve.construction
+                  ? ` — ${resolvedValve.construction}`
+                  : ''}
               </p>
-              <p className="mt-1 text-[12px] text-gray-800">
-                {resolvedValve.valve_size ? <>Size: {resolvedValve.valve_size}</> : null}
-                {resolvedValve.body ? <> | Body: {resolvedValve.body}</> : null}
-              </p>
-              <p className="text-[12px] text-gray-800">
-                {[resolvedValve.end_connection, resolvedValve.pressure].filter(Boolean).join(' | ') || '—'}
-              </p>
+              {isTemporaryProduct ? (
+                <p className="mt-1 text-[12px] text-gray-800">{resolvedValve.type}</p>
+              ) : (
+                <>
+                  <p className="mt-1 text-[12px] text-gray-800">
+                    {resolvedValve.valve_size ? <>Size: {resolvedValve.valve_size}</> : null}
+                    {resolvedValve.body ? <> | Body: {resolvedValve.body}</> : null}
+                  </p>
+                  <p className="text-[12px] text-gray-800">
+                    {[resolvedValve.end_connection, resolvedValve.pressure].filter(Boolean).join(' | ') || '—'}
+                  </p>
+                </>
+              )}
+              {!isTemporaryProduct && !isDamperSelection && (
               <p className="mt-2 font-mono text-[13px] text-brand-green-700">
                 {isHoseSelection ? (
                   <>
@@ -1505,33 +1841,47 @@ export function ValveConfigurator({
                   <>Base Price: {priceText(componentListPrice('valve', resolvedValve.base_price))}</>
                 )}
               </p>
+              )}
+              {isDamperSelection && (
+                <p className="mt-2 text-[12px] text-brand-gold-800">
+                  No catalog price — enter unit price on the review step.
+                </p>
+              )}
             </div>
           )}
           <div className="flex items-center justify-between">
             <span className="text-[12px] text-surface-muted">
-              {specs.catalog_category
-                ? 'Pick each spec to narrow down.'
-                : 'Choose family, then type and product sheet (one step at a time).'}
+              {isTemporaryProduct
+                ? 'Enter a description, then continue to set price on review.'
+                : isDamperSelection
+                  ? 'Pick specs from each column (ME fields are optional), then choose operator.'
+                  : specs.catalog_category
+                    ? 'Pick each spec to narrow down.'
+                    : 'Choose family, then type and product sheet (one step at a time).'}
             </span>
             <Button
               type="button"
               onClick={() =>
                 setStage(
-                  supportsOperatorAccessoryFlow
-                    ? 'operator'
-                    : requiresFittingsAddon
-                      ? 'fittings'
-                      : 'supplier',
+                  isTemporaryProduct
+                    ? 'supplier'
+                    : supportsOperatorAccessoryFlow
+                      ? 'operator'
+                      : requiresFittingsAddon
+                        ? 'fittings'
+                        : 'supplier',
                 )
               }
-              disabled={!resolvedValve || !hoseLengthValid}
+              disabled={!resolvedValve || (!isTemporaryProduct && !isDamperSelection && !hoseLengthValid)}
               className="bg-brand-green-500 text-white hover:bg-brand-green-600"
             >
-              {supportsOperatorAccessoryFlow
-                ? 'Next'
-                : requiresFittingsAddon
-                  ? 'Next: Fittings'
-                  : 'Next: Review'}{' '}
+              {isTemporaryProduct
+                ? 'Next: Review'
+                : supportsOperatorAccessoryFlow
+                  ? 'Next'
+                  : requiresFittingsAddon
+                    ? 'Next: Fittings'
+                    : 'Next: Review'}{' '}
               <ChevronRight className="ml-1 size-4" />
             </Button>
           </div>
@@ -1613,9 +1963,7 @@ export function ValveConfigurator({
                   {opt.key === 'bare_shaft' && (
                     <p className="mt-2 font-mono text-[12px] text-brand-green-700">No additional cost</p>
                   )}
-                  {(opt.key === 'manual' ||
-                    opt.key === 'gear_box' ||
-                    opt.key === 'electric_actuator') && (
+                  {PRICE_ON_REQUEST_OPERATOR_KEYS.has(opt.key) && (
                     <p className="mt-2 font-mono text-[12px] italic text-brand-gold-700">
                       Price on request
                     </p>
@@ -1646,7 +1994,8 @@ export function ValveConfigurator({
           )}
           <div className="flex items-center justify-between">
             <Button type="button" variant="outline" onClick={() => setStage('valve_specs')}>
-              <ChevronLeft className="mr-1 size-4" /> Change Valve
+              <ChevronLeft className="mr-1 size-4" />{' '}
+              {isDamperSelection ? 'Change Damper' : 'Change Valve'}
             </Button>
             {isDaSa && (
               <Button
@@ -1667,7 +2016,10 @@ export function ValveConfigurator({
                 Next: Accessories <ChevronRight className="ml-1 size-4" />
               </Button>
             )}
-            {(operatorKey === 'manual' || operatorKey === 'gear_box') && (
+            {(operatorKey === 'manual' ||
+              operatorKey === 'gear_box' ||
+              operatorKey === 'pneumatic_rack_pinion' ||
+              operatorKey === 'pneumatic_cylinder') && (
               <Button
                 type="button"
                 onClick={() => setStage('accessories')}
@@ -1793,6 +2145,7 @@ export function ValveConfigurator({
                   <div key={cat.catalogKey}>
                     <AccessoryToggleRow
                       label={cat.uiLabel}
+                      catalogKey={cat.catalogKey}
                       items={items}
                       subcategories={cat.subcategories}
                       value={value}
@@ -1843,7 +2196,9 @@ export function ValveConfigurator({
             Review total and add this assembled product to quotation.
           </p>
 
-          {(suppliers ?? []).length > 0 &&
+          {!isTemporaryProduct &&
+            !isDamperSelection &&
+            (suppliers ?? []).length > 0 &&
             Object.entries(componentPricing)
               .filter(([, cfg]) => cfg.enabled && !cfg.supplier_id)
               .map(([k]) => (
@@ -1851,6 +2206,11 @@ export function ValveConfigurator({
                   Missing supplier for {k}.
                 </p>
               ))}
+          {requiresManualProductPrice && priceInfo.has_unknown_prices && (
+            <p className="text-[12px] text-red-600">
+              Enter a unit price for the product in the running total below.
+            </p>
+          )}
 
           <PriceSummary
             price={priceInfo}
@@ -1873,8 +2233,14 @@ export function ValveConfigurator({
               type="button"
               onClick={finishAndEmit}
               disabled={
-                (suppliers ?? []).length > 0 &&
-                Object.values(componentPricing).some((entry) => entry.enabled && !entry.supplier_id)
+                isTemporaryProduct || isDamperSelection
+                  ? (isTemporaryProduct && !temporaryDescription.trim()) ||
+                    !resolvedValve ||
+                    priceInfo.has_unknown_prices
+                  : (suppliers ?? []).length > 0 &&
+                    Object.values(componentPricing).some(
+                      (entry) => entry.enabled && !entry.supplier_id,
+                    )
               }
               className="bg-brand-green-500 text-white hover:bg-brand-green-600 disabled:opacity-50"
             >
@@ -1890,12 +2256,14 @@ export function ValveConfigurator({
 // ── Sub-components ───────────────────────────────────────────────────────
 function AccessoryToggleRow({
   label,
+  catalogKey,
   items,
   subcategories,
   value,
   onChange,
 }: {
   label: string
+  catalogKey: AccessoryCatalogKey
   items: AccessoryItem[]
   subcategories: AccessorySubcategory[]
   value: AccessoryItem | null
@@ -1903,6 +2271,20 @@ function AccessoryToggleRow({
 }) {
   const [open, setOpen] = useState<boolean>(value != null)
   const active = open || value != null
+  const [mode, setMode] = useState<'catalog' | 'custom'>(() =>
+    value && isTemporaryAccessory(value) ? 'custom' : 'catalog',
+  )
+  const [customDescription, setCustomDescription] = useState(() =>
+    value && isTemporaryAccessory(value) ? value.type : '',
+  )
+  const [customPrice, setCustomPrice] = useState(() =>
+    value && isTemporaryAccessory(value) && value.price != null ? String(value.price) : '',
+  )
+  const customIdRef = useRef(
+    value && isTemporaryAccessory(value)
+      ? value.id
+      : `${TEMPORARY_ACCESSORY_ID_PREFIX}${catalogKey}:${crypto.randomUUID()}`,
+  )
 
   const groups = useMemo(
     () => groupAccessoryItems(items, subcategories),
@@ -1912,6 +2294,38 @@ function AccessoryToggleRow({
   useEffect(() => {
     if (!open) onChange(null)
   }, [open, onChange])
+
+  useEffect(() => {
+    if (!value || !isTemporaryAccessory(value)) return
+    setMode('custom')
+    setCustomDescription(value.type)
+    setCustomPrice(value.price != null ? String(value.price) : '')
+    customIdRef.current = value.id
+  }, [value])
+
+  useEffect(() => {
+    if (!active || mode !== 'custom') return
+    const desc = customDescription.trim()
+    const price = Number((customPrice || '').trim())
+    if (!desc || !Number.isFinite(price) || price <= 0) {
+      onChange(null)
+      return
+    }
+    onChange(buildTemporaryAccessory(desc, price, customIdRef.current))
+  }, [active, mode, customDescription, customPrice, onChange])
+
+  const switchToCatalog = () => {
+    setMode('catalog')
+    setCustomDescription('')
+    setCustomPrice('')
+    onChange(null)
+  }
+
+  const switchToCustom = () => {
+    setMode('custom')
+    onChange(null)
+    customIdRef.current = `${TEMPORARY_ACCESSORY_ID_PREFIX}${catalogKey}:${crypto.randomUUID()}`
+  }
 
   return (
     <div className="rounded-xl border border-surface-border bg-surface-page p-4">
@@ -1928,53 +2342,117 @@ function AccessoryToggleRow({
       </div>
       {active && (
         <div className="mt-2 space-y-2">
-          {groups.length === 0 ? (
-            <p className="text-[12px] text-surface-muted">No models available for this category.</p>
-          ) : (
-            <Select
-              value={toSelectValue(value?.id ?? '')}
-              onValueChange={(raw) => {
-                const id = fromSelectValue(raw)
-                const item = items.find((x) => x.id === id) ?? null
-                onChange(item)
-              }}
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={switchToCatalog}
+              className={cn(
+                'rounded-lg border px-2.5 py-1 text-[11px] font-medium transition',
+                mode === 'catalog'
+                  ? 'border-brand-green-500 bg-brand-green-50 text-brand-green-800'
+                  : 'border-surface-border bg-white text-surface-muted hover:border-brand-green-400',
+              )}
             >
-              <SelectTrigger
-                className={SPEC_SELECT_TRIGGER_CLASS}
-                title={value?.type ?? undefined}
+              From catalog
+            </button>
+            <button
+              type="button"
+              onClick={switchToCustom}
+              className={cn(
+                'rounded-lg border px-2.5 py-1 text-[11px] font-medium transition',
+                mode === 'custom'
+                  ? 'border-brand-gold-500 bg-brand-gold-50 text-brand-gold-800'
+                  : 'border-surface-border bg-white text-surface-muted hover:border-brand-gold-400',
+              )}
+            >
+              Custom temporary
+            </button>
+          </div>
+
+          {mode === 'catalog' ? (
+            groups.length === 0 ? (
+              <p className="text-[12px] text-surface-muted">No models available for this category.</p>
+            ) : (
+              <Select
+                value={value && !isTemporaryAccessory(value) ? value.id : SELECT_EMPTY}
+                onValueChange={(raw) => {
+                  const id = fromSelectValue(raw)
+                  const item = items.find((x) => x.id === id) ?? null
+                  onChange(item)
+                }}
               >
-                <SelectValue placeholder={`Select ${label}`}>
-                  {value?.type ?? null}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent variant="wide" align="start">
-                <SelectItem value={SELECT_EMPTY}>
-                  <span className="text-muted-foreground">Select…</span>
-                </SelectItem>
-                {groups.map((group) => (
-                  <SelectGroup key={group.label}>
-                    <SelectLabel className="text-[11px] font-semibold uppercase tracking-wide text-[#8A9488]">
-                      {group.label}
-                    </SelectLabel>
-                    {group.items.map((item) => {
-                      const optLabel = `${item.type} — ${
-                        item.price != null ? formatCurrency(item.price) : '₹TBD'
-                      }`
-                      return (
-                        <SelectItem key={item.id} value={item.id} multiline title={optLabel}>
-                          {optLabel}
-                        </SelectItem>
-                      )
-                    })}
-                  </SelectGroup>
-                ))}
-              </SelectContent>
-            </Select>
+                <SelectTrigger
+                  className={SPEC_SELECT_TRIGGER_CLASS}
+                  title={value && !isTemporaryAccessory(value) ? value.type : undefined}
+                >
+                  <SelectValue placeholder={`Select ${label}`} />
+                </SelectTrigger>
+                <SelectContent variant="wide" align="start">
+                  <SelectItem value={SELECT_EMPTY}>
+                    <span className="text-muted-foreground">Select…</span>
+                  </SelectItem>
+                  {groups.map((group) => (
+                    <SelectGroup key={group.label}>
+                      <SelectLabel className="text-[11px] font-semibold uppercase tracking-wide text-[#8A9488]">
+                        {group.label}
+                      </SelectLabel>
+                      {group.items.map((item) => {
+                        const optLabel = `${item.type} — ${
+                          item.price != null ? formatCurrency(item.price) : '₹TBD'
+                        }`
+                        return (
+                          <SelectItem key={item.id} value={item.id} multiline title={optLabel}>
+                            {optLabel}
+                          </SelectItem>
+                        )
+                      })}
+                    </SelectGroup>
+                  ))}
+                </SelectContent>
+              </Select>
+            )
+          ) : (
+            <div className="space-y-2 rounded-lg border border-brand-gold-200 bg-brand-gold-50/50 p-3">
+              <div className="space-y-1">
+                <label className="text-[10px] font-medium uppercase tracking-wide text-[#8A9488]">
+                  Description
+                </label>
+                <Textarea
+                  value={customDescription}
+                  onChange={(e) => setCustomDescription(e.target.value)}
+                  placeholder={`Describe this ${label.toLowerCase()}`}
+                  rows={2}
+                  className="min-h-[64px] resize-y bg-white"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-medium uppercase tracking-wide text-[#8A9488]">
+                  Price (INR)
+                </label>
+                <Input
+                  type="number"
+                  min="0"
+                  step="any"
+                  inputMode="decimal"
+                  value={customPrice}
+                  onChange={(e) => setCustomPrice(e.target.value)}
+                  placeholder="e.g. 5000"
+                  className="bg-white font-mono"
+                />
+              </div>
+            </div>
           )}
+
           {value && (
             <p className="font-mono text-[12px] text-brand-green-700">
-              {value.type} —{' '}
+              {value.type}
+              {isTemporaryAccessory(value) ? ' (custom)' : ''} —{' '}
               {value.price != null ? `${formatCurrency(value.price)} added` : '₹TBD'}
+            </p>
+          )}
+          {mode === 'custom' && active && !value && (
+            <p className="text-[12px] text-brand-gold-700">
+              Enter a description and price to include this accessory.
             </p>
           )}
         </div>

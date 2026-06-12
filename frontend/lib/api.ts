@@ -237,6 +237,11 @@ export const enquiriesApi = {
     post<T>('/api/enquiries/upload-email', { email_text: emailText, input_type: inputType }),
   processEmailMatcher: <T = unknown>(enquiryId: string) =>
     post<T>(`/api/enquiries/${encodeURIComponent(enquiryId)}/process-matcher`, {}),
+  decideEmailApproval: <T = unknown>(
+    enquiryId: string,
+    body: { decision: 'approve' | 'reject'; notes?: string },
+  ) =>
+    post<T>(`/api/enquiries/${encodeURIComponent(enquiryId)}/email-approval`, body),
   getRevertRequestDraft: <T = unknown>(enquiryId: string) =>
     get<T>(`/api/enquiries/${encodeURIComponent(enquiryId)}/revert-request-draft`),
   getEnquiry: <T = unknown>(id: string) => get<T>(`/api/enquiries/${id}`),
@@ -363,6 +368,45 @@ export const mastersApi = {
     ),
   listSheetDefaultSuppliers: () =>
     get<{ items: import('@/types').MasterSheetDefaultSupplier[] }>('/api/masters/sheet-default-suppliers'),
+
+  getOthersTree: <T = unknown>() => get<T>('/api/masters/others/tree'),
+  createOthersCategory: (name: string) =>
+    post<import('@/types').OthersCategory>('/api/masters/others/categories', { name }),
+  updateOthersCategory: (categoryId: string, name: string) =>
+    patch<import('@/types').OthersCategory>(`/api/masters/others/categories/${categoryId}`, { name }),
+  deleteOthersCategory: (categoryId: string) =>
+    del<{ deleted: boolean }>(`/api/masters/others/categories/${categoryId}`),
+  createOthersSheet: (categoryId: string, name: string) =>
+    post<import('@/types').OthersSheet>(`/api/masters/others/categories/${categoryId}/sheets`, {
+      name,
+    }),
+  updateOthersSheet: (sheetId: string, name: string) =>
+    patch<import('@/types').OthersSheet>(`/api/masters/others/sheets/${sheetId}`, { name }),
+  deleteOthersSheet: (sheetId: string) =>
+    del<{ deleted: boolean }>(`/api/masters/others/sheets/${sheetId}`),
+  getOthersSheetRows: <T = unknown>(sheetId: string) =>
+    get<T>(`/api/masters/others/sheets/${sheetId}/rows`),
+  createOthersRow: (
+    sheetId: string,
+    body: { sr_no?: number | null; description?: string | null; price_inr?: number | null },
+  ) => post<import('@/types').OthersSheetRow>(`/api/masters/others/sheets/${sheetId}/rows`, body),
+  updateOthersRow: (
+    sheetId: string,
+    rowId: string,
+    body: {
+      sr_no?: number | null
+      description?: string | null
+      price_inr?: number | null
+      clear_sr_no?: boolean
+      clear_price?: boolean
+    },
+  ) =>
+    patch<import('@/types').OthersSheetRow>(
+      `/api/masters/others/sheets/${sheetId}/rows/${rowId}`,
+      body,
+    ),
+  deleteOthersRow: (sheetId: string, rowId: string) =>
+    del<{ deleted: boolean }>(`/api/masters/others/sheets/${sheetId}/rows/${rowId}`),
 }
 
 export const clientsApi = {

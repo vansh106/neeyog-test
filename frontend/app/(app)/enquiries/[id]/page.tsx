@@ -3,7 +3,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
-import { ChevronRight, Download, FileText, Loader2, Mail, Sparkles } from 'lucide-react'
+import { CheckCircle2, ChevronRight, Download, FileText, Loader2, Mail, Sparkles, XCircle } from 'lucide-react'
 import PageShell from '@/components/layout/PageShell'
 import StatusBadge from '@/components/ui/StatusBadge'
 import EmptyState from '@/components/ui/EmptyState'
@@ -22,6 +22,7 @@ import type {
   ClientVerificationContext,
   ClientVerificationResponse,
   EnquiryDetail,
+  EmailApprovalInfo,
   ManualEnquiryForm,
 } from '@/types'
 
@@ -330,6 +331,28 @@ export default function EnquiryDetailPage() {
   const [fullManualOverride, setFullManualOverride] = useState(false)
   const [revertOpen, setRevertOpen] = useState(false)
   const [revertDraft, setRevertDraft] = useState<{ subject: string; body: string } | null>(null)
+  const [emailApprovalBusy, setEmailApprovalBusy] = useState(false)
+  const [emailApprovalError, setEmailApprovalError] = useState<string | null>(null)
+  const [rejectNotes, setRejectNotes] = useState('')
+  const [showRejectForm, setShowRejectForm] = useState(false)
+
+  const emailApproval = useMemo((): EmailApprovalInfo | null => {
+    const fromApi = (ext as { email_approval?: EmailApprovalInfo } | undefined)?.email_approval
+    if (fromApi && typeof fromApi === 'object') return fromApi
+    const fromParsed = parsed?.email_approval
+    if (fromParsed && typeof fromParsed === 'object') return fromParsed as EmailApprovalInfo
+    return null
+  }, [ext, parsed])
+
+  const requiresEmailApproval = useMemo(() => {
+    const fromApi = (ext as { requires_email_approval?: boolean } | undefined)?.requires_email_approval
+    if (typeof fromApi === 'boolean') return fromApi
+    const st = (ext?.status || '').toLowerCase()
+    if (st === 'pending_email_approval') return true
+    return (emailApproval?.status || '').toLowerCase() === 'pending'
+  }, [emailApproval?.status, ext?.status])
+
+  const isEmailRejected = (ext?.status || '').toLowerCase() === 'email_rejected'
 
   const downloadErpExport = useCallback(async () => {
     if (!id || exportBusy) return
@@ -571,9 +594,39 @@ export default function EnquiryDetailPage() {
   const showMatcherRail =
     !!matcher &&
     !quoteId &&
+    !requiresEmailApproval &&
+    !isEmailRejected &&
     (ext?.status === 'matcher_ready' ||
       ext?.flow_type === 'product_incomplete' ||
       ext?.flow_type === 'product_complete')
+
+  const handleEmailApproval = useCallback(
+    async (decision: 'approve' | 'reject') => {
+      if (!id || emailApprovalBusy) return
+      setEmailApprovalBusy(true)
+      setEmailApprovalError(null)
+      try {
+        const res = await enquiriesApi.decideEmailApproval<{
+          quotation_id?: string
+          message?: string
+        }>(id, {
+          decision,
+          notes: decision === 'reject' ? rejectNotes.trim() : undefined,
+        })
+        await qc.invalidateQueries({ queryKey: ['enquiry', id] })
+        setShowRejectForm(false)
+        setRejectNotes('')
+        if (decision === 'approve' && res?.quotation_id) {
+          router.push(`/quotations/${res.quotation_id}`)
+        }
+      } catch (e) {
+        setEmailApprovalError(e instanceof Error ? e.message : 'Could not update email approval')
+      } finally {
+        setEmailApprovalBusy(false)
+      }
+    },
+    [emailApprovalBusy, id, qc, rejectNotes, router],
+  )
 
   const submitManualFromEnquiry = useCallback(
     async (form: ManualEnquiryForm) => {
@@ -685,6 +738,109 @@ export default function EnquiryDetailPage() {
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-10">
         <div className="space-y-6 lg:col-span-7">
+          {requiresEmailApproval && (
+            <section className="rounded-xl border border-amber-200 bg-gradient-to-b from-amber-50/90 to-white p-5 shadow-sm">
+              <div className="flex items-start gap-3">
+                <Mail className="mt-0.5 size-5 shrink-0 text-amber-700" />
+                <div className="min-w-0 flex-1">
+                  <h2 className="text-[15px] font-semibold text-gray-900">Approve this email enquiry</h2>
+                  <p className="mt-1 text-[13px] leading-relaxed text-surface-muted">
+                    Review the source message below. Product matching and quotation generation run only after
+                    you approve this email.
+                  </p>
+                  {emailApprovalError && (
+                    <p className="mt-3 text-[12px] text-red-600">{emailApprovalError}</p>
+                  )}
+                  {showRejectForm ? (
+                    <div className="mt-4 space-y-3">
+                      <label className="block text-[11px] font-medium uppercase tracking-wide text-[#8A9488]">
+                        Reason for rejection (optional)
+                      </label>
+                      <textarea
+                        value={rejectNotes}
+                        onChange={(e) => setRejectNotes(e.target.value)}
+                        className="min-h-[72px] w-full rounded-lg border border-surface-border bg-white p-3 text-[13px]"
+                        placeholder="e.g. Not a valid RFQ, spam, duplicate enquiry…"
+                      />
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          type="button"
+                          variant="destructive"
+                          size="sm"
+                          disabled={emailApprovalBusy}
+                          className="gap-1.5"
+                          onClick={() => void handleEmailApproval('reject')}
+                        >
+                          {emailApprovalBusy ? (
+                            <Loader2 className="size-3.5 animate-spin" />
+                          ) : (
+                            <XCircle className="size-3.5" />
+                          )}
+                          Confirm reject
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={emailApprovalBusy}
+                          onClick={() => {
+                            setShowRejectForm(false)
+                            setRejectNotes('')
+                          }}
+                        >
+                          Cancel
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        disabled={emailApprovalBusy}
+                        className="gap-1.5 bg-brand-green-600 hover:bg-brand-green-700"
+                        onClick={() => void handleEmailApproval('approve')}
+                      >
+                        {emailApprovalBusy ? (
+                          <Loader2 className="size-3.5 animate-spin" />
+                        ) : (
+                          <CheckCircle2 className="size-3.5" />
+                        )}
+                        Approve &amp; run matcher
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={emailApprovalBusy}
+                        className="gap-1.5 border-red-200 text-red-700 hover:bg-red-50"
+                        onClick={() => setShowRejectForm(true)}
+                      >
+                        <XCircle className="size-3.5" />
+                        Reject
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </section>
+          )}
+
+          {isEmailRejected && (
+            <section className="rounded-xl border border-red-200 bg-red-50/80 p-5 shadow-sm" role="alert">
+              <h2 className="text-[15px] font-semibold text-red-900">Email enquiry rejected</h2>
+              <p className="mt-1 text-[13px] text-red-800">
+                Product matching was not run for this email.
+                {emailApproval?.decided_by_name ? (
+                  <> Rejected by {emailApproval.decided_by_name}.</>
+                ) : null}
+              </p>
+              {emailApproval?.notes ? (
+                <p className="mt-2 text-[13px] text-red-900/90">{emailApproval.notes}</p>
+              ) : null}
+            </section>
+          )}
+
           {clientContext && (
             <ClientVerificationPanel />
           )}

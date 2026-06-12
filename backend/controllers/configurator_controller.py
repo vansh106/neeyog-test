@@ -167,7 +167,13 @@ async def handle_get_operators(
     except Exception as e:
         logger.exception("operators lookup failed")
         raise HTTPException(status_code=500, detail=str(e))
-    options = build_operator_options(ops["da_operators"], ops["sa_operators"])
+    from services.damper_schema import is_damper_catalog_key
+
+    options = build_operator_options(
+        ops["da_operators"],
+        ops["sa_operators"],
+        include_damper_operators=bool(catalog_category and is_damper_catalog_key(catalog_category)),
+    )
     return OperatorsResponse(
         operator_options=options,
         da_operators=ops["da_operators"],

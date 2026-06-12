@@ -207,6 +207,25 @@ class ManualDropdownProcessRequest(BaseModel):
         return self
 
 
+class EmailApprovalRequest(BaseModel):
+    decision: str = Field(..., description="'approve' or 'reject'")
+    notes: str = ""
+
+
+class EmailApprovalResponse(BaseModel):
+    enquiry_id: str
+    enquiry_number: str | None = None
+    status: str
+    flow_type: str | None = None
+    message: str
+    email_approval: dict = Field(default_factory=dict)
+    quotation_id: str | None = None
+    already_processed: bool = False
+    matcher: dict | None = None
+    product_completeness: str | None = None
+    matcher_confidence: float | None = None
+
+
 class MatcherProcessResponse(EnquiryResponse):
     """Matcher run + optional auto-quote (same shape as EnquiryResponse with extras)."""
 
@@ -415,6 +434,9 @@ async def handle_get_enquiry(
             "processing_completed_at": enquiry.processing_completed_at.isoformat()
             if enquiry.processing_completed_at
             else None,
+            "email_approval": enquiry_service.email_approval_record(enquiry),
+            "requires_email_approval": enquiry_service.requires_email_approval(enquiry),
+            "is_email_agent_enquiry": enquiry_service.is_email_agent_enquiry(enquiry),
         }
     except ProductNotFoundError:
         raise HTTPException(status_code=404, detail=f"Enquiry {enquiry_id} not found")
@@ -476,6 +498,32 @@ async def handle_list_enquiries(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+async def handle_decide_email_approval(
+    enquiry_id: str,
+    body: EmailApprovalRequest,
+    db: AsyncSession,
+    user: CurrentUser,
+) -> EmailApprovalResponse:
+    try:
+        uid, name = _quotation_creator_from_user(user)
+        result = await enquiry_service.decide_email_approval(
+            enquiry_id,
+            body.decision,
+            db,
+            decided_by_user_id=uid,
+            decided_by_name=name,
+            notes=body.notes,
+        )
+        return EmailApprovalResponse(**result)
+    except EnquiryParseError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except ProductNotFoundError:
+        raise HTTPException(status_code=404, detail=f"Enquiry {enquiry_id} not found")
+    except Exception as e:
+        logger.exception("decide_email_approval failed")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 async def handle_process_email_matcher(
     enquiry_id: str,
     db: AsyncSession,
@@ -483,6 +531,8 @@ async def handle_process_email_matcher(
     try:
         result = await enquiry_service.process_email_matcher(enquiry_id, db)
         return MatcherProcessResponse.model_validate(result)
+    except EnquiryParseError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except ProductNotFoundError:
         raise HTTPException(status_code=404, detail=f"Enquiry {enquiry_id} not found")
     except Exception as e:

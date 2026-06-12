@@ -28,6 +28,8 @@ import {
   fetchSupplierPricesForSheet,
 } from '@/lib/mastersSheetExport'
 import { findMasterNavLeafBySlug, masterNavActiveQueryFromSearchParams } from '@/lib/masterSidebarNav'
+import { damperSheetLabel, isDamperCatalogCategory } from '@/lib/damperSchema'
+import DamperMatrixMastersView from '@/components/masters/DamperMatrixMastersView'
 import type { MastersSheetRowsParams } from '@/lib/queries'
 
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 200] as const
@@ -200,6 +202,14 @@ export default function MastersCategoryPage() {
       setExportBusy(false)
     }
   }, [category, exportBusy, sheetFilters, supplierId, supplierLabel])
+
+  if (category && isDamperCatalogCategory(category)) {
+    return (
+      <PageShell title={`Masters / ${damperSheetLabel(category)}`}>
+        <DamperMatrixMastersView catalogKey={category} />
+      </PageShell>
+    )
+  }
 
   return (
     <PageShell

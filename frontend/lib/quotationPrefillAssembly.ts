@@ -20,6 +20,8 @@ const LABEL_TO_OPERATOR_KEY: Record<string, OperatorKey> = {
   'Double Acting (DA)': 'da',
   'Single Acting (SA)': 'sa',
   'Electric Actuator': 'electric_actuator',
+  'Pneumatic Rack and Pinion Actuator': 'pneumatic_rack_pinion',
+  'Pneumatic Cylinder': 'pneumatic_cylinder',
 }
 
 function accessoryFromType(t: string | undefined): AccessoryItem | null {

@@ -8,6 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from config.permissions import Permission
 from controllers import enquiry_controller
 from controllers.enquiry_controller import (
+    EmailApprovalRequest,
+    EmailApprovalResponse,
     EmailInboxItem,
     EnquiryListItem,
     EnquiryResponse,
@@ -100,6 +102,16 @@ async def search_clients_route(
     q: str | None = Query(None),
 ):
     return await enquiry_controller.handle_get_clients(q)
+
+
+@router.post("/{enquiry_id}/email-approval", response_model=EmailApprovalResponse)
+async def email_approval_route(
+    enquiry_id: str,
+    body: EmailApprovalRequest,
+    user: CurrentUser = Depends(require_permission(Permission.VIEW_ENQUIRIES)),
+    db: AsyncSession = Depends(get_db),
+):
+    return await enquiry_controller.handle_decide_email_approval(enquiry_id, body, db, user)
 
 
 @router.post("/{enquiry_id}/process-matcher", response_model=MatcherProcessResponse)

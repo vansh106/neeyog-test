@@ -298,7 +298,11 @@ def _row_to_operator(r: CatalogOperatorRow) -> dict | None:
 def _is_ball_or_butterfly_configurator_category(catalog_category: str | None) -> bool:
     if catalog_category == "butterfly_valve":
         return True
-    return bool(catalog_category and catalog_category.startswith("fp_ball_valve_"))
+    if catalog_category and catalog_category.startswith("fp_ball_valve_"):
+        return True
+    from services.damper_schema import is_damper_catalog_key
+
+    return bool(catalog_category and is_damper_catalog_key(catalog_category))
 
 
 async def get_operators_for_valve(
@@ -477,9 +481,11 @@ def calculate_assembly_price(
 def build_operator_options(
     da_operators: list[dict],
     sa_operators: list[dict],
+    *,
+    include_damper_operators: bool = False,
 ) -> list[dict]:
-    """Build the six fixed operator cards with current availability info."""
-    return [
+    """Build fixed operator cards with current availability info."""
+    options = [
         {
             "key": "bare_shaft",
             "label": "Bare Shaft",
@@ -531,3 +537,25 @@ def build_operator_options(
             "unlocks_accessories": True,
         },
     ]
+    if include_damper_operators:
+        options.extend(
+            [
+                {
+                    "key": "pneumatic_rack_pinion",
+                    "label": "Pneumatic Rack and Pinion Actuator",
+                    "description": "Pneumatic rack and pinion — price on request",
+                    "has_price": False,
+                    "price": None,
+                    "unlocks_accessories": True,
+                },
+                {
+                    "key": "pneumatic_cylinder",
+                    "label": "Pneumatic Cylinder",
+                    "description": "Pneumatic cylinder — price on request",
+                    "has_price": False,
+                    "price": None,
+                    "unlocks_accessories": True,
+                },
+            ]
+        )
+    return options

@@ -23,6 +23,7 @@ import MastersEditor from '@/components/masters/MastersEditor'
 import SupplierPricingTab from '@/components/masters/SupplierPricingTab'
 import SuppliersTab from '@/components/masters/SuppliersTab'
 import ClientsTab from '@/components/masters/ClientsTab'
+import OthersMastersTab from '@/components/masters/OthersMastersTab'
 
 function formatProductSize(p: Product): string {
   if (p.size_inch != null && p.size_mm != null) {
@@ -77,6 +78,7 @@ function parseCatalogRefFromProductId(productId: string): { catalog_table: strin
 const MASTERS_TABS = new Set([
   'catalog',
   'edit',
+  'others',
   'clients',
   'suppliers',
   'supplier-pricing',
@@ -138,6 +140,7 @@ export default function MastersPage() {
         <TabsList className="mb-6 flex flex-wrap gap-1">
           <TabsTrigger value="catalog">Product Catalog</TabsTrigger>
           <TabsTrigger value="edit">Edit Masters</TabsTrigger>
+          <TabsTrigger value="others">Others</TabsTrigger>
           <TabsTrigger value="clients">Clients</TabsTrigger>
           <TabsTrigger value="suppliers">Suppliers</TabsTrigger>
           <TabsTrigger value="supplier-pricing">Supplier pricing</TabsTrigger>
@@ -274,6 +277,10 @@ export default function MastersPage() {
 
         <TabsContent value="edit" className="mt-0">
           <MastersEditor initialCategory={initialCategory} />
+        </TabsContent>
+
+        <TabsContent value="others" className="mt-0">
+          <OthersMastersTab />
         </TabsContent>
 
         <TabsContent value="clients" className="mt-0">

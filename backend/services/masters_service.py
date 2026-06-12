@@ -24,6 +24,8 @@ from db.final_product_models import (
     FinalProductSheetMarker,
 )
 from db.butterfly_sheet_constants import BUTTERFLY_NAV_SOURCE_FILE
+from db.others_models import is_others_catalog_key
+from services.damper_schema import is_damper_catalog_key
 from db.sheet_models import (
     CatalogBracketsCouplerRow,
     CatalogButterflyValveRow,
@@ -32,6 +34,7 @@ from db.sheet_models import (
     CatalogPositionerRow,
     CatalogSovRow,
 )
+from services import others_masters_service
 
 
 SHEET_MODEL_BY_KEY: dict[str, type] = {
@@ -112,12 +115,28 @@ def _column_label(field: str) -> str:
 
 def get_cascade_schema(category: str) -> list[dict[str, str]]:
     """Static ordered steps for a catalog sheet key (no DB)."""
+    if is_damper_catalog_key(category):
+        from services.damper_schema import damper_fields_for_key
+
+        return [
+            {"key": f["key"], "label": f["label"]}
+            for f in damper_fields_for_key(category)
+            if f.get("input_type") == "select"
+        ]
+    if is_others_catalog_key(category):
+        return [{"key": s, "label": _column_label(s)} for s in others_masters_service.OTHERS_CASCADE_STEPS]
     steps = CASCADE_STEPS.get(category, [])
     return [{"key": s, "label": _column_label(s)} for s in steps]
 
 
+def _cascade_steps_for_category(category: str) -> list[str]:
+    if is_others_catalog_key(category):
+        return others_masters_service.OTHERS_CASCADE_STEPS
+    return CASCADE_STEPS.get(category, [])
+
+
 def _cascade_prior_keys(category: str, field: str) -> list[str]:
-    steps = CASCADE_STEPS.get(category, [])
+    steps = _cascade_steps_for_category(category)
     if field not in steps:
         return []
     idx = steps.index(field)
@@ -125,7 +144,7 @@ def _cascade_prior_keys(category: str, field: str) -> list[str]:
 
 
 def _sanitize_cascade_filters(category: str, filters: dict[str, str], allowed_keys: set[str] | None = None) -> dict[str, str]:
-    steps = set(CASCADE_STEPS.get(category, []))
+    steps = set(_cascade_steps_for_category(category))
     out: dict[str, str] = {}
     for k, v in (filters or {}).items():
         if k not in steps:
@@ -210,6 +229,8 @@ async def get_product_categories(db: AsyncSession) -> list[dict[str, str | int]]
         ).scalar_one()
         n = int(total or 0)
         keyed.append((key, n))
+    for oc in await others_masters_service.list_catalog_categories(db):
+        keyed.append((str(oc["key"]), int(oc["count"])))
 
     with_products = [(k, n) for k, n in keyed if n > 0]
     use = with_products if with_products else keyed
@@ -335,8 +356,23 @@ async def get_cascade_distinct_field_values(
     category: str, field: str, filters: dict[str, str], db: AsyncSession
 ) -> list[str]:
     """Distinct non-empty values for one cascade column given prior selections."""
+    if is_others_catalog_key(category):
+        rows = await others_masters_service.get_full_catalog_for_key(db, category)
+        out: list[str] = []
+        seen: set[str] = set()
+        for row in rows:
+            cell = row.get(field)
+            norm = _normalize_distinct_cell(cell)
+            if norm is None:
+                continue
+            s = str(cell).strip()
+            if s and s not in seen:
+                seen.add(s)
+                out.append(s)
+        out.sort(key=str.lower)
+        return out
     model = SHEET_MODEL_BY_KEY.get(category)
-    steps = CASCADE_STEPS.get(category, [])
+    steps = _cascade_steps_for_category(category)
     if model is None or field not in steps or not hasattr(model, field):
         return []
     allowed = set(_cascade_prior_keys(category, field))
@@ -369,6 +405,32 @@ async def get_cascade_distinct_field_values(
 
 async def get_cascade_matching_products(category: str, filters: dict[str, str], db: AsyncSession) -> list[dict]:
     """All catalog rows matching the current cascade filters (may be 0, 1, or many)."""
+    if is_others_catalog_key(category):
+        rows = await others_masters_service.get_full_catalog_for_key(db, category)
+        fdict = _sanitize_cascade_filters(category, filters)
+        matched = [
+            r
+            for r in rows
+            if all(str(r.get(k) or "").strip() == v for k, v in fdict.items())
+        ]
+        out: list[dict] = []
+        for r in matched:
+            desc = str(r.get("description") or "").strip() or "Product"
+            price = float(r.get("price_inr") or 0.0)
+            rid = str(r.get("row_id") or r.get("id") or "")
+            out.append(
+                {
+                    "id": f"{category}:{rid}",
+                    "name": desc,
+                    "size_inch": None,
+                    "size_mm": None,
+                    "material": "",
+                    "base_price": price if price > 0 else None,
+                    "unit": "Nos",
+                    "display_label": f"{desc} — ₹{price:,.0f}/Nos" if price > 0 else desc,
+                }
+            )
+        return out
     model = SHEET_MODEL_BY_KEY.get(category)
     if model is None:
         return []
@@ -454,6 +516,10 @@ async def get_full_category_catalog(category: str, db: AsyncSession) -> list[dic
     Used for client-side cascade filtering in the Masters editor (one fetch
     per category per browser session on the frontend).
     """
+    if is_damper_catalog_key(category):
+        return []
+    if is_others_catalog_key(category):
+        return await others_masters_service.get_full_catalog_for_key(db, category)
     model = SHEET_MODEL_BY_KEY.get(category)
     if model is None:
         return []

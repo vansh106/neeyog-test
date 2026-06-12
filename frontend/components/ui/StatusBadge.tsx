@@ -25,6 +25,9 @@ const STATUS_STYLES: Record<string, string> = {
   awaiting_info:     'bg-amber-50 text-amber-700 border border-amber-200',
   quoted:            'bg-[#F0F7F2] text-[#235A32] border border-[#AEDAB5]',
   matcher_ready:     'bg-violet-50 text-violet-800 border border-violet-200',
+  pending_email_approval: 'bg-amber-50 text-amber-900 border border-amber-200',
+  email_approved:    'bg-sky-50 text-sky-800 border border-sky-200',
+  email_rejected:    'bg-red-50 text-red-700 border border-red-200',
 }
 
 export default function StatusBadge({

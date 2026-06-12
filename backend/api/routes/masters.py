@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config.permissions import Permission
-from controllers import masters_controller
+from controllers import damper_masters_controller, masters_controller, others_masters_controller
 from core.auth_middleware import CurrentUser, require_permission
 from core.database import get_db
 
@@ -31,6 +31,24 @@ class CascadeRowsBody(BaseModel):
 
 class SetSheetDefaultSupplierBody(BaseModel):
     supplier_id: str
+
+
+class OthersNameBody(BaseModel):
+    name: str
+
+
+class OthersRowBody(BaseModel):
+    sr_no: float | None = None
+    description: str | None = None
+    price_inr: float | None = None
+
+
+class OthersRowUpdateBody(BaseModel):
+    sr_no: float | None = None
+    description: str | None = None
+    price_inr: float | None = None
+    clear_sr_no: bool = False
+    clear_price: bool = False
 
 
 @router.get("/sheet-default-suppliers")
@@ -215,3 +233,143 @@ async def list_clients_dropdown_route(
     db: AsyncSession = Depends(get_db),
 ):
     return await masters_controller.handle_clients_dropdown(db, search)
+
+
+# ── Dampers (matrix spec family) ────────────────────────────────────────
+
+
+@router.get("/dampers/sheets")
+async def dampers_list_sheets_route(
+    _user: CurrentUser = Depends(require_permission(Permission.MASTERS_VIEW)),
+):
+    return await damper_masters_controller.handle_list_sheets()
+
+
+@router.get("/dampers/{catalog_key}/schema")
+async def dampers_schema_route(
+    catalog_key: str,
+    _user: CurrentUser = Depends(require_permission(Permission.MASTERS_VIEW)),
+):
+    return await damper_masters_controller.handle_get_schema(catalog_key)
+
+
+# ── Others (dynamic product family) ─────────────────────────────────────
+
+
+@router.get("/others/tree")
+async def others_tree_route(
+    _user: CurrentUser = Depends(require_permission(Permission.MASTERS_VIEW)),
+    db: AsyncSession = Depends(get_db),
+):
+    return await others_masters_controller.handle_get_tree(db)
+
+
+@router.post("/others/categories")
+async def others_create_category_route(
+    body: OthersNameBody,
+    _user: CurrentUser = Depends(require_permission(Permission.MASTERS_EDIT)),
+    db: AsyncSession = Depends(get_db),
+):
+    return await others_masters_controller.handle_create_category(db, body.name)
+
+
+@router.patch("/others/categories/{category_id}")
+async def others_update_category_route(
+    category_id: str,
+    body: OthersNameBody,
+    _user: CurrentUser = Depends(require_permission(Permission.MASTERS_EDIT)),
+    db: AsyncSession = Depends(get_db),
+):
+    return await others_masters_controller.handle_update_category(db, category_id, body.name)
+
+
+@router.delete("/others/categories/{category_id}")
+async def others_delete_category_route(
+    category_id: str,
+    _user: CurrentUser = Depends(require_permission(Permission.MASTERS_EDIT)),
+    db: AsyncSession = Depends(get_db),
+):
+    return await others_masters_controller.handle_delete_category(db, category_id)
+
+
+@router.post("/others/categories/{category_id}/sheets")
+async def others_create_sheet_route(
+    category_id: str,
+    body: OthersNameBody,
+    _user: CurrentUser = Depends(require_permission(Permission.MASTERS_EDIT)),
+    db: AsyncSession = Depends(get_db),
+):
+    return await others_masters_controller.handle_create_sheet(db, category_id, body.name)
+
+
+@router.patch("/others/sheets/{sheet_id}")
+async def others_update_sheet_route(
+    sheet_id: str,
+    body: OthersNameBody,
+    _user: CurrentUser = Depends(require_permission(Permission.MASTERS_EDIT)),
+    db: AsyncSession = Depends(get_db),
+):
+    return await others_masters_controller.handle_update_sheet(db, sheet_id, body.name)
+
+
+@router.delete("/others/sheets/{sheet_id}")
+async def others_delete_sheet_route(
+    sheet_id: str,
+    _user: CurrentUser = Depends(require_permission(Permission.MASTERS_EDIT)),
+    db: AsyncSession = Depends(get_db),
+):
+    return await others_masters_controller.handle_delete_sheet(db, sheet_id)
+
+
+@router.get("/others/sheets/{sheet_id}/rows")
+async def others_list_rows_route(
+    sheet_id: str,
+    _user: CurrentUser = Depends(require_permission(Permission.MASTERS_VIEW)),
+    db: AsyncSession = Depends(get_db),
+):
+    return await others_masters_controller.handle_list_rows(db, sheet_id)
+
+
+@router.post("/others/sheets/{sheet_id}/rows")
+async def others_create_row_route(
+    sheet_id: str,
+    body: OthersRowBody,
+    _user: CurrentUser = Depends(require_permission(Permission.MASTERS_EDIT)),
+    db: AsyncSession = Depends(get_db),
+):
+    return await others_masters_controller.handle_create_row(
+        db,
+        sheet_id,
+        sr_no=body.sr_no,
+        description=body.description,
+        price_inr=body.price_inr,
+    )
+
+
+@router.patch("/others/sheets/{sheet_id}/rows/{row_id}")
+async def others_update_row_route(
+    sheet_id: str,
+    row_id: str,
+    body: OthersRowUpdateBody,
+    _user: CurrentUser = Depends(require_permission(Permission.MASTERS_EDIT)),
+    db: AsyncSession = Depends(get_db),
+):
+    return await others_masters_controller.handle_update_row(
+        db,
+        row_id,
+        sr_no=body.sr_no,
+        description=body.description,
+        price_inr=body.price_inr,
+        clear_sr_no=body.clear_sr_no,
+        clear_price=body.clear_price,
+    )
+
+
+@router.delete("/others/sheets/{sheet_id}/rows/{row_id}")
+async def others_delete_row_route(
+    sheet_id: str,
+    row_id: str,
+    _user: CurrentUser = Depends(require_permission(Permission.MASTERS_EDIT)),
+    db: AsyncSession = Depends(get_db),
+):
+    return await others_masters_controller.handle_delete_row(db, row_id)

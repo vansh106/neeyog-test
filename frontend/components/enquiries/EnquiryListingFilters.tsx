@@ -18,6 +18,8 @@ import type { EnquiryListingFilters as Filters } from '@/lib/filterEnquiriesLoca
 const STATUS_OPTIONS = [
   { value: 'ALL', label: 'ALL' },
   { value: 'received', label: 'Received' },
+  { value: 'pending_email_approval', label: 'Pending email approval' },
+  { value: 'email_rejected', label: 'Email rejected' },
   { value: 'parsing', label: 'Parsing' },
   { value: 'matching', label: 'Matching' },
   { value: 'quoting', label: 'Quoting' },

@@ -1,5 +1,6 @@
 /** Manual configurator: hose → fitting add-on flow (step 1 excludes fittings). */
 
+import { isDamperCatalogCategory, damperSheetLabel } from '@/lib/damperSchema'
 import {
   flattenMasterNavLeaves,
   findMasterNavPathForKey,
@@ -26,9 +27,11 @@ export function configuratorPickFromLeaf(leaf: MasterNavLeaf): ConfiguratorCatal
   }
 }
 
-/** Step-1 manual picker: Valves and Hoses only (no fittings / accessories). */
+/** Step-1 manual picker: Valves, Hoses, Dampers (no fittings / accessories). */
 export const CONFIGURATOR_STEP1_PRODUCT_NAV: MasterNavNode[] = MASTER_SIDEBAR_NAV.filter(
-  (n): n is MasterNavGroup => n.kind === 'group' && (n.label === 'Valves' || n.label === 'Hoses'),
+  (n): n is MasterNavGroup =>
+    n.kind === 'group' &&
+    (n.label === 'Valves' || n.label === 'Hoses' || n.label === 'Dampers'),
 )
 
 export const CONFIGURATOR_STEP1_CATEGORY_KEYS = new Set(
@@ -37,8 +40,10 @@ export const CONFIGURATOR_STEP1_CATEGORY_KEYS = new Set(
 
 export function configuratorLeafLabel(
   key: string,
-  opts?: { navSlug?: string | null; variantType?: string | null },
+  opts?: { navSlug?: string | null; variantType?: string | null; displayLabel?: string | null },
 ): string {
+  if (isOthersCatalogCategory(key) && opts?.displayLabel) return opts.displayLabel
+  if (isDamperCatalogCategory(key)) return damperSheetLabel(key)
   const leaves = flattenMasterNavLeaves(CONFIGURATOR_STEP1_PRODUCT_NAV)
   if (opts?.navSlug) {
     const bySlug = leaves.find((l) => l.navSlug === opts.navSlug)
@@ -71,13 +76,23 @@ export function findConfiguratorNavLeaf(
   return leaves.find((l) => l.key === key) ?? null
 }
 
+export const OTHERS_CATALOG_PREFIX = 'others_'
+
+export function isOthersCatalogCategory(key: string | null | undefined): boolean {
+  return !!key && key.startsWith(OTHERS_CATALOG_PREFIX)
+}
+
+export type ConfiguratorProductFamily = 'Valves' | 'Hoses' | 'Dampers' | 'Others'
+
 export function configuratorProductFamilyForKey(
   key: string | null | undefined,
-): 'Valves' | 'Hoses' | null {
+): ConfiguratorProductFamily | null {
   if (!key) return null
+  if (isOthersCatalogCategory(key)) return 'Others'
+  if (isDamperCatalogCategory(key)) return 'Dampers'
   const path = findMasterNavPathForKey(key, CONFIGURATOR_STEP1_PRODUCT_NAV)
   const root = path?.[0]
-  if (root === 'Valves' || root === 'Hoses') return root
+  if (root === 'Valves' || root === 'Hoses' || root === 'Dampers') return root
   return key.startsWith('fp_hose_') ? 'Hoses' : 'Valves'
 }
 
@@ -85,9 +100,10 @@ export function isHoseCatalogCategory(key: string | null | undefined): boolean {
   return configuratorProductFamilyForKey(key) === 'Hoses'
 }
 
-/** Butterfly valve or any sheet under the Ball Valve family in step-1 nav. */
+/** Butterfly / ball valve sheets and dampers use operator + accessories flow. */
 export function supportsOperatorAccessoryFlowCategory(key: string | null | undefined): boolean {
-  if (!key) return false
+  if (!key || isTemporaryCatalogCategory(key)) return false
+  if (isDamperCatalogCategory(key)) return true
   if (key === 'butterfly_valve') return true
   if (key.startsWith('fp_ball_valve_')) return true
   const path = findMasterNavPathForKey(key, CONFIGURATOR_STEP1_PRODUCT_NAV)
@@ -100,6 +116,7 @@ export function operatorValveTypeForCategory(
   displayType?: string | null,
 ): string {
   if (!catalogCategory) return displayType?.trim() || 'Valve'
+  if (isDamperCatalogCategory(catalogCategory)) return 'Damper'
   if (catalogCategory === 'butterfly_valve') return 'Butterfly Valve'
   if (catalogCategory.startsWith('fp_ball_valve_')) return 'Ball Valve'
   const path = findMasterNavPathForKey(catalogCategory, CONFIGURATOR_STEP1_PRODUCT_NAV)
@@ -116,6 +133,13 @@ export const HOSE_CATEGORIES_WITH_FITTINGS = new Set([
 
 /** Sentinel — hose end with no fitting (manual upload only). */
 export const BARE_FITTING_CATALOG_KEY = '__bare_fitting__'
+
+/** Sentinel — free-text product not in catalog (manual upload only). */
+export const TEMPORARY_PRODUCT_CATALOG_KEY = '__temporary_product__'
+
+export function isTemporaryCatalogCategory(key: string | null | undefined): boolean {
+  return key === TEMPORARY_PRODUCT_CATALOG_KEY
+}
 
 export const FITTING_CATALOG_OPTIONS: { key: string; label: string }[] = [
   { key: 'fp_fittings_sms_nut', label: 'SMS nut' },
