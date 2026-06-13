@@ -11,9 +11,11 @@ from controllers import quotation_controller
 from controllers.quotation_controller import (
     QuotationAuditResponse,
     QuotationCrmStatusBody,
+    QuotationFinancialSummaryBody,
     QuotationHistoryResponse,
     QuotationListItem,
     QuotationPdfDisplayBody,
+    QuotationTermCreateBody,
     QuotationUpdateLineItemsBody,
 )
 from core.auth_middleware import CurrentUser, require_permission
@@ -57,6 +59,35 @@ async def get_product_quote_history_route(
         seat=seat,
         limit=limit,
         offset=offset,
+    )
+
+
+@router.get("/terms-master")
+async def list_quotation_terms_master_route(
+    _user: CurrentUser = Depends(require_permission(Permission.VIEW_QUOTATIONS)),
+    db: AsyncSession = Depends(get_db),
+):
+    return await quotation_controller.handle_list_quotation_term_templates(db)
+
+
+@router.post("/terms-master")
+async def create_quotation_term_master_route(
+    body: QuotationTermCreateBody,
+    user: CurrentUser = Depends(require_permission(Permission.APPROVE_QUOTATIONS)),
+    db: AsyncSession = Depends(get_db),
+):
+    return await quotation_controller.handle_create_quotation_term_template(body, db, user)
+
+
+@router.patch("/{quotation_id}/financial-summary")
+async def patch_quotation_financial_summary_route(
+    quotation_id: str,
+    body: QuotationFinancialSummaryBody,
+    user: CurrentUser = Depends(require_permission(Permission.APPROVE_QUOTATIONS)),
+    db: AsyncSession = Depends(get_db),
+):
+    return await quotation_controller.handle_patch_quotation_financial_summary(
+        quotation_id, body, db, user
     )
 
 
@@ -106,10 +137,10 @@ async def get_quotation_audit_route(
 @router.get("/{quotation_id}/pdf")
 async def get_quotation_pdf_route(
     quotation_id: str,
-    _user: CurrentUser = Depends(require_permission(Permission.DOWNLOAD_PDF)),
+    user: CurrentUser = Depends(require_permission(Permission.DOWNLOAD_PDF)),
     db: AsyncSession = Depends(get_db),
 ):
-    pdf_path = await quotation_controller.handle_get_quotation_pdf(quotation_id, db)
+    pdf_path = await quotation_controller.handle_get_quotation_pdf(quotation_id, db, user)
     return FileResponse(
         path=pdf_path,
         media_type="application/pdf",

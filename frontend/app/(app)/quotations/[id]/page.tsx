@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
-import { FilePenLine, FileText, Pencil } from 'lucide-react'
+import { FilePenLine, FileText, Eye, Pencil } from 'lucide-react'
 import { useCallback, useMemo, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import PageShell from '@/components/layout/PageShell'
@@ -12,6 +12,9 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Button, buttonVariants } from '@/components/ui/button'
 import QuotationLineItemsEditor from '@/components/quotations/QuotationLineItemsEditor'
 import QuotationFormatPreview from '@/components/quotations/QuotationFormatPreview'
+import QuotationFinancialEditor from '@/components/quotations/QuotationFinancialEditor'
+import QuotationTermsEditor from '@/components/quotations/QuotationTermsEditor'
+import QuotationAuditChangeModal from '@/components/quotations/QuotationAuditChangeModal'
 import QuotationPdfEditorDialog from '@/components/quotations/QuotationPdfEditorDialog'
 import {
   Dialog,
@@ -37,7 +40,9 @@ import { useAuthStore } from '@/stores/authStore'
 import { formatCurrency, truncateId } from '@/lib/utils'
 import type {
   AssembledProduct,
+  Quotation,
   QuotationAuditResponse,
+  QuotationAuditItem,
   QuotationHistoryResponse,
   QuotationLineItem,
 } from '@/types'
@@ -82,6 +87,8 @@ export default function QuotationDetailPage() {
   const [auditLoading, setAuditLoading] = useState(false)
   const [auditError, setAuditError] = useState<string | null>(null)
   const [auditData, setAuditData] = useState<QuotationAuditResponse | null>(null)
+  const [auditDetailItem, setAuditDetailItem] = useState<QuotationAuditItem | null>(null)
+  const [auditDetailOpen, setAuditDetailOpen] = useState(false)
 
   const [pdfEditOpen, setPdfEditOpen] = useState(false)
   const [pdfDownloadBusy, setPdfDownloadBusy] = useState(false)
@@ -233,7 +240,7 @@ export default function QuotationDetailPage() {
       </nav>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
-        <div className="lg:col-span-3">
+        <div className="space-y-6 lg:col-span-3">
           <div className="overflow-hidden rounded-xl border border-[#E2E6DC] bg-white shadow-sm">
             <div className="p-6 md:p-8">
               <QuotationFormatPreview
@@ -246,6 +253,23 @@ export default function QuotationDetailPage() {
               />
             </div>
           </div>
+
+          {canEditQuoteLines && (
+            <>
+              <QuotationFinancialEditor
+                quotation={quotation}
+                onSaved={(updated) => {
+                  queryClient.setQueryData(['quotation', id], updated)
+                }}
+              />
+              <QuotationTermsEditor
+                quotation={quotation}
+                onSaved={(updated) => {
+                  queryClient.setQueryData(['quotation', id], updated)
+                }}
+              />
+            </>
+          )}
         </div>
 
         <Dialog open={historyOpen} onOpenChange={setHistoryOpen}>
@@ -439,15 +463,28 @@ export default function QuotationDetailPage() {
                           className="rounded-lg border border-[#E2E6DC] bg-[#F9FAF7] p-3"
                         >
                           <div className="flex items-start justify-between gap-3">
-                            <div className="min-w-0">
+                            <div className="min-w-0 flex-1">
                               <p className="text-[13px] font-medium text-gray-900">{it.summary}</p>
                               <p className="mt-1 text-[12px] text-surface-muted truncate">
                                 {(it.user_name || it.user || 'User').toString()}
                               </p>
                             </div>
-                            <span className="shrink-0 text-[11px] font-mono text-surface-muted">
-                              {it.at ? new Date(it.at).toLocaleString('en-IN') : '—'}
-                            </span>
+                            <div className="flex shrink-0 items-start gap-2">
+                              <button
+                                  type="button"
+                                  aria-label="View change details"
+                                  className="rounded-md p-1.5 text-[#8A9488] hover:bg-white hover:text-brand-navy-500"
+                                  onClick={() => {
+                                    setAuditDetailItem(it)
+                                    setAuditDetailOpen(true)
+                                  }}
+                                >
+                                  <Eye className="size-4" />
+                                </button>
+                              <span className="text-[11px] font-mono text-surface-muted">
+                                {it.at ? new Date(it.at).toLocaleString('en-IN') : '—'}
+                              </span>
+                            </div>
                           </div>
                         </li>
                       ))}
@@ -459,6 +496,14 @@ export default function QuotationDetailPage() {
           </div>
         </aside>
       </div>
+
+      {quotation && (
+        <QuotationAuditChangeModal
+          open={auditDetailOpen}
+          onOpenChange={setAuditDetailOpen}
+          item={auditDetailItem}
+        />
+      )}
 
       {quotation && (
         <QuotationPdfEditorDialog

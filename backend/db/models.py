@@ -241,6 +241,18 @@ class Quotation(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
 
 
+class QuotationTermTemplate(Base):
+    """Master list of terms & conditions snippets for quotations."""
+
+    __tablename__ = "quotation_term_templates"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    client_config: Mapped[str] = mapped_column(String(100), nullable=False, default="parth_valves", index=True)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
 class QuotationProductHistory(Base):
     """Searchable snapshot of quoted product pricing per quote line."""
 

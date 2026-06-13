@@ -20,6 +20,11 @@ import {
   operatorLabel,
   uuidv4,
 } from '@/lib/manualAssemblyLineItem'
+import {
+  quotationGstAmount,
+  quotationGrandTotal,
+  quotationItemTotal,
+} from '@/lib/quotationTotals'
 import type {
   AssembledProduct,
   BranchResponse,
@@ -144,7 +149,7 @@ const toSelectValue = (v: string | null | undefined) =>
 const fromSelectValue = (v: string | null | undefined) => (!v || v === SELECT_EMPTY ? '' : v)
 
 function computeTaxTotals(
-  subtotal: number,
+  itemTotal: number,
   pfApplicable: boolean,
   pfMode: ChargeMode,
   pfDraft: string,
@@ -152,16 +157,18 @@ function computeTaxTotals(
   freightMode: ChargeMode,
   freightDraft: string,
 ) {
-  const gst = roundMoney(subtotal * DEFAULT_GST_RATE)
-  const { pf, defaultPf } = resolvePfAmount(subtotal, pfApplicable, pfMode, pfDraft)
-  const { freight } = resolveFreightAmount(subtotal, freightApplicable, freightMode, freightDraft)
+  const { pf, defaultPf } = resolvePfAmount(itemTotal, pfApplicable, pfMode, pfDraft)
+  const { freight } = resolveFreightAmount(itemTotal, freightApplicable, freightMode, freightDraft)
+  const taxableSubtotal = quotationItemTotal(itemTotal, pf, freight)
+  const gst = quotationGstAmount(taxableSubtotal, DEFAULT_GST_RATE * 100)
   return {
-    subtotal,
+    subtotal: itemTotal,
+    taxableSubtotal,
     gst,
     pf,
     defaultPf,
     freight,
-    grand: roundMoney(subtotal + gst + pf + freight),
+    grand: quotationGrandTotal(taxableSubtotal, gst),
   }
 }
 
@@ -2051,9 +2058,10 @@ export default function ManualEntryForm({
         <section className="rounded-xl border border-surface-border bg-white p-5 shadow-sm border-t-2 border-t-brand-navy-200">
           <h2 className="text-[15px] font-semibold text-gray-900">Net total &amp; taxes</h2>
           <p className="mt-1 text-[13px] text-surface-muted">
-            Subtotal uses each product&apos;s quoted unit price (after any customer discount from Step 5). GST is
-            18% on subtotal. P&amp;F and freight can each be entered as a flat amount (₹) or as a percentage of
-            subtotal; leave blank to use the default 3% for P&amp;F when enabled.
+            Item total is the sum of quoted line prices. P&amp;F and freight (when enabled) are added to
+            form the subtotal; GST @ 18% is calculated on that subtotal. P&amp;F and freight can each be
+            entered as a flat amount (₹) or as a percentage of item total; leave blank to use the default
+            3% for P&amp;F when enabled.
           </p>
           <div className="mt-4 space-y-3 text-[13px]">
             <div className="rounded-lg border border-surface-border bg-surface-page p-3">
@@ -2083,13 +2091,9 @@ export default function ManualEntryForm({
             </div>
             <div className="rounded-lg border border-surface-border bg-[#FAFAF8] p-4">
               <div className="grid grid-cols-[1fr_8.5rem] items-center gap-x-3 gap-y-0.5 text-[13px]">
-                <span className="text-surface-muted">Subtotal (excl. taxes)</span>
+                <span className="text-surface-muted">Item total</span>
                 <span className={NET_TOTAL_AMOUNT_COL}>
                   {netOrderTotals?.subtotal != null ? formatCurrency(netOrderTotals.subtotal) : '—'}
-                </span>
-                <span className="text-surface-muted">GST @ 18%</span>
-                <span className={NET_TOTAL_AMOUNT_COL}>
-                  {netOrderTotals?.gst != null ? formatCurrency(netOrderTotals.gst) : '—'}
                 </span>
                 <NetChargeRow
                   label="P&amp;F"
@@ -2108,7 +2112,7 @@ export default function ManualEntryForm({
                       ? netOrderTotals.defaultPf.toFixed(2)
                       : '0.00'
                   }
-                  percentAriaLabel="P and F as percent of subtotal"
+                  percentAriaLabel="P and F as percent of item total"
                   amountAriaLabel="P and F amount in INR"
                   appliedAmount={netOrderTotals?.pf}
                 />
@@ -2125,10 +2129,20 @@ export default function ManualEntryForm({
                   onDraftChange={setFreightDraft}
                   percentPlaceholder="e.g. 2"
                   amountPlaceholder="0.00"
-                  percentAriaLabel="Freight as percent of subtotal"
+                  percentAriaLabel="Freight as percent of item total"
                   amountAriaLabel="Freight amount in INR"
                   appliedAmount={netOrderTotals?.freight}
                 />
+                <span className="pt-1 font-medium text-gray-900">Subtotal (before tax)</span>
+                <span className={cn(NET_TOTAL_AMOUNT_COL, 'pt-1 font-medium text-gray-900')}>
+                  {netOrderTotals?.taxableSubtotal != null
+                    ? formatCurrency(netOrderTotals.taxableSubtotal)
+                    : '—'}
+                </span>
+                <span className="text-surface-muted">GST @ 18%</span>
+                <span className={NET_TOTAL_AMOUNT_COL}>
+                  {netOrderTotals?.gst != null ? formatCurrency(netOrderTotals.gst) : '—'}
+                </span>
               </div>
               <div className="mt-3 grid grid-cols-[1fr_8.5rem] items-center gap-x-3 border-t border-surface-border pt-3 text-[13px] font-semibold text-gray-900">
                 <span>Net total (incl. taxes)</span>
@@ -2139,7 +2153,7 @@ export default function ManualEntryForm({
             </div>
             {netOrderTotals?.hasUnpriced && (
               <p className="text-[12px] text-brand-gold-700">
-                Items marked {PRICE_TBD_LABEL} are excluded from subtotal and net total until a list price is available.
+                Items marked {PRICE_TBD_LABEL} are excluded from item total and net total until a list price is available.
               </p>
             )}
           </div>

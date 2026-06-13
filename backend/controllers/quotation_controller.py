@@ -14,6 +14,7 @@ from core.auth_middleware import CurrentUser
 from core.exceptions import ProductNotFoundError, QuotationBuildError
 from db.models import Quotation
 from services import quotation_service
+from services import quotation_terms_service
 
 
 def _quotation_api_dict(q: Quotation) -> dict:
@@ -60,6 +61,11 @@ def _quotation_api_dict(q: Quotation) -> dict:
         "pdf_display_overrides": q.pdf_display_overrides if isinstance(q.pdf_display_overrides, dict) else None,
         "created_at": q.created_at.isoformat() if q.created_at else None,
         "created_by_name": (q.created_by_name or "").strip() or None,
+        "created_by_email": (
+            str(q.created_by_user.email).strip()
+            if getattr(q, "created_by_user", None) is not None and getattr(q.created_by_user, "email", None)
+            else None
+        ),
     }
 
 
@@ -112,6 +118,30 @@ class QuotationPdfDisplayBody(BaseModel):
     pdf_display_overrides: dict | None = None
 
 
+class QuotationFinancialSummaryBody(BaseModel):
+    pf_applicable: bool = Field(True, alias="pfApplicable")
+    pf_mode: str = Field("percent", alias="pfMode")
+    pf_draft: str = Field("", alias="pfDraft")
+    freight_applicable: bool = Field(True, alias="freightApplicable")
+    freight_mode: str = Field("amount", alias="freightMode")
+    freight_draft: str = Field("", alias="freightDraft")
+    cgst_applicable: bool = Field(True, alias="cgstApplicable")
+    cgst_mode: str = Field("percent", alias="cgstMode")
+    cgst_draft: str = Field("9", alias="cgstDraft")
+    sgst_applicable: bool = Field(True, alias="sgstApplicable")
+    sgst_mode: str = Field("percent", alias="sgstMode")
+    sgst_draft: str = Field("9", alias="sgstDraft")
+    igst_applicable: bool = Field(False, alias="igstApplicable")
+    igst_mode: str = Field("percent", alias="igstMode")
+    igst_draft: str = Field("18", alias="igstDraft")
+
+    model_config = {"populate_by_name": True}
+
+
+class QuotationTermCreateBody(BaseModel):
+    body: str = Field(..., min_length=1, max_length=1500)
+
+
 class QuotationCrmStatusBody(BaseModel):
     """Listing CRM status: PO received, Ongoing, Lost, Hold (remarks required for Lost/Hold)."""
 
@@ -126,6 +156,7 @@ class QuotationAuditItem(BaseModel):
     action: str
     summary: str
     diff: dict | None = None
+    change_view: dict | None = None
 
 
 class QuotationAuditResponse(BaseModel):
@@ -169,28 +200,44 @@ async def handle_get_quotation_audit(
         for r in rows:
             details = r.details if isinstance(r.details, dict) else {}
             diff = details.get("diff") if isinstance(details.get("diff"), dict) else None
+            change_view = details.get("change_view") if isinstance(details.get("change_view"), dict) else None
+            action = str(r.action or "quotation_edited")
             counts = (diff or {}).get("counts") if isinstance((diff or {}).get("counts"), dict) else {}
             ch = int(counts.get("changed") or 0)
             ad = int(counts.get("added") or 0)
             rm = int(counts.get("removed") or 0)
-            summary = "Edited quotation"
-            parts = []
-            if ch:
-                parts.append(f"{ch} line(s) changed")
-            if ad:
-                parts.append(f"{ad} added")
-            if rm:
-                parts.append(f"{rm} removed")
-            if parts:
-                summary = ", ".join(parts)
+            changed_keys = change_view.get("changed_keys") if isinstance(change_view, dict) else None
+            ck_count = len(changed_keys) if isinstance(changed_keys, list) else 0
+
+            if action == "quotation_financial_summary_updated":
+                summary = "Updated financial summary"
+            elif action == "quotation_pdf_display_updated":
+                summary = "Updated PDF display"
+            elif action == "quotation_crm_status":
+                summary = "Updated CRM status"
+            else:
+                summary = "Edited quotation"
+                parts = []
+                if ch:
+                    parts.append(f"{ch} line(s) changed")
+                if ad:
+                    parts.append(f"{ad} added")
+                if rm:
+                    parts.append(f"{rm} removed")
+                if parts:
+                    summary = ", ".join(parts)
+                elif ck_count:
+                    summary = f"{ck_count} field(s) changed"
+
             items.append(
                 QuotationAuditItem(
                     at=r.created_at.isoformat() if r.created_at else "",
                     user=str(r.performed_by or ""),
                     user_name=str(details.get("performed_by_name") or "") or None,
-                    action=str(r.action or "quotation_edited"),
+                    action=action,
                     summary=summary,
                     diff=diff,
+                    change_view=change_view,
                 )
             )
         return QuotationAuditResponse(items=items)
@@ -237,9 +284,15 @@ async def handle_patch_quotation_pdf_display(
 async def handle_get_quotation_pdf(
     quotation_id: str,
     db: AsyncSession,
+    user: CurrentUser,
 ) -> str:
     try:
-        return await quotation_service.get_quotation_pdf_path(quotation_id, db)
+        return await quotation_service.get_quotation_pdf_path(
+            quotation_id,
+            db,
+            prepared_by_email=user.email,
+            prepared_by_name=user.full_name or None,
+        )
     except ProductNotFoundError:
         raise HTTPException(status_code=404, detail="Quotation not found")
     except QuotationBuildError as e:
@@ -385,5 +438,50 @@ async def handle_get_product_quote_history(
                 for r in rows
             ],
         )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+async def handle_patch_quotation_financial_summary(
+    quotation_id: str,
+    body: QuotationFinancialSummaryBody,
+    db: AsyncSession,
+    user: CurrentUser,
+) -> dict:
+    try:
+        q = await quotation_service.update_quotation_financial_summary(
+            quotation_id,
+            body.model_dump(by_alias=True),
+            db,
+            performed_by=user.email,
+            performed_by_name=user.full_name or None,
+        )
+        return _quotation_api_dict(q)
+    except ProductNotFoundError:
+        raise HTTPException(status_code=404, detail="Quotation not found")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+async def handle_list_quotation_term_templates(db: AsyncSession) -> dict:
+    try:
+        items = await quotation_terms_service.list_term_templates(db)
+        return {"items": items}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+async def handle_create_quotation_term_template(
+    body: QuotationTermCreateBody,
+    db: AsyncSession,
+    user: CurrentUser,
+) -> dict:
+    try:
+        row = await quotation_terms_service.create_term_template(db, body.body)
+        return row
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

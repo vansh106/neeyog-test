@@ -4,6 +4,7 @@ Pure service — no FastAPI imports, no HTTPException.
 Raises only from core.exceptions.
 """
 
+import copy
 import json
 import uuid
 from datetime import date, datetime, timedelta, timezone
@@ -18,6 +19,12 @@ from core.exceptions import ProductNotFoundError, QuotationBuildError
 from db.models import AuditLog, ClientCompany, Quotation, QuotationProductHistory
 from services import enquiry_service as enquiry_svc
 from services.pdf_service import generate_quotation_pdf
+from services.quotation_audit_diff import (
+    build_financial_change_view,
+    build_line_items_change_view,
+    build_pdf_change_view,
+    financial_rows_from_quotation,
+)
 
 QUOTATION_CRM_STATUSES: frozenset[str] = frozenset({"po_received", "lost", "hold", "ongoing"})
 
@@ -87,12 +94,294 @@ def _trim_pdf_display_overrides(overrides: dict | None, line_count: int) -> dict
             out.pop("valuation_supplement_rows", None)
     if "notes" in out and out["notes"] is not None:
         out["notes"] = _trim_str(out["notes"], 20000)
+    fc = out.get("financial_config")
+    if isinstance(fc, dict):
+        out["financial_config"] = fc
     if not out:
         return None
     return out
 
 
-def _quotation_payload_for_pdf(q: Quotation) -> dict:
+def _parse_bool(v: object, default: bool = False) -> bool:
+    if isinstance(v, bool):
+        return v
+    if v is None:
+        return default
+    s = str(v).strip().lower()
+    if s in ("1", "true", "yes", "on"):
+        return True
+    if s in ("0", "false", "no", "off"):
+        return False
+    return default
+
+
+def _parse_charge_mode(v: object) -> str:
+    s = str(v or "percent").strip().lower()
+    return "amount" if s == "amount" else "percent"
+
+
+def _resolve_charge_amount(
+    base: float,
+    *,
+    applicable: bool,
+    mode: str,
+    draft: str | None,
+    default_percent: float | None = None,
+) -> tuple[float, float | None]:
+    if not applicable or base <= 0:
+        return 0.0, None
+    raw = str(draft or "").strip().replace(",", "")
+    if not raw:
+        if default_percent is not None and mode == "percent":
+            return round(base * (default_percent / 100.0), 2), default_percent
+        return 0.0, None
+    try:
+        n = float(raw)
+    except (TypeError, ValueError):
+        if default_percent is not None and mode == "percent":
+            return round(base * (default_percent / 100.0), 2), default_percent
+        return 0.0, None
+    if n < 0:
+        return 0.0, None
+    if mode == "percent":
+        return round(base * (n / 100.0), 2), n
+    return round(n, 2), None
+
+
+def compute_financial_summary_from_config(
+    item_total: float,
+    body: dict,
+) -> dict:
+    """Compute quotation totals from item total and charge toggles/drafts."""
+    item_total = round(float(item_total or 0), 2)
+    pf_applicable = _parse_bool(body.get("pf_applicable", body.get("pfApplicable")), True)
+    pf_mode = _parse_charge_mode(body.get("pf_mode", body.get("pfMode")))
+    pf_draft = body.get("pf_draft", body.get("pfDraft"))
+    pf_amount, pf_rate = _resolve_charge_amount(
+        item_total,
+        applicable=pf_applicable,
+        mode=pf_mode,
+        draft=str(pf_draft) if pf_draft is not None else None,
+        default_percent=3.0 if pf_mode == "percent" else None,
+    )
+
+    freight_applicable = _parse_bool(body.get("freight_applicable", body.get("freightApplicable")), True)
+    freight_mode = _parse_charge_mode(body.get("freight_mode", body.get("freightMode")))
+    freight_draft = body.get("freight_draft", body.get("freightDraft"))
+    freight_amount, freight_rate = _resolve_charge_amount(
+        item_total,
+        applicable=freight_applicable,
+        mode=freight_mode,
+        draft=str(freight_draft) if freight_draft is not None else None,
+        default_percent=None,
+    )
+
+    taxable = round(
+        item_total
+        + (pf_amount if pf_applicable else 0.0)
+        + (freight_amount if freight_applicable else 0.0),
+        2,
+    )
+
+    cgst_applicable = _parse_bool(body.get("cgst_applicable", body.get("cgstApplicable")), True)
+    cgst_mode = _parse_charge_mode(body.get("cgst_mode", body.get("cgstMode")))
+    cgst_draft = body.get("cgst_draft", body.get("cgstDraft"))
+    cgst_amount, cgst_rate = _resolve_charge_amount(
+        taxable,
+        applicable=cgst_applicable,
+        mode=cgst_mode,
+        draft=str(cgst_draft) if cgst_draft is not None else None,
+        default_percent=9.0 if cgst_mode == "percent" else None,
+    )
+
+    sgst_applicable = _parse_bool(body.get("sgst_applicable", body.get("sgstApplicable")), True)
+    sgst_mode = _parse_charge_mode(body.get("sgst_mode", body.get("sgstMode")))
+    sgst_draft = body.get("sgst_draft", body.get("sgstDraft"))
+    sgst_amount, sgst_rate = _resolve_charge_amount(
+        taxable,
+        applicable=sgst_applicable,
+        mode=sgst_mode,
+        draft=str(sgst_draft) if sgst_draft is not None else None,
+        default_percent=9.0 if sgst_mode == "percent" else None,
+    )
+
+    igst_applicable = _parse_bool(body.get("igst_applicable", body.get("igstApplicable")), False)
+    igst_mode = _parse_charge_mode(body.get("igst_mode", body.get("igstMode")))
+    igst_draft = body.get("igst_draft", body.get("igstDraft"))
+    igst_amount, igst_rate = _resolve_charge_amount(
+        taxable,
+        applicable=igst_applicable,
+        mode=igst_mode,
+        draft=str(igst_draft) if igst_draft is not None else None,
+        default_percent=18.0 if igst_mode == "percent" else None,
+    )
+
+    gst_amount = round(cgst_amount + sgst_amount + igst_amount, 2)
+    total_amount = round(taxable + gst_amount, 2)
+
+    return {
+        "item_total": item_total,
+        "taxable_subtotal": taxable,
+        "pf_applicable": pf_applicable,
+        "pf_mode": pf_mode,
+        "pf_draft": str(pf_draft or "").strip(),
+        "pf_amount": pf_amount,
+        "pf_rate": pf_rate if pf_rate is not None else (3.0 if pf_applicable and pf_mode == "percent" else None),
+        "freight_applicable": freight_applicable,
+        "freight_mode": freight_mode,
+        "freight_draft": str(freight_draft or "").strip(),
+        "freight_amount": freight_amount,
+        "freight_rate": freight_rate,
+        "cgst_applicable": cgst_applicable,
+        "cgst_mode": cgst_mode,
+        "cgst_draft": str(cgst_draft or "").strip(),
+        "cgst_amount": cgst_amount,
+        "cgst_rate": cgst_rate,
+        "sgst_applicable": sgst_applicable,
+        "sgst_mode": sgst_mode,
+        "sgst_draft": str(sgst_draft or "").strip(),
+        "sgst_amount": sgst_amount,
+        "sgst_rate": sgst_rate,
+        "igst_applicable": igst_applicable,
+        "igst_mode": igst_mode,
+        "igst_draft": str(igst_draft or "").strip(),
+        "igst_amount": igst_amount,
+        "igst_rate": igst_rate,
+        "gst_amount": gst_amount,
+        "total_amount": total_amount,
+    }
+
+
+def _totals_snapshot(q: Quotation, computed: dict | None = None) -> dict:
+    comp = computed or {}
+    return {
+        "subtotal": float(comp.get("item_total", getattr(q, "subtotal", 0) or 0)),
+        "pf_amount": float(comp.get("pf_amount", getattr(q, "pf_amount", 0) or 0)),
+        "freight_amount": float(comp.get("freight_amount", getattr(q, "freight_amount", 0) or 0)),
+        "gst_amount": float(comp.get("gst_amount", getattr(q, "gst_amount", 0) or 0)),
+        "total_amount": float(comp.get("total_amount", getattr(q, "total_amount", 0) or 0)),
+    }
+
+
+def _financial_extra(q: Quotation, computed: dict | None = None) -> dict:
+    comp = computed or {}
+    return {
+        "pf_rate": comp.get("pf_rate", getattr(q, "pf_rate", None)),
+        "freight_rate": comp.get("freight_rate", getattr(q, "freight_rate", None)),
+        "cgst_amount": comp.get("cgst_amount"),
+        "sgst_amount": comp.get("sgst_amount"),
+        "igst_amount": comp.get("igst_amount"),
+    }
+
+
+async def update_quotation_financial_summary(
+    quotation_id: str,
+    body: dict,
+    db: AsyncSession,
+    *,
+    performed_by: str = "user",
+    performed_by_name: str | None = None,
+) -> Quotation:
+    q = await get_quotation(quotation_id, db)
+    item_total = round(float(q.subtotal or 0), 2)
+    before_rows = financial_rows_from_quotation(q)
+    before_totals = _totals_snapshot(q)
+    before_extra = _financial_extra(q)
+    computed = compute_financial_summary_from_config(item_total, body if isinstance(body, dict) else {})
+
+    q.pf_amount = float(computed["pf_amount"])
+    if computed.get("pf_rate") is not None:
+        q.pf_rate = float(computed["pf_rate"])
+    q.freight_amount = float(computed["freight_amount"])
+    q.freight_rate = float(computed["freight_rate"]) if computed.get("freight_rate") is not None else None
+    q.freight_note = (
+        "Extra at actual"
+        if not computed["freight_applicable"] or computed["freight_amount"] <= 0
+        else ""
+    )
+    q.gst_amount = float(computed["gst_amount"])
+    q.total_amount = float(computed["total_amount"])
+
+    ov = dict(q.pdf_display_overrides) if isinstance(q.pdf_display_overrides, dict) else {}
+    ov["financial_config"] = {
+        "pf_applicable": computed["pf_applicable"],
+        "pf_mode": computed["pf_mode"],
+        "pf_draft": computed["pf_draft"],
+        "freight_applicable": computed["freight_applicable"],
+        "freight_mode": computed["freight_mode"],
+        "freight_draft": computed["freight_draft"],
+        "cgst_applicable": computed["cgst_applicable"],
+        "cgst_mode": computed["cgst_mode"],
+        "cgst_draft": computed["cgst_draft"],
+        "sgst_applicable": computed["sgst_applicable"],
+        "sgst_mode": computed["sgst_mode"],
+        "sgst_draft": computed["sgst_draft"],
+        "igst_applicable": computed["igst_applicable"],
+        "igst_mode": computed["igst_mode"],
+        "igst_draft": computed["igst_draft"],
+        "cgst_amount": computed["cgst_amount"],
+        "sgst_amount": computed["sgst_amount"],
+        "igst_amount": computed["igst_amount"],
+    }
+    line_count = len(q.line_items) if isinstance(q.line_items, list) else 0
+    q.pdf_display_overrides = _trim_pdf_display_overrides(ov, line_count)
+
+    pdf_path = await regenerate_quotation_pdf(
+        q,
+        prepared_by_email=performed_by,
+        prepared_by_name=performed_by_name,
+    )
+    if pdf_path:
+        q.pdf_path = pdf_path
+
+    after_rows = financial_rows_from_quotation(q, computed)
+    after_totals = _totals_snapshot(q, computed)
+    after_extra = _financial_extra(q, computed)
+    change_view = build_financial_change_view(before_rows, after_rows)
+
+    db.add(
+        AuditLog(
+            id=uuid.uuid4(),
+            entity_type="quotation",
+            entity_id=q.id,
+            action="quotation_financial_summary_updated",
+            performed_by=performed_by or "user",
+            details={
+                "performed_by_name": performed_by_name,
+                "quotation_id": str(q.id),
+                "quote_number": q.quote_number,
+                "total_amount": computed["total_amount"],
+                "totals_before": before_totals,
+                "totals_after": after_totals,
+                "financial_before": before_extra,
+                "financial_after": after_extra,
+                "change_view": change_view,
+            },
+        )
+    )
+    await db.commit()
+    await db.refresh(q)
+    return q
+
+
+def _preparer_from_quotation(q: Quotation) -> tuple[str | None, str | None]:
+    name = (getattr(q, "created_by_name", None) or "").strip()
+    email = ""
+    creator = getattr(q, "created_by_user", None)
+    if creator is not None:
+        if not name and getattr(creator, "full_name", None):
+            name = str(creator.full_name).strip()
+        if getattr(creator, "email", None):
+            email = str(creator.email).strip()
+    return name or None, email or None
+
+
+def _quotation_payload_for_pdf(
+    q: Quotation,
+    *,
+    prepared_by_email: str | None = None,
+    prepared_by_name: str | None = None,
+) -> dict:
     li = q.line_items if isinstance(q.line_items, list) else []
     ov = q.pdf_display_overrides if isinstance(q.pdf_display_overrides, dict) else {}
     out: dict = {
@@ -136,13 +425,34 @@ def _quotation_payload_for_pdf(q: Quotation) -> dict:
             "department": str(getattr(emp, "department", None) or "").strip(),
             "designation": str(emp.designation).strip() if getattr(emp, "designation", None) else "",
         }
+    prep_name, prep_email = _preparer_from_quotation(q)
+    if prepared_by_name and str(prepared_by_name).strip():
+        prep_name = str(prepared_by_name).strip()
+    if prepared_by_email and str(prepared_by_email).strip():
+        prep_email = str(prepared_by_email).strip()
+    if prep_name:
+        out["prepared_by_name"] = prep_name
+    if prep_email:
+        out["prepared_by_email"] = prep_email
     return out
 
 
-async def regenerate_quotation_pdf(q: Quotation) -> str | None:
+async def regenerate_quotation_pdf(
+    q: Quotation,
+    *,
+    prepared_by_email: str | None = None,
+    prepared_by_name: str | None = None,
+) -> str | None:
     settings = get_settings()
     client_json = settings.get_client_json()
-    pdf_path = await generate_quotation_pdf(_quotation_payload_for_pdf(q), client_json)
+    pdf_path = await generate_quotation_pdf(
+        _quotation_payload_for_pdf(
+            q,
+            prepared_by_email=prepared_by_email,
+            prepared_by_name=prepared_by_name,
+        ),
+        client_json,
+    )
     return pdf_path
 
 
@@ -221,6 +531,7 @@ async def get_quotation(quotation_id: str, db: AsyncSession) -> Quotation:
         .options(
             selectinload(Quotation.client_employee),
             selectinload(Quotation.enquiry),
+            selectinload(Quotation.created_by_user),
         )
         .where(Quotation.id == quotation_id)
     )
@@ -230,7 +541,13 @@ async def get_quotation(quotation_id: str, db: AsyncSession) -> Quotation:
     return quotation
 
 
-async def get_quotation_pdf_path(quotation_id: str, db: AsyncSession) -> str:
+async def get_quotation_pdf_path(
+    quotation_id: str,
+    db: AsyncSession,
+    *,
+    prepared_by_email: str | None = None,
+    prepared_by_name: str | None = None,
+) -> str:
     """Return the absolute PDF file path for a quotation.
 
     Raises ProductNotFoundError if quotation doesn't exist.
@@ -238,7 +555,11 @@ async def get_quotation_pdf_path(quotation_id: str, db: AsyncSession) -> str:
     """
     quotation = await get_quotation(quotation_id, db)
     # Always regenerate on download so the file matches the latest UI/PDF template.
-    regenerated = await regenerate_quotation_pdf(quotation)
+    regenerated = await regenerate_quotation_pdf(
+        quotation,
+        prepared_by_email=prepared_by_email,
+        prepared_by_name=prepared_by_name,
+    )
     if regenerated:
         quotation.pdf_path = regenerated
         await db.commit()
@@ -442,12 +763,8 @@ async def update_quotation_from_manual_line_items(
     q = await get_quotation(quotation_id, db)
     enquiry = await enquiry_svc.get_enquiry(str(q.enquiry_id), db)
     before_lines = list(q.line_items or []) if isinstance(q.line_items, list) else []
-    before_totals = {
-        "subtotal": float(q.subtotal or 0),
-        "gst_amount": float(q.gst_amount or 0),
-        "pf_amount": float(q.pf_amount or 0),
-        "total_amount": float(q.total_amount or 0),
-    }
+    before_totals = _totals_snapshot(q)
+    before_extra = _financial_extra(q)
 
     parsed_products, matched_products, quote_line_items, history_rows = (
         enquiry_svc.expand_manual_line_items_to_quote_parts(line_items_in)
@@ -466,11 +783,13 @@ async def update_quotation_from_manual_line_items(
 
     gst_rate = float(q.gst_rate)
     pf_rate = float(q.pf_rate)
-    quote_line_items, subtotal, gst_amount, pf_amount, _base_total = enquiry_svc._calc_totals(
+    quote_line_items, subtotal, _, pf_amount, _base_total = enquiry_svc._calc_totals(
         quote_line_items, gst_rate=gst_rate, pf_rate=pf_rate
     )
     freight_amount = float(getattr(q, "freight_amount", 0) or 0)
-    total_amount = round(subtotal + gst_amount + pf_amount + freight_amount, 2)
+    taxable_subtotal = round(subtotal + pf_amount + freight_amount, 2)
+    gst_amount = round(taxable_subtotal * (gst_rate / 100.0), 2)
+    total_amount = round(taxable_subtotal + gst_amount, 2)
 
     await db.execute(delete(QuotationProductHistory).where(QuotationProductHistory.quotation_id == q.id))
     await db.flush()
@@ -540,7 +859,7 @@ async def update_quotation_from_manual_line_items(
 
     client_json = settings.get_client_json()
     quotation_data = {
-        **_quotation_payload_for_pdf(q),
+        **_quotation_payload_for_pdf(q, prepared_by_email=performed_by, prepared_by_name=performed_by_name),
         "line_items": quote_line_items,
         "subtotal": subtotal,
         "gst_rate": gst_rate,
@@ -561,8 +880,14 @@ async def update_quotation_from_manual_line_items(
         "subtotal": float(subtotal or 0),
         "gst_amount": float(gst_amount or 0),
         "pf_amount": float(pf_amount or 0),
+        "freight_amount": float(freight_amount or 0),
         "total_amount": float(total_amount or 0),
     }
+    after_extra = {
+        "pf_rate": float(pf_rate),
+        "freight_rate": float(q.freight_rate) if q.freight_rate is not None else None,
+    }
+    change_view = build_line_items_change_view(before_lines, after_lines, diff)
     db.add(
         AuditLog(
             id=uuid.uuid4(),
@@ -578,6 +903,7 @@ async def update_quotation_from_manual_line_items(
                 "diff": diff,
                 "totals_before": before_totals,
                 "totals_after": after_totals,
+                "change_view": change_view,
             },
         )
     )
@@ -603,6 +929,7 @@ async def update_quotation_pdf_display_overrides(
     """Store PDF-only text overlays (line description/size, notes) and regenerate the PDF file."""
     q = await get_quotation(quotation_id, db)
     line_count = len(q.line_items) if isinstance(q.line_items, list) else 0
+    before_ov = copy.deepcopy(q.pdf_display_overrides) if isinstance(q.pdf_display_overrides, dict) else {}
 
     if pdf_display_overrides is None:
         q.pdf_display_overrides = None
@@ -611,7 +938,14 @@ async def update_quotation_pdf_display_overrides(
     else:
         raise ValueError("pdf_display_overrides must be an object or null")
 
-    pdf_path = await regenerate_quotation_pdf(q)
+    after_ov = copy.deepcopy(q.pdf_display_overrides) if isinstance(q.pdf_display_overrides, dict) else {}
+    change_view = build_pdf_change_view(before_ov, after_ov)
+
+    pdf_path = await regenerate_quotation_pdf(
+        q,
+        prepared_by_email=performed_by,
+        prepared_by_name=performed_by_name,
+    )
     if pdf_path:
         q.pdf_path = pdf_path
 
@@ -626,6 +960,7 @@ async def update_quotation_pdf_display_overrides(
                 "performed_by_name": performed_by_name,
                 "quotation_id": str(q.id),
                 "quote_number": q.quote_number,
+                "change_view": change_view,
             },
         )
     )

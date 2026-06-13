@@ -276,6 +276,8 @@ async def generate_quotation_pdf(
         website = client_config.get("website", "")
         gst = client_config.get("gst_number", "")
         prepared = client_config.get("prepared_by", "Sales Team")
+        prep_email = (quotation_data.get("prepared_by_email") or "").strip() or sales_email
+        prep_name = (quotation_data.get("prepared_by_name") or "").strip() or prepared
 
         el: list = []
 
@@ -335,9 +337,9 @@ async def generate_quotation_pdf(
                 left_info.append(Paragraph(f"<b>Address</b> : {escape(str(address))}", s_addr))
             if website:
                 left_info.append(Paragraph(f"<b>Website</b> : {escape(str(website))}", s_addr))
-            if sales_email:
-                left_info.append(Paragraph(f"<b>E-Mail</b> : {escape(str(sales_email))}", s_addr))
-            left_info.append(Paragraph(f"<b>Prepared By</b> : {escape(str(prepared))}", s_addr))
+            if prep_email:
+                left_info.append(Paragraph(f"<b>E-Mail</b> : {escape(str(prep_email))}", s_addr))
+            left_info.append(Paragraph(f"<b>Prepared By</b> : {escape(str(prep_name))}", s_addr))
 
         if hr is not None:
             right_info = _flow_from_kv_rows(hr, s_meta_val)
@@ -591,7 +593,7 @@ async def generate_quotation_pdf(
         el.append(Spacer(1, 6 * mm))
 
         # ── Totals (recompute if needed — same logic as before) ──
-        subtotal = float(quotation_data.get("subtotal", 0))
+        item_total = float(quotation_data.get("subtotal", 0))
         gst_amount = float(quotation_data.get("gst_amount", 0))
         pf_amount = float(quotation_data.get("pf_amount", 0))
         total_amount = float(quotation_data.get("total_amount", 0))
@@ -605,7 +607,7 @@ async def generate_quotation_pdf(
         if (
             isinstance(line_items_for_total, list)
             and line_items_for_total
-            and subtotal == 0
+            and item_total == 0
             and total_amount == 0
         ):
             st = 0.0
@@ -621,10 +623,28 @@ async def generate_quotation_pdf(
                     st += float(lt)
                 else:
                     st += float(item.get("total") or qty * up)
-            subtotal = round(st, 2)
-            gst_amount = round(subtotal * (gst_pct / 100.0), 2)
-            pf_amount = round(subtotal * (pf_pct / 100.0), 2)
-            total_amount = round(subtotal + gst_amount + pf_amount + freight_amount, 2)
+            item_total = round(st, 2)
+            pf_amount = round(item_total * (pf_pct / 100.0), 2)
+
+        taxable_subtotal = round(item_total + pf_amount + freight_amount, 2)
+        gst_amount = round(taxable_subtotal * (gst_pct / 100.0), 2)
+        total_amount = round(taxable_subtotal + gst_amount, 2)
+
+        fin_cfg = pdf_ov.get("financial_config") if isinstance(pdf_ov, dict) else None
+        cgst_amount = None
+        sgst_amount = None
+        igst_amount = None
+        if isinstance(fin_cfg, dict):
+            if fin_cfg.get("cgst_applicable") and fin_cfg.get("cgst_amount") is not None:
+                cgst_amount = float(fin_cfg["cgst_amount"])
+            if fin_cfg.get("sgst_applicable") and fin_cfg.get("sgst_amount") is not None:
+                sgst_amount = float(fin_cfg["sgst_amount"])
+            if fin_cfg.get("igst_applicable") and fin_cfg.get("igst_amount") is not None:
+                igst_amount = float(fin_cfg["igst_amount"])
+            tax_sum = (cgst_amount or 0) + (sgst_amount or 0) + (igst_amount or 0)
+            if tax_sum > 0:
+                gst_amount = round(tax_sum, 2)
+                total_amount = round(taxable_subtotal + gst_amount, 2)
 
         # ── Terms + Financial summary side-by-side ────────────────
         ti = None
@@ -661,28 +681,12 @@ async def generate_quotation_pdf(
         fin_col_w = _table_col_widths(fin_col_sum, [0.62, 0.38])
 
         fin_rows: list[list] = [
-            [Paragraph("<b>SUB TOTAL</b>", s_cell_head), Paragraph(_money_text(subtotal), s_cell)],
+            [Paragraph("<b>ITEM TOTAL</b>", s_cell_head), Paragraph(_money_text(item_total), s_cell)],
             [
                 Paragraph(f"<b>P &amp; F CHARGES</b> ({pf_pct:g} %)", s_cell_head),
                 Paragraph(_money_text(pf_amount), s_cell),
             ],
         ]
-        if abs(gst_pct - 18.0) < 0.01 and gst_amount > 0:
-            half = round(gst_amount / 2.0, 2)
-            other = round(gst_amount - half, 2)
-            fin_rows.append(
-                [Paragraph("<b>CGST</b> (9 %)", s_cell_head), Paragraph(_money_text(half), s_cell)]
-            )
-            fin_rows.append(
-                [Paragraph("<b>SGST</b> (9 %)", s_cell_head), Paragraph(_money_text(other), s_cell)]
-            )
-        else:
-            fin_rows.append(
-                [
-                    Paragraph(f"<b>GST</b> ({gst_pct:g} %)", s_cell_head),
-                    Paragraph(_money_text(gst_amount), s_cell),
-                ]
-            )
         if freight_amount > 0:
             if freight_rate is not None:
                 freight_label = f"<b>FREIGHT</b> ({float(freight_rate):g} %)"
@@ -699,6 +703,55 @@ async def generate_quotation_pdf(
                 Paragraph(freight_value, s_cell),
             ]
         )
+        fin_rows.append(
+            [
+                Paragraph("<b>SUB TOTAL</b>", s_cell_head),
+                Paragraph(_money_text(taxable_subtotal), s_cell),
+            ]
+        )
+        if isinstance(fin_cfg, dict) and fin_cfg.get("igst_applicable") and (igst_amount or 0) > 0:
+            igst_rate = fin_cfg.get("igst_rate")
+            igst_label = (
+                f"<b>IGST</b> ({float(igst_rate):g} %)"
+                if igst_rate is not None
+                else "<b>IGST</b>"
+            )
+            fin_rows.append(
+                [Paragraph(igst_label, s_cell_head), Paragraph(_money_text(igst_amount or 0), s_cell)]
+            )
+        elif isinstance(fin_cfg, dict) and (
+            fin_cfg.get("cgst_applicable") or fin_cfg.get("sgst_applicable")
+        ):
+            if fin_cfg.get("cgst_applicable") and (cgst_amount or 0) > 0:
+                fin_rows.append(
+                    [
+                        Paragraph("<b>CGST</b> (9 %)", s_cell_head),
+                        Paragraph(_money_text(cgst_amount or 0), s_cell),
+                    ]
+                )
+            if fin_cfg.get("sgst_applicable") and (sgst_amount or 0) > 0:
+                fin_rows.append(
+                    [
+                        Paragraph("<b>SGST</b> (9 %)", s_cell_head),
+                        Paragraph(_money_text(sgst_amount or 0), s_cell),
+                    ]
+                )
+        elif abs(gst_pct - 18.0) < 0.01 and gst_amount > 0:
+            half = round(gst_amount / 2.0, 2)
+            other = round(gst_amount - half, 2)
+            fin_rows.append(
+                [Paragraph("<b>CGST</b> (9 %)", s_cell_head), Paragraph(_money_text(half), s_cell)]
+            )
+            fin_rows.append(
+                [Paragraph("<b>SGST</b> (9 %)", s_cell_head), Paragraph(_money_text(other), s_cell)]
+            )
+        else:
+            fin_rows.append(
+                [
+                    Paragraph(f"<b>GST</b> ({gst_pct:g} %)", s_cell_head),
+                    Paragraph(_money_text(gst_amount), s_cell),
+                ]
+            )
         fin_rows.append(
             [
                 Paragraph("<b>GRAND TOTAL INR</b>", s_cell_head),
@@ -762,11 +815,11 @@ async def generate_quotation_pdf(
             el.append(note_tbl)
 
         el.append(Spacer(1, 6 * mm))
-        contact_line = f"If you have any questions about this quote, please contact {escape(str(prepared))}"
+        contact_line = f"If you have any questions about this quote, please contact {escape(str(prep_name))}"
         if phone:
             contact_line += f", {escape(str(phone))}"
-        if sales_email:
-            contact_line += f", {escape(str(sales_email))}"
+        if prep_email:
+            contact_line += f", {escape(str(prep_email))}"
         contact_line += "."
         if isinstance(pdf_ov, dict) and str(pdf_ov.get("footer_contact") or "").strip():
             contact_line = escape(str(pdf_ov.get("footer_contact") or "").strip())
@@ -777,7 +830,7 @@ async def generate_quotation_pdf(
             thanks_line = str(pdf_ov.get("footer_thanks") or "").strip()
         el.append(Paragraph(f"<b>{escape(thanks_line)}</b>", s_thanks))
         el.append(Spacer(1, 8 * mm))
-        disc_line = "This quotation was prepared with AI assistance and reviewed by our team."
+        disc_line = "Ai quotation powered by ClevrScan"
         if isinstance(pdf_ov, dict) and str(pdf_ov.get("footer_disclaimer") or "").strip():
             disc_line = str(pdf_ov.get("footer_disclaimer") or "").strip()
         el.append(

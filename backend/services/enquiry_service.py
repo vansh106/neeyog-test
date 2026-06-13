@@ -25,6 +25,7 @@ from db.models import (
     MailboxSyncState,
     Quotation,
     QuotationProductHistory,
+    User,
 )
 from services.email_display_infer import infer_company_from_email_raw
 from services.email_inbox_filters import raw_input_is_quotation_work_related
@@ -275,6 +276,34 @@ def expand_manual_line_items_to_quote_parts(
     return parsed_products, matched_products, quote_line_items, history_rows
 
 
+def compute_quotation_amounts(
+    item_total: float,
+    gst_rate: float,
+    pf_rate: float,
+    *,
+    pf_applicable: bool = True,
+    pf_amount: float | None = None,
+    freight_amount: float = 0.0,
+) -> tuple[float, float, float]:
+    """Return ``(gst_amount, pf_amount, total_amount)``.
+
+    ``item_total`` is the sum of line items. P&F defaults to ``pf_rate`` % of item total.
+    Taxable subtotal = item total + P&F + freight; GST is applied on that subtotal.
+    """
+    item_total = round(float(item_total or 0), 2)
+    if not pf_applicable:
+        pf = 0.0
+    elif pf_amount is not None:
+        pf = round(float(pf_amount), 2)
+    else:
+        pf = round(item_total * (float(pf_rate) / 100.0), 2)
+    freight = round(max(0.0, float(freight_amount or 0)), 2)
+    taxable = round(item_total + pf + freight, 2)
+    gst = round(taxable * (float(gst_rate) / 100.0), 2)
+    total = round(taxable + gst, 2)
+    return gst, pf, total
+
+
 def _calc_totals(
     line_items: list[dict],
     gst_rate: float,
@@ -303,11 +332,11 @@ def _calc_totals(
         row = {**raw, "quantity": qty, "unit_price": unit_price, "line_total": line_total, "price_tbd": False}
         normalized.append(row)
         subtotal += line_total
-    subtotal = round(subtotal, 2)
-    gst_amount = round(subtotal * (gst_rate / 100.0), 2)
-    pf_amount = round(subtotal * (pf_rate / 100.0), 2)
-    total_amount = round(subtotal + gst_amount + pf_amount, 2)
-    return normalized, subtotal, gst_amount, pf_amount, total_amount
+    item_total = round(subtotal, 2)
+    gst_amount, pf_amount, total_amount = compute_quotation_amounts(
+        item_total, gst_rate, pf_rate
+    )
+    return normalized, item_total, gst_amount, pf_amount, total_amount
 
 
 EMAIL_AGENT_INPUT_TYPES = frozenset({"email", "email_sync", "indiamart"})
@@ -1172,6 +1201,11 @@ async def process_manual_dropdown(
     cb_uid = created_by_user_id
     cb_raw = (created_by_name or "").strip()
     cb_name = cb_raw[:255] if cb_raw else None
+    prepared_by_email: str | None = None
+    if cb_uid is not None:
+        creator_user = await db.get(User, cb_uid)
+        if creator_user is not None and getattr(creator_user, "email", None):
+            prepared_by_email = str(creator_user.email).strip() or None
 
     line_items_in = body.get("lineItems") or []
     notes = str(body.get("notes") or "").strip()
@@ -1273,7 +1307,9 @@ async def process_manual_dropdown(
             elif mode == "percent" and subtotal > 0 and freight_amount > 0:
                 freight_rate = round((freight_amount / subtotal) * 100.0, 2)
 
-    total_amount = round(subtotal + gst_amount + pf_amount + freight_amount, 2)
+    taxable_subtotal = round(subtotal + pf_amount + freight_amount, 2)
+    gst_amount = round(taxable_subtotal * (gst_rate / 100.0), 2)
+    total_amount = round(taxable_subtotal + gst_amount, 2)
     freight_note = "Extra at actual" if not freight_applicable or freight_amount <= 0 else ""
 
     raw_payload: dict = {
@@ -1360,6 +1396,10 @@ async def process_manual_dropdown(
         "enquiry_date": enquiry.created_at.strftime("%d/%m/%Y") if enquiry.created_at else "",
         "quotation_date": datetime.now(timezone.utc).strftime("%d/%m/%Y"),
     }
+    if cb_name:
+        quotation_data["prepared_by_name"] = cb_name
+    if prepared_by_email:
+        quotation_data["prepared_by_email"] = prepared_by_email
     if employee_for_quote is not None:
         quotation_data["quotation_client_employee"] = {
             "full_name": str(employee_for_quote.full_name or "").strip(),

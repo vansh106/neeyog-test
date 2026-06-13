@@ -15,13 +15,14 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import QuotationFormatPreview from '@/components/quotations/QuotationFormatPreview'
 import { fetchQuotationPdfBlob, quotationsApi } from '@/lib/api'
-import { emptySupplementRow } from '@/lib/quotationPdfDefaults'
+import { emptySupplementRow, resolveQuotationPreparer } from '@/lib/quotationPdfDefaults'
 import {
   buildPdfDisplayOverridesPayload,
   hydratePdfEditorState,
   mergeOverridesForPreview,
   type PdfEditorFormState,
 } from '@/lib/quotationPdfPayload'
+import { useAuthStore } from '@/stores/authStore'
 import type { ClientConfig, EnquiryDetail, Quotation } from '@/types'
 
 function KvEditorSection({
@@ -109,8 +110,13 @@ export default function QuotationPdfEditorDialog({
   linkedEnquiry,
   onSaved,
 }: Props) {
+  const sessionUser = useAuthStore((s) => s.user)
+  const preparer = useMemo(
+    () => resolveQuotationPreparer(quotation, sessionUser),
+    [quotation, sessionUser],
+  )
   const [form, setForm] = useState<PdfEditorFormState>(() =>
-    hydratePdfEditorState(quotation, clientConfig, linkedEnquiry),
+    hydratePdfEditorState(quotation, clientConfig, linkedEnquiry, preparer),
   )
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
@@ -122,11 +128,11 @@ export default function QuotationPdfEditorDialog({
 
   useEffect(() => {
     if (open && !wasOpenRef.current) {
-      setForm(hydratePdfEditorState(quotation, clientConfig, linkedEnquiry))
+      setForm(hydratePdfEditorState(quotation, clientConfig, linkedEnquiry, preparer))
       setErr(null)
     }
     wasOpenRef.current = open
-  }, [open, quotation, clientConfig, linkedEnquiry])
+  }, [open, quotation, clientConfig, linkedEnquiry, preparer])
 
   const previewQuotation = useMemo(
     () => ({
@@ -175,7 +181,13 @@ export default function QuotationPdfEditorDialog({
     setBusy(true)
     setErr(null)
     try {
-      const payload = buildPdfDisplayOverridesPayload(quotation, clientConfig, linkedEnquiry, form)
+      const payload = buildPdfDisplayOverridesPayload(
+        quotation,
+        clientConfig,
+        linkedEnquiry,
+        form,
+        preparer,
+      )
       await quotationsApi.updatePdfDisplay(quotationId, { pdf_display_overrides: payload })
       setPdfPreviewNonce((n) => n + 1)
       await onSaved()

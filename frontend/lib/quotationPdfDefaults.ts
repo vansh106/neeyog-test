@@ -21,18 +21,40 @@ function validUntilDdMmYyyy(createdAt: string | null, validityDays: number): str
   return formatDateDdMmYyyy(d.toISOString())
 }
 
-export function buildDefaultHeaderLeft(clientConfig: ClientConfig | undefined): PdfKvRow[] {
+export type QuotationPreparer = {
+  email?: string | null
+  name?: string | null
+}
+
+export function resolveQuotationPreparer(
+  quotation: { created_by_name?: string | null; created_by_email?: string | null },
+  sessionUser?: { email: string; full_name: string } | null,
+): QuotationPreparer {
+  return {
+    email: sessionUser?.email?.trim() || quotation.created_by_email?.trim() || null,
+    name: sessionUser?.full_name?.trim() || quotation.created_by_name?.trim() || null,
+  }
+}
+
+export function buildDefaultHeaderLeft(
+  clientConfig: ClientConfig | undefined,
+  preparer?: QuotationPreparer,
+): PdfKvRow[] {
   const rows: PdfKvRow[] = []
   const addr = (clientConfig?.address || '').trim()
   if (addr) rows.push({ label: 'Address', value: addr })
   const website = (clientConfig?.website as string | undefined)?.trim()
   if (website) rows.push({ label: 'Website', value: website })
   const salesEmail = (
+    preparer?.email?.trim() ||
     (clientConfig?.sales_email as string | undefined)?.trim() ||
     (clientConfig?.email || '').trim()
   ).trim()
   if (salesEmail) rows.push({ label: 'E-Mail', value: salesEmail })
-  const prepared = ((clientConfig?.prepared_by as string | undefined) || 'Sales Team').trim()
+  const prepared = (
+    preparer?.name?.trim() ||
+    ((clientConfig?.prepared_by as string | undefined) || 'Sales Team').trim()
+  ).trim()
   rows.push({ label: 'Prepared By', value: prepared })
   return rows
 }
@@ -97,10 +119,17 @@ export function buildDefaultTerms(quotation: Quotation): string[] {
   ]
 }
 
-export function buildDefaultFooterContact(clientConfig: ClientConfig | undefined): string {
-  const prepared = ((clientConfig?.prepared_by as string | undefined) || 'Sales Team').trim()
+export function buildDefaultFooterContact(
+  clientConfig: ClientConfig | undefined,
+  preparer?: QuotationPreparer,
+): string {
+  const prepared = (
+    preparer?.name?.trim() ||
+    ((clientConfig?.prepared_by as string | undefined) || 'Sales Team').trim()
+  ).trim()
   const phone = (clientConfig?.phone || '').trim()
   const letterEmail = (
+    preparer?.email?.trim() ||
     (clientConfig?.sales_email as string | undefined)?.trim() ||
     (clientConfig?.email || '').trim()
   ).trim()
@@ -115,7 +144,7 @@ export function defaultFooterThanks(): string {
 }
 
 export function defaultFooterDisclaimer(): string {
-  return 'This quotation was prepared with AI assistance and reviewed by our team.'
+  return 'Ai quotation powered by ClevrScan'
 }
 
 export function emptySupplementRow(): QuotationPdfValuationSupplementRow {

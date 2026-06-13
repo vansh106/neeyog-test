@@ -273,6 +273,29 @@ export const quotationsApi = {
     patch<T>(`/api/quotations/${id}`, body),
   updatePdfDisplay: <T = unknown>(id: string, body: { pdf_display_overrides: Record<string, unknown> | null }) =>
     patch<T>(`/api/quotations/${id}/pdf-display`, body),
+  updateFinancialSummary: <T = unknown>(
+    id: string,
+    body: {
+      pfApplicable: boolean
+      pfMode: 'percent' | 'amount'
+      pfDraft: string
+      freightApplicable: boolean
+      freightMode: 'percent' | 'amount'
+      freightDraft: string
+      cgstApplicable: boolean
+      cgstMode: 'percent' | 'amount'
+      cgstDraft: string
+      sgstApplicable: boolean
+      sgstMode: 'percent' | 'amount'
+      sgstDraft: string
+      igstApplicable: boolean
+      igstMode: 'percent' | 'amount'
+      igstDraft: string
+    },
+  ) => patch<T>(`/api/quotations/${encodeURIComponent(id)}/financial-summary`, body),
+  listTermsMaster: <T = unknown>() => get<T>('/api/quotations/terms-master'),
+  createTermMaster: <T = unknown>(body: { body: string }) =>
+    post<T>('/api/quotations/terms-master', body),
   getAudit: <T = unknown>(id: string, limit: number = 25) =>
     get<T>(`/api/quotations/${id}/audit`, { limit }),
   listQuotations: <T = unknown>(

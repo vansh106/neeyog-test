@@ -7,6 +7,8 @@ import {
   defaultFooterThanks,
   defaultThankYouBanner,
   defaultCompanyRightBlurb,
+  resolveQuotationPreparer,
+  type QuotationPreparer,
 } from '@/lib/quotationPdfDefaults'
 import type {
   ClientConfig,
@@ -73,8 +75,10 @@ export function hydratePdfEditorState(
   quotation: Quotation,
   clientConfig: ClientConfig | undefined,
   linkedEnquiry: EnquiryDetail | null | undefined,
+  preparer?: QuotationPreparer,
 ): PdfEditorFormState {
   const ov = quotation.pdf_display_overrides
+  const prep = preparer ?? resolveQuotationPreparer(quotation)
   const items = quotation.line_items ?? []
   const lineEdits = items.map((line, idx) => {
     const row = ov?.lines?.[idx]
@@ -90,7 +94,7 @@ export function hydratePdfEditorState(
     }
   })
 
-  const defL = buildDefaultHeaderLeft(clientConfig)
+  const defL = buildDefaultHeaderLeft(clientConfig, prep)
   const defR = buildDefaultHeaderRight(quotation, linkedEnquiry)
   const headerLeft =
     Array.isArray(ov?.header_left) && ov!.header_left!.length > 0
@@ -130,7 +134,7 @@ export function hydratePdfEditorState(
   const footerContact =
     typeof ov?.footer_contact === 'string' && ov.footer_contact.trim()
       ? ov.footer_contact
-      : buildDefaultFooterContact(clientConfig)
+      : buildDefaultFooterContact(clientConfig, prep)
   const footerThanks =
     typeof ov?.footer_thanks === 'string' && ov.footer_thanks.trim() ? ov.footer_thanks : defaultFooterThanks()
   const footerDisclaimer =
@@ -219,13 +223,15 @@ export function buildPdfDisplayOverridesPayload(
   clientConfig: ClientConfig | undefined,
   linkedEnquiry: EnquiryDetail | null | undefined,
   state: PdfEditorFormState,
+  preparer?: QuotationPreparer,
 ): Record<string, unknown> | null {
-  const defL = buildDefaultHeaderLeft(clientConfig)
+  const prep = preparer ?? resolveQuotationPreparer(quotation)
+  const defL = buildDefaultHeaderLeft(clientConfig, prep)
   const defR = buildDefaultHeaderRight(quotation, linkedEnquiry)
   const defTerms = buildDefaultTerms(quotation)
   const defThank = defaultThankYouBanner()
   const defCompanyRight = defaultCompanyRightBlurb()
-  const defFooterC = buildDefaultFooterContact(clientConfig)
+  const defFooterC = buildDefaultFooterContact(clientConfig, prep)
   const defFooterT = defaultFooterThanks()
   const defFooterD = defaultFooterDisclaimer()
 

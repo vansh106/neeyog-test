@@ -199,23 +199,24 @@ export default function QuotationLineItemsEditor({
       if (raw && Number.isFinite(n) && n >= 0) return Math.min(n, 100)
       return 0
     }
-    let subtotal = 0
+    let itemTotal = 0
     for (const p of assembledProducts) {
       const ov = parseOverride(p.id)
       const discountFactor = 1 - parseDiscount(p.id) / 100
       if (ov != null) {
-        subtotal += ov * discountFactor * p.quantity
+        itemTotal += ov * discountFactor * p.quantity
         continue
       }
       const pc = productCalcs.find((c) => c.productId === p.id)
       if (!pc) return null
       if (!pc.ok) return null
-      subtotal += pc.assemblyUnit * discountFactor * p.quantity
+      itemTotal += pc.assemblyUnit * discountFactor * p.quantity
     }
-    const gst = subtotal * 0.18
-    const pf = subtotal * 0.03
-    const grand = subtotal + gst + pf
-    return { subtotal, gst, pf, grand }
+    const pf = itemTotal * 0.03
+    const taxableSubtotal = itemTotal + pf
+    const gst = taxableSubtotal * 0.18
+    const grand = taxableSubtotal + gst
+    return { subtotal: itemTotal, gst, pf, grand, taxableSubtotal }
   }, [assembledProducts, customerDiscountByProduct, productCalcs, tempQuoteUnitByProduct])
 
   const supplierRequired = suppliers.length > 0

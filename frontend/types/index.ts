@@ -127,6 +127,27 @@ export interface QuotationPdfDisplayOverrides {
   company_right_text?: string
   /** Full terms list (unnumbered strings; PDF adds numbers). */
   terms_items?: string[]
+  /** Per-quotation financial toggles (P&F, freight, CGST/SGST/IGST). */
+  financial_config?: {
+    pf_applicable?: boolean
+    pf_mode?: 'percent' | 'amount'
+    pf_draft?: string
+    freight_applicable?: boolean
+    freight_mode?: 'percent' | 'amount'
+    freight_draft?: string
+    cgst_applicable?: boolean
+    cgst_mode?: 'percent' | 'amount'
+    cgst_draft?: string
+    sgst_applicable?: boolean
+    sgst_mode?: 'percent' | 'amount'
+    sgst_draft?: string
+    igst_applicable?: boolean
+    igst_mode?: 'percent' | 'amount'
+    igst_draft?: string
+    cgst_amount?: number
+    sgst_amount?: number
+    igst_amount?: number
+  }
   footer_contact?: string
   footer_thanks?: string
   footer_disclaimer?: string
@@ -172,6 +193,8 @@ export interface Quotation {
   notes: string | null
   pdf_display_overrides?: QuotationPdfDisplayOverrides | null
   created_at: string | null
+  created_by_name?: string | null
+  created_by_email?: string | null
 }
 
 export interface QuotationHistoryItem {
@@ -206,6 +229,24 @@ export interface QuotationHistoryResponse {
   items: QuotationHistoryItem[]
 }
 
+export interface QuotationAuditRow {
+  key: string
+  label: string
+  value: string
+}
+
+export interface QuotationAuditSection {
+  title: string
+  rows: QuotationAuditRow[]
+  highlight_all?: boolean
+}
+
+export interface QuotationAuditChangeView {
+  before: { sections: QuotationAuditSection[] }
+  after: { sections: QuotationAuditSection[] }
+  changed_keys: string[]
+}
+
 export interface QuotationAuditItem {
   at: string
   user: string
@@ -218,6 +259,7 @@ export interface QuotationAuditItem {
     removed?: string[]
     changed?: Array<{ line: string; changes: Record<string, { from: unknown; to: unknown }> }>
   } | null
+  change_view?: QuotationAuditChangeView | null
 }
 
 export interface QuotationAuditResponse {

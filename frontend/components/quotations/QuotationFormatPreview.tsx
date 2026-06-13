@@ -13,8 +13,12 @@ import {
   defaultFooterThanks,
   defaultThankYouBanner,
   formatQuotationFreight,
+  resolveQuotationPreparer,
 } from '@/lib/quotationPdfDefaults'
 import { cn, formatCurrency, PRICE_TBD_LABEL } from '@/lib/utils'
+import { useAuthStore } from '@/stores/authStore'
+import { computeFinancialPreview, hydrateFinancialDraft } from '@/lib/quotationFinancialConfig'
+import { quotationFinancialsFromStored } from '@/lib/quotationTotals'
 import type { ClientConfig, EnquiryDetail, Quotation, QuotationLineItem, QuotationPdfDisplayOverrides } from '@/types'
 
 const NAVY = '#1a2744'
@@ -56,8 +60,12 @@ export default function QuotationFormatPreview({
   }
 
   const ov = pdfOverrides
+  const sessionUser = useAuthStore((s) => s.user)
+  const preparer = resolveQuotationPreparer(quotation, sessionUser)
   const headerLeft =
-    ov?.header_left && ov.header_left.length > 0 ? ov.header_left : buildDefaultHeaderLeft(clientConfig)
+    ov?.header_left && ov.header_left.length > 0
+      ? ov.header_left
+      : buildDefaultHeaderLeft(clientConfig, preparer)
   const headerRight =
     ov?.header_right && ov.header_right.length > 0
       ? ov.header_right
@@ -67,15 +75,65 @@ export default function QuotationFormatPreview({
   const companyRightBlurb = (ov?.company_right_text || '').trim() || defaultCompanyRightBlurb()
   const termsList =
     ov?.terms_items && ov.terms_items.length > 0 ? ov.terms_items : buildDefaultTerms(quotation)
-  const footerContact = (ov?.footer_contact || '').trim() || buildDefaultFooterContact(clientConfig)
+  const footerContact =
+    (ov?.footer_contact || '').trim() || buildDefaultFooterContact(clientConfig, preparer)
   const footerThanks = (ov?.footer_thanks || '').trim() || defaultFooterThanks()
   const footerDisclaimer = (ov?.footer_disclaimer || '').trim() || defaultFooterDisclaimer()
   const supplementRows = ov?.valuation_supplement_rows?.length ? ov.valuation_supplement_rows : []
 
   const gstRate = quotation.gst_rate
-  const splitGst = Math.abs(gstRate - 18) < 0.01 && quotation.gst_amount > 0
-  const cgst = splitGst ? Math.round((quotation.gst_amount / 2) * 100) / 100 : 0
-  const sgst = splitGst ? Math.round((quotation.gst_amount - cgst) * 100) / 100 : 0
+  const freightAmount = Number(quotation.freight_amount ?? 0)
+  const finCfg = ov?.financial_config
+  const financialDraft = finCfg ? hydrateFinancialDraft(quotation) : null
+  const configuredPreview = financialDraft
+    ? computeFinancialPreview(quotation.subtotal, financialDraft)
+    : null
+  const financials = configuredPreview ?? quotationFinancialsFromStored(
+    quotation.subtotal,
+    quotation.pf_amount,
+    freightAmount,
+    gstRate,
+    quotation.gst_amount,
+    quotation.total_amount,
+  )
+  const showCgst =
+    configuredPreview != null
+      ? financialDraft!.cgstApplicable && configuredPreview.cgstAmount > 0
+      : Math.abs(gstRate - 18) < 0.01 && financials.gstAmount > 0
+  const showSgst =
+    configuredPreview != null
+      ? financialDraft!.sgstApplicable && configuredPreview.sgstAmount > 0
+      : Math.abs(gstRate - 18) < 0.01 && financials.gstAmount > 0
+  const showIgst =
+    configuredPreview != null &&
+    financialDraft!.igstApplicable &&
+    configuredPreview.igstAmount > 0
+  const cgst =
+    configuredPreview?.cgstAmount ??
+    (showCgst && configuredPreview == null
+      ? Math.round((financials.gstAmount / 2) * 100) / 100
+      : 0)
+  const sgst =
+    configuredPreview?.sgstAmount ??
+    (showSgst && configuredPreview == null
+      ? Math.round((financials.gstAmount - cgst) * 100) / 100
+      : 0)
+  const igst = configuredPreview?.igstAmount ?? 0
+  const showPf =
+    configuredPreview == null || (financialDraft!.pfApplicable && configuredPreview.pfAmount > 0)
+  const showFreight =
+    configuredPreview == null ||
+    (financialDraft!.freightApplicable && configuredPreview.freightAmount > 0)
+  const pfLabel =
+    financialDraft?.pfMode === 'percent' && financialDraft.pfDraft.trim()
+      ? `P & F CHARGES (${financialDraft.pfDraft} %)`
+      : `P & F CHARGES (${quotation.pf_rate} %)`
+  const freightLabel =
+    financialDraft?.freightMode === 'percent' && financialDraft.freightDraft.trim()
+      ? `FREIGHT (${financialDraft.freightDraft} %)`
+      : quotation.freight_rate != null
+        ? `FREIGHT (${quotation.freight_rate} %)`
+        : 'FREIGHT'
 
   const notesBody =
     notesPreviewText !== null ? notesPreviewText : quotation.notes ? String(quotation.notes) : ''
@@ -278,62 +336,91 @@ export default function QuotationFormatPreview({
           <div className="p-2">
             <table className="w-full border-collapse text-[11px]">
           <tbody>
-                <tr className="border border-[#333] bg-white">
-              <td className="px-2 py-1.5 font-bold" style={{ width: '62%' }}>
-                SUB TOTAL
-              </td>
-              <td className="px-2 py-1.5 text-right font-mono">
-                ₹{quotation.subtotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-              </td>
-            </tr>
                 <tr className="border border-[#333] border-t-0 bg-white">
-              <td className="px-2 py-1.5 font-bold">P &amp; F CHARGES ({quotation.pf_rate} %)</td>
+              <td className="px-2 py-1.5 font-bold" style={{ width: '62%' }}>
+                ITEM TOTAL
+              </td>
               <td className="px-2 py-1.5 text-right font-mono">
-                ₹{quotation.pf_amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                ₹{financials.itemTotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </td>
             </tr>
-            {splitGst ? (
-              <>
+            {showPf && (
+                <tr className="border border-[#333] border-t-0 bg-white">
+              <td className="px-2 py-1.5 font-bold">{pfLabel}</td>
+              <td className="px-2 py-1.5 text-right font-mono">
+                ₹{financials.pfAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </td>
+            </tr>
+            )}
+            {showFreight && (
+                <tr className="border border-[#333] border-t-0 bg-white">
+              <td className="px-2 py-1.5 font-bold">{freightLabel}</td>
+              <td className="px-2 py-1.5 text-right text-gray-800">
+                {configuredPreview != null
+                  ? formatCurrency(configuredPreview.freightAmount)
+                  : quotation.freight_amount != null && quotation.freight_amount > 0
+                    ? formatCurrency(quotation.freight_amount)
+                    : formatQuotationFreight(quotation)}
+              </td>
+            </tr>
+            )}
+                <tr className="border border-[#333] border-t-0 bg-white">
+              <td className="px-2 py-1.5 font-bold">SUB TOTAL</td>
+              <td className="px-2 py-1.5 text-right font-mono">
+                ₹{financials.taxableSubtotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </td>
+            </tr>
+            {showCgst && (
                     <tr className="border border-[#333] border-t-0 bg-white">
-                  <td className="px-2 py-1.5 font-bold">CGST (9 %)</td>
+                  <td className="px-2 py-1.5 font-bold">
+                    CGST
+                    {financialDraft?.cgstMode === 'percent' && financialDraft.cgstDraft.trim()
+                      ? ` (${financialDraft.cgstDraft} %)`
+                      : ' (9 %)'}
+                  </td>
                   <td className="px-2 py-1.5 text-right font-mono">
                     ₹{cgst.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </td>
                 </tr>
+            )}
+            {showSgst && (
                     <tr className="border border-[#333] border-t-0 bg-white">
-                  <td className="px-2 py-1.5 font-bold">SGST (9 %)</td>
+                  <td className="px-2 py-1.5 font-bold">
+                    SGST
+                    {financialDraft?.sgstMode === 'percent' && financialDraft.sgstDraft.trim()
+                      ? ` (${financialDraft.sgstDraft} %)`
+                      : ' (9 %)'}
+                  </td>
                   <td className="px-2 py-1.5 text-right font-mono">
                     ₹{sgst.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </td>
                 </tr>
-              </>
-            ) : (
+            )}
+            {showIgst && (
+                    <tr className="border border-[#333] border-t-0 bg-white">
+                  <td className="px-2 py-1.5 font-bold">
+                    IGST
+                    {financialDraft?.igstMode === 'percent' && financialDraft.igstDraft.trim()
+                      ? ` (${financialDraft.igstDraft} %)`
+                      : ' (18 %)'}
+                  </td>
+                  <td className="px-2 py-1.5 text-right font-mono">
+                    ₹{igst.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </td>
+                </tr>
+            )}
+            {!showCgst && !showSgst && !showIgst && financials.gstAmount > 0 && (
                   <tr className="border border-[#333] border-t-0 bg-white">
                 <td className="px-2 py-1.5 font-bold">GST ({gstRate} %)</td>
                 <td className="px-2 py-1.5 text-right font-mono">
-                  ₹{quotation.gst_amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  ₹{financials.gstAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </td>
               </tr>
             )}
-                <tr className="border border-[#333] border-t-0 bg-white">
-              <td className="px-2 py-1.5 font-bold">
-                FREIGHT
-                {quotation.freight_amount != null &&
-                quotation.freight_amount > 0 &&
-                quotation.freight_rate != null
-                  ? ` (${quotation.freight_rate} %)`
-                  : ''}
-              </td>
-              <td className="px-2 py-1.5 text-right text-gray-800">
-                {quotation.freight_amount != null && quotation.freight_amount > 0
-                  ? formatCurrency(quotation.freight_amount)
-                  : formatQuotationFreight(quotation)}
-              </td>
-            </tr>
                 <tr className="border border-[#333] border-t-0 bg-[#f9faf7]">
               <td className="px-2 py-2 font-bold">GRAND TOTAL INR</td>
               <td className="px-2 py-2 text-right text-base font-bold font-mono" style={{ color: GREEN }}>
-                ₹{quotation.total_amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                ₹{financials.grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </td>
             </tr>
           </tbody>
