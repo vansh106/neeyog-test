@@ -169,6 +169,26 @@ export function hydrateFinancialDraft(quotation: Quotation): QuotationFinancialD
   }
 }
 
+export function defaultFinancialDraft(): QuotationFinancialDraft {
+  return {
+    pfApplicable: true,
+    pfMode: 'percent',
+    pfDraft: '3',
+    freightApplicable: false,
+    freightMode: 'amount',
+    freightDraft: '',
+    cgstApplicable: true,
+    cgstMode: 'percent',
+    cgstDraft: '9',
+    sgstApplicable: true,
+    sgstMode: 'percent',
+    sgstDraft: '9',
+    igstApplicable: false,
+    igstMode: 'percent',
+    igstDraft: '18',
+  }
+}
+
 export function financialDraftToApiBody(draft: QuotationFinancialDraft) {
   return {
     pfApplicable: draft.pfApplicable,

@@ -237,6 +237,8 @@ class Quotation(Base):
     created_by_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_by_user: Mapped["User | None"] = relationship("User", foreign_keys=[created_by_user_id])
 
+    is_archived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
 
@@ -666,3 +668,66 @@ class ClientPricingConfig(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
 
     default_supplier: Mapped["Supplier | None"] = relationship("Supplier")
+
+
+class PurchaseOrder(Base):
+    """Customer purchase order — optionally linked to a quotation."""
+
+    __tablename__ = "purchase_orders"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    po_number: Mapped[str] = mapped_column(String(50), unique=True, nullable=False, index=True)
+
+    quotation_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("quotations.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    quote_number: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
+
+    client_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    client_company: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    client_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    client_phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    client_employee_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("client_employees.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    line_items: Mapped[list] = mapped_column(JSON, nullable=False)
+    subtotal: Mapped[float] = mapped_column(Float, nullable=False)
+    gst_rate: Mapped[float] = mapped_column(Float, nullable=False, default=18.0)
+    gst_amount: Mapped[float] = mapped_column(Float, nullable=False)
+    pf_rate: Mapped[float] = mapped_column(Float, nullable=False, default=3.0)
+    pf_amount: Mapped[float] = mapped_column(Float, nullable=False)
+    freight_note: Mapped[str] = mapped_column(String(255), nullable=False, default="Extra at actual")
+    freight_amount: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    freight_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
+    total_amount: Mapped[float] = mapped_column(Float, nullable=False)
+
+    primary_category: Mapped[str] = mapped_column(String(100), nullable=False, default="Others", index=True)
+    item_desc_short: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+
+    financial_config: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    pdf_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    quotation: Mapped["Quotation | None"] = relationship("Quotation", foreign_keys=[quotation_id])
+    client_employee: Mapped["ClientEmployee | None"] = relationship("ClientEmployee")
+
+    created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    created_by_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_by_user: Mapped["User | None"] = relationship("User", foreign_keys=[created_by_user_id])
+
+    is_archived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)

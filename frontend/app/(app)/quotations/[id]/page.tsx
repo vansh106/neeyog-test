@@ -16,6 +16,7 @@ import QuotationFinancialEditor from '@/components/quotations/QuotationFinancial
 import QuotationTermsEditor from '@/components/quotations/QuotationTermsEditor'
 import QuotationAuditChangeModal from '@/components/quotations/QuotationAuditChangeModal'
 import QuotationPdfEditorDialog from '@/components/quotations/QuotationPdfEditorDialog'
+import { CreatePOButton } from '@/components/purchase-orders/CreatePurchaseOrderDialog'
 import {
   Dialog,
   DialogContent,
@@ -74,6 +75,7 @@ export default function QuotationDetailPage() {
   const id = typeof params?.id === 'string' ? params.id : Array.isArray(params?.id) ? params.id[0] : ''
   const queryClient = useQueryClient()
   const canEditQuoteLines = useAuthStore((s) => s.hasPermission(Permissions.APPROVE_QUOTATIONS))
+  const canCreatePO = useAuthStore((s) => s.hasPermission(Permissions.CREATE_PURCHASE_ORDERS))
 
   // Hooks MUST be declared before any conditional returns.
   const [historyOpen, setHistoryOpen] = useState(false)
@@ -217,18 +219,23 @@ export default function QuotationDetailPage() {
     <PageShell
       title={`Quote ${quotation.quote_number}`}
       actions={
-        canEditQuoteLines ? (
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="gap-1.5 border-[#E2E6DC]"
-            onClick={() => openPdfEditor()}
-          >
-            <FilePenLine className="size-4" />
-            Edit PDF
-          </Button>
-        ) : undefined
+        <div className="flex flex-wrap gap-2">
+          {canCreatePO && (
+            <CreatePOButton fixedQuotationId={quotation.quotation_id} className="h-9" />
+          )}
+          {canEditQuoteLines ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="gap-1.5 border-[#E2E6DC]"
+              onClick={() => openPdfEditor()}
+            >
+              <FilePenLine className="size-4" />
+              Edit PDF
+            </Button>
+          ) : null}
+        </div>
       }
     >
       <nav className="mb-6 flex flex-wrap items-center gap-2 text-[13px] text-surface-muted">

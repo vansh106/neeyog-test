@@ -13,7 +13,7 @@ from datetime import date, datetime, timezone
 from sqlalchemy import Integer, cast, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.models import Enquiry, Quotation
+from db.models import Enquiry, PurchaseOrder, Quotation
 
 
 def fiscal_year_code(d: date | datetime) -> str:
@@ -77,3 +77,20 @@ async def allocate_quote_number(db: AsyncSession) -> str:
     if nxt > 99_999:
         raise ValueError(f"Quotation serial exhausted for FY {fy} (max 99999)")
     return f"{prefix}{nxt:05d}"
+
+
+async def allocate_po_number(db: AsyncSession) -> str:
+    """Next purchase order number: ``PO-4410`` style (global serial)."""
+    await _transaction_serial_lock(db, "po_serial:global")
+    ser_col = cast(func.substr(PurchaseOrder.po_number, 4), Integer)
+    res = await db.execute(
+        select(func.max(ser_col)).where(
+            PurchaseOrder.po_number.like("PO-%"),
+            func.length(PurchaseOrder.po_number) >= 5,
+        )
+    )
+    mx = res.scalar_one_or_none()
+    nxt = (int(mx) if mx is not None else 4409) + 1
+    if nxt > 999_999:
+        raise ValueError("Purchase order serial exhausted (max 999999)")
+    return f"PO-{nxt}"

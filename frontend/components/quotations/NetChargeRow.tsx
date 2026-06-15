@@ -74,6 +74,7 @@ export function NetChargeRow({
   amountAriaLabel,
   appliedAmount,
   percentInputClassName,
+  className,
 }: {
   label: string
   checkboxAriaLabel: string
@@ -91,12 +92,18 @@ export function NetChargeRow({
   amountAriaLabel: string
   appliedAmount: number | null | undefined
   percentInputClassName?: string
+  className?: string
 }) {
   const isPercent = mode === 'percent'
   const showApplied = checked && isPercent && appliedAmount != null && appliedAmount > 0
 
   return (
-    <div className="grid grid-cols-[1fr_8.5rem] items-center gap-x-3 border-b border-[#E2E6DC] py-2.5 last:border-b-0">
+    <div
+      className={cn(
+        'grid grid-cols-[1fr_8.5rem] items-center gap-x-3 border-b border-[#E2E6DC] py-2.5 last:border-b-0',
+        className,
+      )}
+    >
       <div className="flex min-w-0 flex-nowrap items-center gap-1.5">
         <label className="flex shrink-0 cursor-pointer items-center gap-2">
           <input

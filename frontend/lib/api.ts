@@ -338,6 +338,51 @@ export const quotationsApi = {
   },
 }
 
+export const purchaseOrdersApi = {
+  list: <T = unknown>(
+    params?: {
+      limit?: number
+      offset?: number
+      search?: string
+      client_name?: string
+      date_from?: string
+      date_to?: string
+      po_type?: string
+    },
+  ) => get<T>('/api/purchase-orders/', params as Record<string, unknown>),
+  get: <T = unknown>(id: string) => get<T>(`/api/purchase-orders/${id}`),
+  create: <T = unknown>(body: import('@/types').PurchaseOrderCreatePayload) =>
+    post<T>('/api/purchase-orders/', body),
+  getPdfUrl: (id: string) => {
+    const base = apiBaseURL()
+    return `${base}/api/purchase-orders/${id}/pdf`
+  },
+}
+
+export async function fetchPurchaseOrderPdfBlob(poId: string): Promise<Blob> {
+  const url = purchaseOrdersApi.getPdfUrl(poId)
+  const response = await fetch(url, {
+    headers: bearerHeaders(true),
+    cache: 'no-store',
+  })
+  if (!response.ok) {
+    throw new Error(`Failed to fetch PO PDF (${response.status})`)
+  }
+  return response.blob()
+}
+
+export async function downloadPurchaseOrderPdf(poId: string, filename?: string): Promise<void> {
+  const blob = await fetchPurchaseOrderPdfBlob(poId)
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename || `purchase-order-${poId}.pdf`
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}
+
 export const mastersApi = {
   listProducts: <T = unknown>(params?: { category?: string }) =>
     get<T>('/api/masters/products', params as Record<string, unknown>),

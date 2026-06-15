@@ -14,6 +14,7 @@ from db.models import (  # noqa: F401
     EmailSyncState,
     Enquiry,
     ProcessedEmail,
+    PurchaseOrder,
     Quotation,
     RefreshToken,
     Supplier,

@@ -18,6 +18,12 @@ class Permission(str, Enum):
     DELETE_QUOTATIONS = "delete_quotations"
     DOWNLOAD_PDF = "download_pdf"
 
+    # ── Purchase Orders ────────────────────
+    VIEW_PURCHASE_ORDERS = "view_purchase_orders"
+    CREATE_PURCHASE_ORDERS = "create_purchase_orders"
+    DELETE_PURCHASE_ORDERS = "delete_purchase_orders"
+    DOWNLOAD_PO_PDF = "download_po_pdf"
+
     # ── HITL Approvals (reserved for future) ─
     HITL_APPROVE = "hitl_approve"
     HITL_EDIT_EMAIL = "hitl_edit_email"
@@ -69,6 +75,12 @@ PERMISSION_GROUPS: dict[str, list[Permission]] = {
         Permission.DELETE_QUOTATIONS,
         Permission.DOWNLOAD_PDF,
     ],
+    "Purchase Orders": [
+        Permission.VIEW_PURCHASE_ORDERS,
+        Permission.CREATE_PURCHASE_ORDERS,
+        Permission.DELETE_PURCHASE_ORDERS,
+        Permission.DOWNLOAD_PO_PDF,
+    ],
     "HITL Approvals": [
         Permission.HITL_APPROVE,
         Permission.HITL_EDIT_EMAIL,
@@ -115,6 +127,10 @@ PERMISSION_PRESETS: dict[str, list[Permission]] = {
         Permission.VIEW_ENQUIRIES,
         Permission.VIEW_QUOTATIONS,
         Permission.DOWNLOAD_PDF,
+        Permission.VIEW_PURCHASE_ORDERS,
+        Permission.CREATE_PURCHASE_ORDERS,
+        Permission.DELETE_PURCHASE_ORDERS,
+        Permission.DOWNLOAD_PO_PDF,
         Permission.HITL_APPROVE,
         Permission.HITL_EDIT_EMAIL,
         Permission.CLIENT_VERIFY,
@@ -131,6 +147,10 @@ PERMISSION_PRESETS: dict[str, list[Permission]] = {
         Permission.VIEW_QUOTATIONS,
         Permission.APPROVE_QUOTATIONS,
         Permission.DOWNLOAD_PDF,
+        Permission.VIEW_PURCHASE_ORDERS,
+        Permission.CREATE_PURCHASE_ORDERS,
+        Permission.DELETE_PURCHASE_ORDERS,
+        Permission.DOWNLOAD_PO_PDF,
         Permission.HITL_APPROVE,
         Permission.HITL_EDIT_EMAIL,
         Permission.HITL_CUSTOM_PROMPT,
@@ -146,6 +166,7 @@ PERMISSION_PRESETS: dict[str, list[Permission]] = {
     "View Only": [
         Permission.VIEW_ENQUIRIES,
         Permission.VIEW_QUOTATIONS,
+        Permission.VIEW_PURCHASE_ORDERS,
         Permission.MASTERS_VIEW,
         Permission.EMAIL_SYNC_VIEW,
         Permission.REPORTS_VIEW,

@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.routes import auth, clients, configurator, enquiries, mailboxes, masters, quotations, stream, suppliers, sync, users
+from api.routes import auth, clients, configurator, enquiries, mailboxes, masters, purchase_orders, quotations, stream, suppliers, sync, users
 from core.config import get_settings
 from core.database import async_session_factory, get_db, init_db
 from masters.product_master import SHEET_TABLES
@@ -111,6 +111,7 @@ app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(enquiries.router)
 app.include_router(quotations.router)
+app.include_router(purchase_orders.router)
 app.include_router(masters.router, prefix="/api")
 app.include_router(clients.router, prefix="/api")
 app.include_router(suppliers.router, prefix="/api")

@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   enquiriesApi,
   quotationsApi,
+  purchaseOrdersApi,
   mastersApi,
   systemApi,
   syncApi,
@@ -14,6 +15,7 @@ import { useAuthStore } from '@/stores/authStore'
 import type {
   EnquiryListItem, EnquiryDetail, EnquiryResponse,
   QuotationListItem, Quotation, Product,
+  PurchaseOrder, PurchaseOrderListItem,
   HealthResponse, ClientConfig, EmailSyncStatus,
   Accessories,
   MasterSheetDefaultSupplier,
@@ -125,6 +127,24 @@ export function useQuotation(id: string) {
   return useQuery<Quotation>({
     queryKey: ['quotation', id],
     queryFn: () => quotationsApi.getQuotation<Quotation>(id),
+    enabled: !!id,
+  })
+}
+
+export function usePurchaseOrdersListingDataset(limit: number = 2000) {
+  const canView = useAuthStore((s) => s.hasPermission(Permissions.VIEW_PURCHASE_ORDERS))
+  return useQuery<PurchaseOrderListItem[]>({
+    queryKey: ['purchase-orders', 'listing_dataset', limit],
+    queryFn: () => purchaseOrdersApi.list<PurchaseOrderListItem[]>({ limit }),
+    enabled: canView,
+    staleTime: 60_000,
+  })
+}
+
+export function usePurchaseOrder(id: string) {
+  return useQuery<PurchaseOrder>({
+    queryKey: ['purchase-order', id],
+    queryFn: () => purchaseOrdersApi.get<PurchaseOrder>(id),
     enabled: !!id,
   })
 }

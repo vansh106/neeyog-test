@@ -282,6 +282,87 @@ export interface QuotationListItem {
   created_by_name?: string | null
 }
 
+export interface PurchaseOrderLineItem extends QuotationLineItem {
+  quoted_unit_price?: number
+}
+
+export interface PurchaseOrderListItem {
+  po_id: string
+  po_number: string
+  created_at: string
+  client_name: string
+  client_company?: string | null
+  po_type: 'quoted' | 'non_quoted'
+  quote_number?: string | null
+  quotation_id?: string | null
+  primary_category: string
+  item_desc_short: string
+  total_amount: number
+  created_by_name?: string | null
+}
+
+export interface PurchaseOrder {
+  po_id: string
+  po_number: string
+  quotation_id?: string | null
+  quote_number?: string | null
+  po_type: 'quoted' | 'non_quoted'
+  client_name: string
+  client_company?: string | null
+  client_email?: string | null
+  client_phone?: string | null
+  client_employee_id?: string | null
+  line_items: PurchaseOrderLineItem[]
+  subtotal: number
+  gst_rate: number
+  gst_amount: number
+  pf_rate: number
+  pf_amount: number
+  freight_note: string
+  freight_amount: number
+  freight_rate?: number | null
+  total_amount: number
+  primary_category: string
+  item_desc_short: string
+  financial_config?: QuotationPdfDisplayOverrides['financial_config'] | null
+  pdf_path?: string | null
+  notes?: string | null
+  created_at: string
+  created_by_name?: string | null
+  created_by_email?: string | null
+}
+
+export interface PurchaseOrderCreatePayload {
+  quotation_id?: string | null
+  selected_lines?: Array<{
+    line_index: number
+    quantity: number
+    unit_price: number
+    quoted_unit_price?: number
+  }>
+  manual_line_items?: unknown[]
+  client_name?: string
+  client_company?: string
+  client_email?: string
+  client_phone?: string
+  notes?: string
+  pf_applicable?: boolean
+  pf_mode?: 'percent' | 'amount'
+  pf_draft?: string
+  freight_applicable?: boolean
+  freight_mode?: 'percent' | 'amount'
+  freight_draft?: string
+  cgst_applicable?: boolean
+  cgst_mode?: 'percent' | 'amount'
+  cgst_draft?: string
+  sgst_applicable?: boolean
+  sgst_mode?: 'percent' | 'amount'
+  sgst_draft?: string
+  igst_applicable?: boolean
+  igst_mode?: 'percent' | 'amount'
+  igst_draft?: string
+}
+
 export interface Product {
   id: string
   name: string
