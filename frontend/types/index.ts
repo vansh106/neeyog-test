@@ -345,6 +345,7 @@ export interface PurchaseOrderCreatePayload {
   client_company?: string
   client_email?: string
   client_phone?: string
+  client_employee_id?: string
   notes?: string
   pf_applicable?: boolean
   pf_mode?: 'percent' | 'amount'

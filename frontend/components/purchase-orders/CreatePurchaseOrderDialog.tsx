@@ -18,7 +18,9 @@ import PurchaseOrderFinancialPanel, {
   usePurchaseOrderFinancialDraft,
 } from '@/components/purchase-orders/PurchaseOrderFinancialPanel'
 import QuotationPreviewDialog from '@/components/purchase-orders/QuotationPreviewDialog'
+import ManualClientDetailsSection from '@/components/clients/ManualClientDetailsSection'
 import { purchaseOrdersApi, suppliersApi } from '@/lib/api'
+import { useManualClientPicker } from '@/lib/manualClientPicker'
 import { useQuotationsListingDataset, useQuotation } from '@/lib/queries'
 import {
   assemblyLabel,
@@ -76,10 +78,7 @@ export default function CreatePurchaseOrderDialog({
   const [previewQuotationId, setPreviewQuotationId] = useState<string | null>(null)
   const [previewOpen, setPreviewOpen] = useState(false)
 
-  const [clientName, setClientName] = useState('')
-  const [clientCompany, setClientCompany] = useState('')
-  const [clientEmail, setClientEmail] = useState('')
-  const [clientPhone, setClientPhone] = useState('')
+  const clientPicker = useManualClientPicker()
   const [assembledProducts, setAssembledProducts] = useState<AssembledProduct[]>([])
   const [suppliers, setSuppliers] = useState<SupplierResponse[]>([])
   const [activeConfigId, setActiveConfigId] = useState<string>(() => uuidv4())
@@ -89,6 +88,10 @@ export default function CreatePurchaseOrderDialog({
     if (!open) return
     suppliersApi.getSuppliers(true).then(setSuppliers).catch(() => setSuppliers([]))
   }, [open])
+
+  useEffect(() => {
+    if (!open) clientPicker.reset()
+  }, [open, clientPicker.reset])
 
   const handleProductComplete = useCallback(
     (configId: string) => (product: AssembledProduct) => {
@@ -206,14 +209,16 @@ export default function CreatePurchaseOrderDialog({
           ...apiBody,
         }
       } else {
-        if (!clientName.trim()) throw new Error('Client name is required')
+        if (!clientPicker.validate()) throw new Error('Please select or add a client')
         if (assembledProducts.length === 0) throw new Error('Add at least one product')
+        const client = clientPicker.getSnapshot()
         payload = {
           manual_line_items: assembledProducts.map((p) => assembledToLineItem(p, null, p.customer_discount_pct ?? 0)),
-          client_name: clientName.trim(),
-          client_company: clientCompany.trim() || undefined,
-          client_email: clientEmail.trim() || undefined,
-          client_phone: clientPhone.trim() || undefined,
+          client_name: client.client_name,
+          client_company: client.client_company,
+          client_email: client.client_email,
+          client_phone: client.client_phone,
+          client_employee_id: client.client_employee_id,
           ...apiBody,
         }
       }
@@ -411,24 +416,7 @@ export default function CreatePurchaseOrderDialog({
 
           {step === 'manual' && (
             <div className="space-y-5">
-              <div className="grid gap-3 sm:grid-cols-2">
-                <label className="text-[12px]">
-                  <span className="text-surface-muted">Client name *</span>
-                  <Input value={clientName} onChange={(e) => setClientName(e.target.value)} />
-                </label>
-                <label className="text-[12px]">
-                  <span className="text-surface-muted">Company</span>
-                  <Input value={clientCompany} onChange={(e) => setClientCompany(e.target.value)} />
-                </label>
-                <label className="text-[12px]">
-                  <span className="text-surface-muted">Email</span>
-                  <Input value={clientEmail} onChange={(e) => setClientEmail(e.target.value)} />
-                </label>
-                <label className="text-[12px]">
-                  <span className="text-surface-muted">Phone</span>
-                  <Input value={clientPhone} onChange={(e) => setClientPhone(e.target.value)} />
-                </label>
-              </div>
+              <ManualClientDetailsSection {...clientPicker} disabled={creating} />
               <ValveConfigurator
                 key={activeConfigId}
                 productIndex={assembledProducts.length}
@@ -501,7 +489,7 @@ export default function CreatePurchaseOrderDialog({
                 disabled={
                   creating ||
                   (step === 'quoted_lines' && selectedQuotedLines.length === 0) ||
-                  (step === 'manual' && (assembledProducts.length === 0 || !clientName.trim()))
+                  (step === 'manual' && (assembledProducts.length === 0 || !clientPicker.isComplete))
                 }
                 onClick={handleCreate}
               >

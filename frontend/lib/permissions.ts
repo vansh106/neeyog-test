@@ -10,6 +10,7 @@ export const Permissions = {
   DOWNLOAD_PDF: 'download_pdf',
   VIEW_PURCHASE_ORDERS: 'view_purchase_orders',
   CREATE_PURCHASE_ORDERS: 'create_purchase_orders',
+  DELETE_PURCHASE_ORDERS: 'delete_purchase_orders',
   DOWNLOAD_PO_PDF: 'download_po_pdf',
   HITL_APPROVE: 'hitl_approve',
   HITL_EDIT_EMAIL: 'hitl_edit_email',

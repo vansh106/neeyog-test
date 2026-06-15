@@ -353,6 +353,7 @@ export const purchaseOrdersApi = {
   get: <T = unknown>(id: string) => get<T>(`/api/purchase-orders/${id}`),
   create: <T = unknown>(body: import('@/types').PurchaseOrderCreatePayload) =>
     post<T>('/api/purchase-orders/', body),
+  archive: <T = unknown>(id: string) => del<T>(`/api/purchase-orders/${encodeURIComponent(id)}`),
   getPdfUrl: (id: string) => {
     const base = apiBaseURL()
     return `${base}/api/purchase-orders/${id}/pdf`
