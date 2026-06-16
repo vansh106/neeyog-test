@@ -7,6 +7,7 @@ No DB queries. No business logic. Calls services only.
 import asyncio
 import logging
 import uuid
+from datetime import date
 from typing import AsyncGenerator
 
 from fastapi import HTTPException
@@ -55,6 +56,10 @@ class EnquiryListItem(BaseModel):
     flow_type: str | None = None
     input_type: str
     source: str = "manual"
+    item_desc_short: str = "—"
+    quotation_id: str | None = None
+    quote_number: str | None = None
+    next_follow_up_date: str | None = None
     created_at: str
     created_by_name: str | None = None
     erp_export_available: bool = False
@@ -63,6 +68,10 @@ class EnquiryListItem(BaseModel):
     is_non_standard_customer: bool = False
     series: str | None = None
     is_sales_enquiry: bool = False
+
+
+class EnquiryListingDatesBody(BaseModel):
+    next_follow_up_date: date | None = None
 
 
 class ManualSelectedProduct(BaseModel):
@@ -260,6 +269,17 @@ class EmailInboxItem(BaseModel):
 # ── Controller functions ────────────────────────────────────
 
 
+def _is_admin_scope(user: CurrentUser) -> bool:
+    return user.tier in ("admin", "superadmin")
+
+
+def _ensure_enquiry_access(enquiry: Enquiry, user: CurrentUser) -> None:
+    if _is_admin_scope(user):
+        return
+    if enquiry.created_by_user_id is None or str(enquiry.created_by_user_id) != str(user.id):
+        raise HTTPException(status_code=404, detail=f"Enquiry {enquiry.id} not found")
+
+
 def _enquiry_client_org_name(e: Enquiry) -> str:
     """Display name for list rows: linked company via branch, else parsed enquiry fields."""
     branch = getattr(e, "branch", None)
@@ -406,9 +426,11 @@ async def handle_upload_email(
 async def handle_get_enquiry(
     enquiry_id: str,
     db: AsyncSession,
+    user: CurrentUser,
 ) -> dict:
     try:
         enquiry = await enquiry_service.get_enquiry(enquiry_id, db)
+        _ensure_enquiry_access(enquiry, user)
         pd = enquiry.parsed_data if isinstance(enquiry.parsed_data, dict) else {}
         co = str(pd.get("client_company", "") or "").strip()
         if not co or co.lower() == "unknown":
@@ -447,9 +469,12 @@ async def handle_get_enquiry(
 async def handle_get_erp_export(
     enquiry_id: str,
     db: AsyncSession,
+    user: CurrentUser,
 ) -> str:
     """Return absolute path to the generated ERP export XLSX for this enquiry."""
     try:
+        enquiry = await enquiry_service.get_enquiry(enquiry_id, db)
+        _ensure_enquiry_access(enquiry, user)
         return await enquiry_service.get_erp_export_path(enquiry_id, db)
     except ProductNotFoundError:
         raise HTTPException(status_code=404, detail="ERP export not found for this enquiry")
@@ -459,6 +484,7 @@ async def handle_get_erp_export(
 
 async def handle_list_enquiries(
     db: AsyncSession,
+    user: CurrentUser,
     status: str | None = None,
     flow_type: str | None = None,
     limit: int = 50,
@@ -466,6 +492,9 @@ async def handle_list_enquiries(
     company_id: str | None = None,
 ) -> list[EnquiryListItem]:
     try:
+        scoped_user_id = None
+        if not _is_admin_scope(user):
+            scoped_user_id = uuid.UUID(str(user.id))
         enquiries = await enquiry_service.list_enquiries(
             db,
             status=status,
@@ -473,6 +502,10 @@ async def handle_list_enquiries(
             limit=limit,
             offset=offset,
             company_id=company_id,
+            created_by_user_id=scoped_user_id,
+        )
+        quote_by_enquiry = await enquiry_service.latest_quotations_by_enquiry_ids(
+            db, [e.id for e in enquiries]
         )
         return [
             EnquiryListItem(
@@ -483,6 +516,24 @@ async def handle_list_enquiries(
                 flow_type=e.flow_type,
                 input_type=e.input_type,
                 source=_enquiry_list_source(e),
+                item_desc_short=enquiry_service.item_desc_short_from_enquiry(
+                    e, quote_by_enquiry.get(str(e.id))
+                ),
+                quotation_id=(
+                    str(quote_by_enquiry[str(e.id)].id)
+                    if str(e.id) in quote_by_enquiry
+                    else None
+                ),
+                quote_number=(
+                    quote_by_enquiry[str(e.id)].quote_number
+                    if str(e.id) in quote_by_enquiry
+                    else None
+                ),
+                next_follow_up_date=(
+                    e.next_follow_up_date.isoformat()
+                    if getattr(e, "next_follow_up_date", None)
+                    else None
+                ),
                 created_at=e.created_at.isoformat() if e.created_at else "",
                 created_by_name=(e.created_by_name or "").strip() or None,
                 erp_export_available=bool(getattr(e, "erp_export_path", None)),
@@ -498,6 +549,33 @@ async def handle_list_enquiries(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+async def handle_patch_enquiry_listing_dates(
+    enquiry_id: str,
+    body: EnquiryListingDatesBody,
+    db: AsyncSession,
+    user: CurrentUser,
+) -> dict:
+    try:
+        current = await enquiry_service.get_enquiry(enquiry_id, db)
+        _ensure_enquiry_access(current, user)
+        fields_set = body.model_fields_set
+        e = await enquiry_service.update_enquiry_listing_dates(
+            enquiry_id,
+            db,
+            next_follow_up_date=body.next_follow_up_date,
+            set_follow_up="next_follow_up_date" in fields_set,
+            performed_by=user.email,
+            performed_by_name=user.full_name or None,
+        )
+        return {"enquiry_id": str(e.id), "next_follow_up_date": (
+            e.next_follow_up_date.isoformat() if getattr(e, "next_follow_up_date", None) else None
+        )}
+    except ProductNotFoundError:
+        raise HTTPException(status_code=404, detail="Enquiry not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 async def handle_decide_email_approval(
     enquiry_id: str,
     body: EmailApprovalRequest,
@@ -505,6 +583,8 @@ async def handle_decide_email_approval(
     user: CurrentUser,
 ) -> EmailApprovalResponse:
     try:
+        current = await enquiry_service.get_enquiry(enquiry_id, db)
+        _ensure_enquiry_access(current, user)
         uid, name = _quotation_creator_from_user(user)
         result = await enquiry_service.decide_email_approval(
             enquiry_id,
@@ -527,8 +607,11 @@ async def handle_decide_email_approval(
 async def handle_process_email_matcher(
     enquiry_id: str,
     db: AsyncSession,
+    user: CurrentUser,
 ) -> MatcherProcessResponse:
     try:
+        current = await enquiry_service.get_enquiry(enquiry_id, db)
+        _ensure_enquiry_access(current, user)
         result = await enquiry_service.process_email_matcher(enquiry_id, db)
         return MatcherProcessResponse.model_validate(result)
     except EnquiryParseError as e:
@@ -543,9 +626,11 @@ async def handle_process_email_matcher(
 async def handle_revert_request_email_draft(
     enquiry_id: str,
     db: AsyncSession,
+    user: CurrentUser,
 ) -> dict:
     try:
         enquiry = await enquiry_service.get_enquiry(enquiry_id, db)
+        _ensure_enquiry_access(enquiry, user)
         pd = enquiry.parsed_data if isinstance(enquiry.parsed_data, dict) else {}
         company = str(pd.get("client_company") or "Customer").strip()
         lines = [
@@ -611,6 +696,10 @@ async def handle_process_manual_dropdown(
 ) -> EnquiryResponse:
     """Add products to an existing manual enquiry and generate a quotation."""
     try:
+        target_id = str(body.target_enquiry_id or "").strip()
+        if target_id:
+            existing = await enquiry_service.get_enquiry(target_id, db)
+            _ensure_enquiry_access(existing, user)
         creator_id, creator_name = _quotation_creator_from_user(user)
         result = await enquiry_service.process_manual_dropdown(
             body.model_dump(by_alias=True),

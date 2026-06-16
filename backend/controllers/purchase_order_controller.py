@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.auth_middleware import CurrentUser
 from core.exceptions import ProductNotFoundError
 from db.models import PurchaseOrder
-from services import purchase_order_service
+from services import purchase_order_service, quotation_service
 
 
 def _po_api_dict(po: PurchaseOrder) -> dict:
@@ -50,6 +50,17 @@ def _po_api_dict(po: PurchaseOrder) -> dict:
             else None
         ),
     }
+
+
+def _is_admin_scope(user: CurrentUser) -> bool:
+    return user.tier in ("admin", "superadmin")
+
+
+def _ensure_po_access(po: PurchaseOrder, user: CurrentUser) -> None:
+    if _is_admin_scope(user):
+        return
+    if po.created_by_user_id is None or str(po.created_by_user_id) != str(user.id):
+        raise HTTPException(status_code=404, detail="Purchase order not found")
 
 
 class PurchaseOrderListItem(BaseModel):
@@ -138,6 +149,7 @@ class PurchaseOrderUpdateBody(BaseModel):
 
 async def handle_list_purchase_orders(
     db: AsyncSession,
+    user: CurrentUser,
     *,
     limit: int = 200,
     offset: int = 0,
@@ -147,6 +159,7 @@ async def handle_list_purchase_orders(
     date_to: date | None = None,
     po_type: str | None = None,
 ) -> list[dict]:
+    scope_user_id = None if _is_admin_scope(user) else uuid.UUID(str(user.id))
     rows = await purchase_order_service.list_purchase_orders(
         db,
         limit=limit,
@@ -156,6 +169,7 @@ async def handle_list_purchase_orders(
         date_from=date_from,
         date_to=date_to,
         po_type=po_type,
+        created_by_user_id=scope_user_id,
     )
     return [
         {
@@ -177,9 +191,10 @@ async def handle_list_purchase_orders(
     ]
 
 
-async def handle_get_purchase_order(db: AsyncSession, po_id: str) -> dict:
+async def handle_get_purchase_order(db: AsyncSession, po_id: str, user: CurrentUser) -> dict:
     try:
         po = await purchase_order_service.get_purchase_order(db, po_id)
+        _ensure_po_access(po, user)
     except ProductNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return _po_api_dict(po)
@@ -209,6 +224,10 @@ async def handle_create_purchase_order(
         "igst_draft": body.igst_draft,
     }
     try:
+        if body.quotation_id and not _is_admin_scope(user):
+            q = await quotation_service.get_quotation(str(body.quotation_id), db)
+            if q.created_by_user_id is None or str(q.created_by_user_id) != str(user.id):
+                raise HTTPException(status_code=404, detail="Quotation not found")
         po = await purchase_order_service.create_purchase_order(
             db,
             payload,
@@ -227,7 +246,10 @@ async def handle_update_purchase_order(
     po_id: str,
     body: PurchaseOrderUpdateBody,
     db: AsyncSession,
+    user: CurrentUser,
 ) -> dict:
+    current = await purchase_order_service.get_purchase_order(db, po_id)
+    _ensure_po_access(current, user)
     payload = body.model_dump(exclude_unset=True)
     try:
         po = await purchase_order_service.update_purchase_order(db, po_id, payload)
@@ -238,8 +260,10 @@ async def handle_update_purchase_order(
     return _po_api_dict(po)
 
 
-async def handle_delete_purchase_order(db: AsyncSession, po_id: str) -> dict:
+async def handle_delete_purchase_order(db: AsyncSession, po_id: str, user: CurrentUser) -> dict:
     try:
+        current = await purchase_order_service.get_purchase_order(db, po_id)
+        _ensure_po_access(current, user)
         deleted_id = await purchase_order_service.delete_purchase_order(db, po_id)
     except ProductNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

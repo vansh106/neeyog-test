@@ -1,8 +1,8 @@
 import enum
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSON, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -181,6 +181,8 @@ class Enquiry(Base):
 
     #: Human-readable ref: FY + 5-digit serial (e.g. ``262700089``); UUID ``id`` remains the primary key.
     enquiry_number: Mapped[str | None] = mapped_column(String(20), nullable=True, unique=True, index=True)
+    #: Next CRM follow-up (editable from enquiry list).
+    next_follow_up_date: Mapped[date | None] = mapped_column(Date, nullable=True)
 
     quotations: Mapped[list["Quotation"]] = relationship(back_populates="enquiry")
 
@@ -209,6 +211,10 @@ class Quotation(Base):
     freight_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
     total_amount: Mapped[float] = mapped_column(Float, nullable=False)
     validity_days: Mapped[int] = mapped_column(Integer, nullable=False, default=15)
+    #: Offer valid until (editable from quotation list).
+    validity_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    #: Next CRM follow-up (editable from quotation list).
+    next_follow_up_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     #: CRM: po_received | lost | hold | ongoing
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="ongoing")
     status_remarks: Mapped[str | None] = mapped_column(Text, nullable=True)

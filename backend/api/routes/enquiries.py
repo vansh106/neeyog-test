@@ -12,6 +12,7 @@ from controllers.enquiry_controller import (
     EmailApprovalResponse,
     EmailInboxItem,
     EnquiryListItem,
+    EnquiryListingDatesBody,
     EnquiryResponse,
     ManualDropdownProcessRequest,
     ManualEnquiryCreateRequest,
@@ -71,7 +72,7 @@ async def manual_dropdown_process_route(
 
 @router.get("/", response_model=list[EnquiryListItem])
 async def list_enquiries_route(
-    _user: CurrentUser = Depends(require_permission(Permission.VIEW_ENQUIRIES)),
+    user: CurrentUser = Depends(require_permission(Permission.VIEW_ENQUIRIES)),
     status: str | None = Query(None),
     flow_type: str | None = Query(None),
     company_id: str | None = Query(None),
@@ -80,7 +81,7 @@ async def list_enquiries_route(
     db: AsyncSession = Depends(get_db),
 ):
     return await enquiry_controller.handle_list_enquiries(
-        db, status, flow_type, limit, offset, company_id=company_id
+        db, user, status, flow_type, limit, offset, company_id=company_id
     )
 
 
@@ -104,6 +105,17 @@ async def search_clients_route(
     return await enquiry_controller.handle_get_clients(q)
 
 
+@router.patch("/{enquiry_id}/listing-dates")
+async def patch_enquiry_listing_dates_route(
+    enquiry_id: str,
+    body: EnquiryListingDatesBody,
+    user: CurrentUser = Depends(require_permission(Permission.APPROVE_QUOTATIONS)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Next follow-up date on the enquiry list."""
+    return await enquiry_controller.handle_patch_enquiry_listing_dates(enquiry_id, body, db, user)
+
+
 @router.post("/{enquiry_id}/email-approval", response_model=EmailApprovalResponse)
 async def email_approval_route(
     enquiry_id: str,
@@ -117,37 +129,37 @@ async def email_approval_route(
 @router.post("/{enquiry_id}/process-matcher", response_model=MatcherProcessResponse)
 async def process_email_matcher_route(
     enquiry_id: str,
-    _user: CurrentUser = Depends(require_permission(Permission.VIEW_ENQUIRIES)),
+    user: CurrentUser = Depends(require_permission(Permission.VIEW_ENQUIRIES)),
     db: AsyncSession = Depends(get_db),
 ):
-    return await enquiry_controller.handle_process_email_matcher(enquiry_id, db)
+    return await enquiry_controller.handle_process_email_matcher(enquiry_id, db, user)
 
 
 @router.get("/{enquiry_id}/revert-request-draft")
 async def revert_request_draft_route(
     enquiry_id: str,
-    _user: CurrentUser = Depends(require_permission(Permission.VIEW_ENQUIRIES)),
+    user: CurrentUser = Depends(require_permission(Permission.VIEW_ENQUIRIES)),
     db: AsyncSession = Depends(get_db),
 ):
-    return await enquiry_controller.handle_revert_request_email_draft(enquiry_id, db)
+    return await enquiry_controller.handle_revert_request_email_draft(enquiry_id, db, user)
 
 
 @router.get("/{enquiry_id}")
 async def get_enquiry_route(
     enquiry_id: str,
-    _user: CurrentUser = Depends(require_permission(Permission.VIEW_ENQUIRIES)),
+    user: CurrentUser = Depends(require_permission(Permission.VIEW_ENQUIRIES)),
     db: AsyncSession = Depends(get_db),
 ):
-    return await enquiry_controller.handle_get_enquiry(enquiry_id, db)
+    return await enquiry_controller.handle_get_enquiry(enquiry_id, db, user)
 
 
 @router.get("/{enquiry_id}/erp-export")
 async def get_enquiry_erp_export_route(
     enquiry_id: str,
-    _user: CurrentUser = Depends(require_permission(Permission.ERP_DOWNLOAD)),
+    user: CurrentUser = Depends(require_permission(Permission.ERP_DOWNLOAD)),
     db: AsyncSession = Depends(get_db),
 ):
-    path = await enquiry_controller.handle_get_erp_export(enquiry_id, db)
+    path = await enquiry_controller.handle_get_erp_export(enquiry_id, db, user)
     return FileResponse(
         path=path,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

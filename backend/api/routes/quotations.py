@@ -13,6 +13,7 @@ from controllers.quotation_controller import (
     QuotationCrmStatusBody,
     QuotationFinancialSummaryBody,
     QuotationHistoryResponse,
+    QuotationListingDatesBody,
     QuotationListItem,
     QuotationPdfDisplayBody,
     QuotationTermCreateBody,
@@ -124,14 +125,25 @@ async def patch_quotation_crm_status_route(
     return await quotation_controller.handle_patch_quotation_crm_status(quotation_id, body, db, user)
 
 
+@router.patch("/{quotation_id}/listing-dates")
+async def patch_quotation_listing_dates_route(
+    quotation_id: str,
+    body: QuotationListingDatesBody,
+    user: CurrentUser = Depends(require_permission(Permission.APPROVE_QUOTATIONS)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Validity and next follow-up dates on the quotation list."""
+    return await quotation_controller.handle_patch_quotation_listing_dates(quotation_id, body, db, user)
+
+
 @router.get("/{quotation_id}/audit", response_model=QuotationAuditResponse)
 async def get_quotation_audit_route(
     quotation_id: str,
-    _user: CurrentUser = Depends(require_permission(Permission.VIEW_QUOTATIONS)),
+    user: CurrentUser = Depends(require_permission(Permission.VIEW_QUOTATIONS)),
     limit: int = Query(25, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
 ):
-    return await quotation_controller.handle_get_quotation_audit(quotation_id, db, limit=limit)
+    return await quotation_controller.handle_get_quotation_audit(quotation_id, db, user, limit=limit)
 
 
 @router.get("/{quotation_id}/pdf")
@@ -151,15 +163,15 @@ async def get_quotation_pdf_route(
 @router.get("/{quotation_id}")
 async def get_quotation_route(
     quotation_id: str,
-    _user: CurrentUser = Depends(require_permission(Permission.VIEW_QUOTATIONS)),
+    user: CurrentUser = Depends(require_permission(Permission.VIEW_QUOTATIONS)),
     db: AsyncSession = Depends(get_db),
 ):
-    return await quotation_controller.handle_get_quotation(quotation_id, db)
+    return await quotation_controller.handle_get_quotation(quotation_id, db, user)
 
 
 @router.get("/", response_model=list[QuotationListItem])
 async def list_quotations_route(
-    _user: CurrentUser = Depends(require_permission(Permission.VIEW_QUOTATIONS)),
+    user: CurrentUser = Depends(require_permission(Permission.VIEW_QUOTATIONS)),
     limit: int = Query(50, le=2000),
     offset: int = Query(0),
     search: str | None = Query(None, description="Quote number or client (partial)"),
@@ -171,6 +183,7 @@ async def list_quotations_route(
 ):
     return await quotation_controller.handle_list_quotations(
         db,
+        user,
         limit,
         offset,
         search=search,

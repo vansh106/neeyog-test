@@ -30,6 +30,7 @@ export default function ChangePasswordPage() {
   const [loading, setLoading] = useState(false)
 
   const needsPhone = Boolean(user?.is_first_login || !user?.phone?.trim())
+  const isFirstLogin = Boolean(user?.is_first_login)
 
   useEffect(() => {
     if (!user || !access_token) router.replace('/login')
@@ -59,9 +60,9 @@ export default function ChangePasswordPage() {
     setLoading(true)
     try {
       const res = await changePasswordApi(
-        current,
         nextPw,
         needsPhone ? cleanPhone(phone) : undefined,
+        isFirstLogin ? undefined : current,
       )
       const updated: AuthUser = {
         ...user!,
@@ -87,7 +88,7 @@ export default function ChangePasswordPage() {
         </h1>
         <p className="mt-2 text-[14px] text-surface-muted">
           {user.is_first_login
-            ? 'Welcome! Set a new password and your mobile number before continuing.'
+            ? 'Welcome! Choose a new password and add your mobile number before continuing. You already signed in with the temporary password from your admin — you do not need to enter it again.'
             : 'Update your password. You will stay signed in.'}
         </p>
 
@@ -118,24 +119,26 @@ export default function ChangePasswordPage() {
             </div>
           )}
 
-          <div className="space-y-2">
-            <label className="text-[12px] font-medium text-gray-700" htmlFor="cur-pw">
-              Current password
-            </label>
-            <Input
-              id="cur-pw"
-              type="password"
-              autoComplete="current-password"
-              value={current}
-              onChange={(e) => setCurrent(e.target.value)}
-              className="h-10"
-              required
-            />
-          </div>
+          {!isFirstLogin && (
+            <div className="space-y-2">
+              <label className="text-[12px] font-medium text-gray-700" htmlFor="cur-pw">
+                Current password
+              </label>
+              <Input
+                id="cur-pw"
+                type="password"
+                autoComplete="current-password"
+                value={current}
+                onChange={(e) => setCurrent(e.target.value)}
+                className="h-10"
+                required
+              />
+            </div>
+          )}
 
           <div className="space-y-2">
             <label className="text-[12px] font-medium text-gray-700" htmlFor="new-pw">
-              New password
+              {isFirstLogin ? 'Password' : 'New password'}
             </label>
             <Input
               id="new-pw"
@@ -175,7 +178,7 @@ export default function ChangePasswordPage() {
 
           <div className="space-y-2">
             <label className="text-[12px] font-medium text-gray-700" htmlFor="conf-pw">
-              Confirm new password
+              {isFirstLogin ? 'Confirm password' : 'Confirm new password'}
             </label>
             <Input
               id="conf-pw"

@@ -10,6 +10,10 @@ export interface EnquiryListItem {
   input_type: string
   /** Business source: email, indiamart, manual, referral */
   source?: EnquirySource | string
+  item_desc_short?: string
+  quotation_id?: string | null
+  quote_number?: string | null
+  next_follow_up_date?: string | null
   created_at: string
   /** User who created the enquiry (upload / manual); omitted for older rows or inbox sync. */
   created_by_name?: string | null
@@ -187,6 +191,8 @@ export interface Quotation {
   freight_rate?: number | null
   total_amount: number
   validity_days: number
+  validity_date?: string | null
+  next_follow_up_date?: string | null
   status: string
   status_remarks?: string | null
   pdf_path: string | null
@@ -275,9 +281,16 @@ export interface QuotationListItem {
   quote_number: string
   client_name: string
   client_company?: string | null
+  primary_category: string
+  category_label: string
+  sub_category?: string | null
+  item_desc_short: string
   total_amount: number
+  po_total_amount?: number | null
   status: string
   status_remarks?: string | null
+  validity_date?: string | null
+  next_follow_up_date?: string | null
   created_at: string
   /** Logged-in user who created the quotation (manual flow); omitted for older rows or system-generated quotes. */
   created_by_name?: string | null

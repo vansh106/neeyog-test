@@ -16,7 +16,8 @@ from sqlalchemy.orm import selectinload
 
 from core.config import get_settings
 from core.exceptions import ProductNotFoundError, QuotationBuildError
-from db.models import AuditLog, ClientCompany, Quotation, QuotationProductHistory
+from db.models import AuditLog, ClientCompany, PurchaseOrder, Quotation, QuotationProductHistory
+from services.masters_service import _category_label
 from services import enquiry_service as enquiry_svc
 from services.pdf_service import generate_quotation_pdf
 from services.quotation_audit_diff import (
@@ -27,6 +28,128 @@ from services.quotation_audit_diff import (
 )
 
 QUOTATION_CRM_STATUSES: frozenset[str] = frozenset({"po_received", "lost", "hold", "ongoing"})
+
+
+def _primary_category_from_lines(lines: list[dict]) -> str:
+    counts: dict[str, int] = {}
+    for li in lines:
+        if not isinstance(li, dict):
+            continue
+        cat = str(li.get("category") or "").strip().lower()
+        if "hose" in cat:
+            label = "Hoses"
+        elif "damper" in cat:
+            label = "Dampers"
+        elif cat and cat not in ("other", "others", ""):
+            label = "Valves"
+        else:
+            label = "Others"
+        counts[label] = counts.get(label, 0) + 1
+    if not counts:
+        return "Others"
+    return max(counts, key=lambda k: counts[k])
+
+
+def _short_label(line: dict) -> str:
+    name = str(line.get("product_name") or line.get("description") or "").strip()
+    if "\n" in name:
+        first = name.split("\n")[0].strip()
+        if first.lower().startswith("product :"):
+            name = first.split(":", 1)[1].strip()
+        else:
+            name = first
+    size = str(line.get("size") or "").strip()
+    if len(name) > 36:
+        name = name[:33] + "..."
+    if size:
+        return f"{name} {size}".strip()
+    return name or "Item"
+
+
+def _item_desc_short_from_lines(lines: list[dict]) -> str:
+    bits = [_short_label(li) for li in lines[:3] if isinstance(li, dict)]
+    bits = [b for b in bits if b and b != "Item"]
+    if not bits:
+        return "—"
+    out = " · ".join(bits)
+    if len(lines) > 3:
+        out += " …"
+    return out[:250]
+
+
+def item_desc_short_from_lines(lines: list[dict]) -> str:
+    """Public helper for enquiry / PO style listing snippets."""
+    return _item_desc_short_from_lines(lines)
+
+
+def _sub_category_from_line(li: dict) -> str | None:
+    desc = str(li.get("description") or "")
+    for line in desc.split("\n"):
+        low = line.lower()
+        if "variant" in low and ":" in line:
+            val = line.split(":", 1)[1].strip()
+            return val or None
+    first = desc.split("\n")[0].strip() if desc else ""
+    if first.lower().startswith("product :"):
+        val = first.split(":", 1)[1].strip()
+        return val or None
+    return None
+
+
+def listing_fields_from_quotation(q: Quotation) -> dict:
+    lines = q.line_items if isinstance(q.line_items, list) else []
+    primary = _primary_category_from_lines(lines)
+    category_label = primary
+    sub_category: str | None = None
+    for li in lines:
+        if not isinstance(li, dict):
+            continue
+        ct = str(li.get("catalog_table") or "").strip()
+        if ct:
+            category_label = _category_label(ct)
+        sub_category = _sub_category_from_line(li)
+        if sub_category:
+            break
+    if not sub_category:
+        for li in lines:
+            if isinstance(li, dict):
+                sub_category = _sub_category_from_line(li)
+                if sub_category:
+                    break
+    return {
+        "primary_category": primary,
+        "category_label": category_label,
+        "sub_category": sub_category,
+        "item_desc_short": _item_desc_short_from_lines(lines),
+    }
+
+
+def default_validity_date(created_at: datetime | None, validity_days: int) -> date | None:
+    if created_at is None:
+        return None
+    base = created_at.date() if hasattr(created_at, "date") else None
+    if base is None:
+        return None
+    return base + timedelta(days=max(0, int(validity_days or 0)))
+
+
+async def po_totals_by_quotation_ids(
+    db: AsyncSession,
+    quotation_ids: list[uuid.UUID],
+) -> dict[str, float]:
+    if not quotation_ids:
+        return {}
+    stmt = (
+        select(PurchaseOrder.quotation_id, func.coalesce(func.sum(PurchaseOrder.total_amount), 0.0))
+        .where(PurchaseOrder.quotation_id.in_(quotation_ids))
+        .group_by(PurchaseOrder.quotation_id)
+    )
+    result = await db.execute(stmt)
+    out: dict[str, float] = {}
+    for qid, total in result.all():
+        if qid is not None:
+            out[str(qid)] = round(float(total or 0), 2)
+    return out
 
 
 def _trim_str(s: object, max_len: int) -> str:
@@ -594,6 +717,7 @@ async def list_quotations(
     status: str | None = None,
     date_from: date | None = None,
     date_to: date | None = None,
+    created_by_user_id: uuid.UUID | None = None,
 ) -> list[Quotation]:
     """Return list of quotations ordered by creation date, with optional filters."""
     stmt = select(Quotation).options(selectinload(Quotation.enquiry))
@@ -628,6 +752,8 @@ async def list_quotations(
     if date_to is not None:
         dt1 = datetime.combine(date_to + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
         conds.append(Quotation.created_at < dt1)
+    if created_by_user_id is not None:
+        conds.append(Quotation.created_by_user_id == created_by_user_id)
 
     if conds:
         stmt = stmt.where(and_(*conds))
@@ -675,6 +801,50 @@ async def update_quotation_crm_status(
         )
     )
 
+    await db.commit()
+    await db.refresh(q)
+    return q
+
+
+async def update_quotation_listing_dates(
+    quotation_id: str,
+    db: AsyncSession,
+    *,
+    validity_date: date | None = None,
+    next_follow_up_date: date | None = None,
+    set_validity: bool = False,
+    set_follow_up: bool = False,
+    performed_by: str = "user",
+    performed_by_name: str | None = None,
+) -> Quotation:
+    q = await get_quotation(quotation_id, db)
+    changed: dict[str, object] = {}
+    if set_validity:
+        q.validity_date = validity_date
+        changed["validity_date"] = validity_date.isoformat() if validity_date else None
+    if set_follow_up:
+        q.next_follow_up_date = next_follow_up_date
+        changed["next_follow_up_date"] = (
+            next_follow_up_date.isoformat() if next_follow_up_date else None
+        )
+    if not changed:
+        return q
+
+    db.add(
+        AuditLog(
+            id=uuid.uuid4(),
+            entity_type="quotation",
+            entity_id=q.id,
+            action="quotation_listing_dates",
+            performed_by=performed_by or "user",
+            details={
+                "performed_by_name": performed_by_name,
+                "quotation_id": str(q.id),
+                "quote_number": q.quote_number,
+                **changed,
+            },
+        )
+    )
     await db.commit()
     await db.refresh(q)
     return q

@@ -2,51 +2,38 @@
 
 import Link from 'next/link'
 import { useMemo, useState } from 'react'
-import { Download, Eye, FileText, Search } from 'lucide-react'
+import { FileText, Search } from 'lucide-react'
 import PageShell from '@/components/layout/PageShell'
 import EmptyState from '@/components/ui/EmptyState'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Button, buttonVariants } from '@/components/ui/button'
+import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import QuotationListStatusEditor from '@/components/quotations/QuotationListStatusEditor'
+import QuotationListDateEditor, {
+  formatQuotationListDate,
+} from '@/components/quotations/QuotationListDateEditor'
 import { useQuotationsListingDataset } from '@/lib/queries'
-import { downloadQuotationPdf } from '@/lib/api'
 import { filterQuotationsLocal } from '@/lib/filterQuotationsLocal'
 import {
   QUOTATION_CRM_LABELS,
   QUOTATION_CRM_STATUSES,
   type QuotationCrmStatus,
 } from '@/lib/quotationCrmStatus'
-import { cn, formatCurrency, formatRelativeTime } from '@/lib/utils'
+import { formatCurrency } from '@/lib/utils'
 import type { QuotationListItem } from '@/types'
+
+const COL_COUNT = 11
 
 function TableSkeletonRows() {
   return (
     <tbody>
       {Array.from({ length: 6 }).map((_, i) => (
         <tr key={i} className="border-b border-[#E2E6DC] bg-white">
-          <td className="px-4 py-3">
-            <Skeleton className="h-4 w-24" />
-          </td>
-          <td className="px-4 py-3">
-            <Skeleton className="h-4 w-40" />
-          </td>
-          <td className="px-4 py-3 text-right">
-            <Skeleton className="ml-auto h-4 w-20" />
-          </td>
-          <td className="px-4 py-3">
-            <Skeleton className="h-5 w-16 rounded-md" />
-          </td>
-          <td className="px-4 py-3">
-            <Skeleton className="h-4 w-28" />
-            <Skeleton className="mt-1 h-3 w-20" />
-          </td>
-          <td className="px-4 py-3">
-            <div className="flex justify-end gap-2">
-              <Skeleton className="h-7 w-7 rounded-md" />
-              <Skeleton className="h-7 w-20 rounded-md" />
-            </div>
-          </td>
+          {Array.from({ length: COL_COUNT }).map((__, j) => (
+            <td key={j} className="px-3 py-3">
+              <Skeleton className="h-4 w-full max-w-[100px]" />
+            </td>
+          ))}
         </tr>
       ))}
     </tbody>
@@ -76,7 +63,6 @@ export default function QuotationsPage() {
       }),
     [allRows, searchInput, clientFilter, statusFilter, dateFrom, dateTo],
   )
-  const [pdfBusyId, setPdfBusyId] = useState<string | null>(null)
   const totalValue = list.reduce((sum, q) => sum + q.total_amount, 0)
 
   const clearFilters = () => {
@@ -102,7 +88,7 @@ export default function QuotationsPage() {
           <Input
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
-            placeholder="Search quote number or client…"
+            placeholder="Search quote, enquiry, client, or item…"
             className="h-10 border-[#E2E6DC] pl-9 text-[13px]"
             aria-label="Search quotations"
           />
@@ -172,15 +158,20 @@ export default function QuotationsPage() {
 
       <div className="overflow-hidden rounded-xl border border-surface-border bg-white shadow-sm">
         <div className="overflow-x-auto">
-          <table className="w-full border-collapse text-left">
+          <table className="w-full min-w-[1400px] border-collapse text-left">
             <thead>
               <tr className="bg-[#F4F5F0] text-[11px] font-medium uppercase tracking-wide text-[#8A9488]">
-                <th className="px-4 py-3">Quote Number</th>
-                <th className="px-4 py-3">Client</th>
-                <th className="px-4 py-3 text-right">Total Amount</th>
-                <th className="px-4 py-3 min-w-[200px]">Status</th>
-                <th className="px-4 py-3">Created</th>
-                <th className="px-4 py-3 text-right">Actions</th>
+                <th className="min-w-[120px] whitespace-nowrap px-3 py-3">Quote / Enq</th>
+                <th className="min-w-[72px] whitespace-nowrap px-3 py-3">Date</th>
+                <th className="min-w-[140px] whitespace-nowrap px-3 py-3">Client</th>
+                <th className="min-w-[130px] whitespace-nowrap px-3 py-3">Category / Sub-Category</th>
+                <th className="min-w-[160px] whitespace-nowrap px-3 py-3">Item Description</th>
+                <th className="min-w-[88px] whitespace-nowrap px-3 py-3 text-right">Quote ₹</th>
+                <th className="min-w-[72px] whitespace-nowrap px-3 py-3 text-right">PO ₹</th>
+                <th className="min-w-[180px] whitespace-nowrap px-3 py-3">Status</th>
+                <th className="min-w-[96px] whitespace-nowrap px-3 py-3">Validity</th>
+                <th className="min-w-[110px] whitespace-nowrap px-3 py-3">Next follow-up</th>
+                <th className="min-w-[88px] whitespace-nowrap px-3 py-3">User</th>
               </tr>
             </thead>
             {isPending ? (
@@ -188,7 +179,7 @@ export default function QuotationsPage() {
             ) : list.length === 0 ? (
               <tbody>
                 <tr>
-                  <td colSpan={6} className="p-0">
+                  <td colSpan={COL_COUNT} className="p-0">
                     <EmptyState
                       icon={FileText}
                       title={hasActiveFilters ? 'No matching quotations' : 'No quotations yet'}
@@ -208,63 +199,70 @@ export default function QuotationsPage() {
                     key={q.quotation_id}
                     className="border-b border-[#E2E6DC] bg-white text-[13px] transition-colors hover:bg-[#F4F5F0]"
                   >
-                    <td className="px-4 py-3 align-top">
+                    <td className="px-3 py-3 align-top">
                       <Link
                         href={`/quotations/${q.quotation_id}`}
                         className="font-mono text-brand-gold-500 hover:underline"
                       >
                         {q.quote_number}
                       </Link>
+                      {q.enquiry_number ? (
+                        <p className="mt-0.5 font-mono text-[12px] text-surface-muted">
+                          <span className="mr-0.5 text-[#B0B8AD]" aria-hidden>
+                            ↳
+                          </span>
+                          {q.enquiry_number}
+                        </p>
+                      ) : null}
                     </td>
-                    <td className="px-4 py-3 align-top text-gray-900">
+                    <td className="whitespace-nowrap px-3 py-3 align-top text-gray-900">
+                      {formatQuotationListDate(q.created_at)}
+                    </td>
+                    <td className="px-3 py-3 align-top text-gray-900">
                       <span className="font-medium">{q.client_name}</span>
                       {q.client_company && (
                         <span className="mt-0.5 block text-[12px] text-surface-muted">{q.client_company}</span>
                       )}
                     </td>
-                    <td className="px-4 py-3 align-top text-right font-mono text-brand-green-600">
-                      {formatCurrency(q.total_amount)}
-                    </td>
-                    <td className="px-4 py-3 align-top">
-                      <QuotationListStatusEditor q={q} />
-                    </td>
-                    <td className="px-4 py-3 align-top text-surface-muted" title={q.created_at}>
-                      <span className="block text-[13px]">{formatRelativeTime(q.created_at)}</span>
-                      {q.created_by_name ? (
-                        <span className="mt-0.5 block text-[11px] leading-snug text-[#6B7568]">
-                          {q.created_by_name}
-                        </span>
+                    <td className="px-3 py-3 align-top text-gray-900">
+                      <p className="font-medium">{q.category_label || q.primary_category}</p>
+                      {q.sub_category ? (
+                        <p className="mt-0.5 text-[12px] text-surface-muted">{q.sub_category}</p>
                       ) : null}
                     </td>
-                    <td className="px-4 py-3 align-top">
-                      <div className="flex items-center justify-end gap-2">
-                        <Link
-                          href={`/quotations/${q.quotation_id}`}
-                          aria-label="View quotation"
-                          className={cn(
-                            buttonVariants({ variant: 'ghost', size: 'icon-sm' }),
-                            'text-surface-muted',
-                          )}
-                        >
-                          <Eye className="size-4" />
-                        </Link>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          disabled={pdfBusyId === q.quotation_id}
-                          className="inline-flex h-7 gap-1 text-[12px]"
-                          onClick={() => {
-                            setPdfBusyId(q.quotation_id)
-                            downloadQuotationPdf(q.quotation_id, `${q.quote_number}.pdf`)
-                              .catch((e: unknown) => window.alert(e instanceof Error ? e.message : 'Download failed'))
-                              .finally(() => setPdfBusyId(null))
-                          }}
-                        >
-                          <Download className="size-3.5" />
-                          {pdfBusyId === q.quotation_id ? '…' : 'PDF'}
-                        </Button>
-                      </div>
+                    <td
+                      className="max-w-[200px] truncate px-3 py-3 align-top text-[12px] text-surface-muted"
+                      title={q.item_desc_short}
+                    >
+                      {q.item_desc_short}
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-3 align-top text-right font-mono text-brand-green-600">
+                      {formatCurrency(q.total_amount)}
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-3 align-top text-right font-mono text-gray-900">
+                      {q.po_total_amount != null && q.po_total_amount > 0
+                        ? formatCurrency(q.po_total_amount)
+                        : '—'}
+                    </td>
+                    <td className="px-3 py-3 align-top">
+                      <QuotationListStatusEditor q={q} />
+                    </td>
+                    <td className="px-3 py-3 align-top">
+                      <QuotationListDateEditor
+                        quotationId={q.quotation_id}
+                        field="validity_date"
+                        value={q.validity_date}
+                      />
+                    </td>
+                    <td className="px-3 py-3 align-top">
+                      <QuotationListDateEditor
+                        quotationId={q.quotation_id}
+                        field="next_follow_up_date"
+                        value={q.next_follow_up_date}
+                      />
+                    </td>
+                    <td className="px-3 py-3 align-top text-[12px] text-surface-muted">
+                      {q.created_by_name || '—'}
                     </td>
                   </tr>
                 ))}

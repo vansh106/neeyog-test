@@ -228,8 +228,9 @@ async def change_password(
     user = result.scalar_one_or_none()
     if not user:
         raise UserNotFoundError("User not found")
-    if not verify_password(old_password, user.hashed_password):
-        raise AuthenticationError("Current password is incorrect")
+    if not user.is_first_login:
+        if not verify_password(old_password, user.hashed_password):
+            raise AuthenticationError("Current password is incorrect")
     ok, msg = is_strong_password(new_password)
     if not ok:
         raise ValueError(f"Weak password: {msg}")

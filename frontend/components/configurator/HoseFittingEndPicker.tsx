@@ -18,7 +18,9 @@ import {
   filterFittingCascadeSteps,
   FITTING_CATALOG_OPTIONS,
   fittingCategoryLabel,
+  HOSE_FITTING_SIZE_FIELD,
   isBareFittingSelection,
+  matchHoseSizeToFittingOption,
 } from '@/lib/configuratorProductFlow'
 import type { CascadeStep, ValveProduct, ValveSpecSelections } from '@/types'
 
@@ -92,6 +94,8 @@ type Props = {
   specs: ValveSpecSelections
   onSpecsChange: (specs: ValveSpecSelections) => void
   onResolvedChange: (product: ValveProduct | null) => void
+  /** Hose ``size_id_mm`` — auto-select matching fittings size when available in masters. */
+  hoseSizeForMatch?: string | null
   showQuantity?: boolean
   quantity?: 1 | 2
   onQuantityChange?: (qty: 1 | 2) => void
@@ -103,6 +107,7 @@ export function HoseFittingEndPicker({
   specs,
   onSpecsChange,
   onResolvedChange,
+  hoseSizeForMatch,
   showQuantity = false,
   quantity = 1,
   onQuantityChange,
@@ -231,6 +236,48 @@ export function HoseFittingEndPicker({
     }
     if (changed) onSpecsChange({ ...specs, field_values: nextFv })
   }, [specs, catalog, catalogLoading, visibleCascadeSteps, onSpecsChange])
+
+  useEffect(() => {
+    const hoseSize = hoseSizeForMatch?.trim()
+    if (
+      !hoseSize ||
+      catalogLoading ||
+      !specs.catalog_category ||
+      isBareFittingSelection(specs.catalog_category) ||
+      catalog.length === 0 ||
+      visibleCascadeSteps.length === 0
+    ) {
+      return
+    }
+    if (specs.field_values[HOSE_FITTING_SIZE_FIELD]) return
+
+    const sizeStepIdx = visibleCascadeSteps.findIndex((s) => s.key === HOSE_FITTING_SIZE_FIELD)
+    if (sizeStepIdx < 0) return
+
+    const prior: Record<string, string> = {}
+    for (const step of visibleCascadeSteps) {
+      if (step.key === HOSE_FITTING_SIZE_FIELD) break
+      const v = specs.field_values[step.key]
+      if (!v?.trim()) return
+      prior[step.key] = v
+    }
+
+    const sizeOpts = computeDistinctOptions(catalog, HOSE_FITTING_SIZE_FIELD, prior)
+    const matched = matchHoseSizeToFittingOption(hoseSize, sizeOpts)
+    if (!matched) return
+
+    onSpecsChange({
+      ...specs,
+      field_values: { ...specs.field_values, [HOSE_FITTING_SIZE_FIELD]: matched },
+    })
+  }, [
+    hoseSizeForMatch,
+    specs,
+    catalog,
+    catalogLoading,
+    visibleCascadeSteps,
+    onSpecsChange,
+  ])
 
   const pickCategory = (key: string) => {
     onSpecsChange({ catalog_category: key, field_values: {} })

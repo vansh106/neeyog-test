@@ -256,6 +256,10 @@ export const enquiriesApi = {
       offset?: number
     },
   ) => get<T>('/api/enquiries/', params as Record<string, unknown>),
+  updateListingDates: <T = unknown>(
+    id: string,
+    body: { next_follow_up_date?: string | null },
+  ) => patch<T>(`/api/enquiries/${encodeURIComponent(id)}/listing-dates`, body),
   listEmailInbox: <T = unknown>(params?: {
     status?: string
     limit?: number
@@ -315,6 +319,10 @@ export const quotationsApi = {
     id: string,
     body: { status: string; status_remarks?: string | null },
   ) => patch<T>(`/api/quotations/${encodeURIComponent(id)}/crm-status`, body),
+  updateListingDates: <T = unknown>(
+    id: string,
+    body: { validity_date?: string | null; next_follow_up_date?: string | null },
+  ) => patch<T>(`/api/quotations/${encodeURIComponent(id)}/listing-dates`, body),
   getQuoteHistory: <T = unknown>(
     params: {
       category: string
@@ -746,12 +754,12 @@ export const usersApi = {
 }
 
 export async function changePasswordApi(
-  old_password: string,
   new_password: string,
   phone?: string,
+  old_password?: string,
 ): Promise<{ message?: string; phone?: string | null }> {
   return post<{ message?: string; phone?: string | null }>('/api/auth/change-password', {
-    old_password,
+    ...(old_password != null && old_password !== '' ? { old_password } : {}),
     new_password,
     phone,
   })

@@ -163,6 +163,7 @@ async def list_purchase_orders(
     date_from=None,
     date_to=None,
     po_type: str | None = None,
+    created_by_user_id: uuid.UUID | None = None,
 ) -> list[PurchaseOrder]:
     q = (
         select(PurchaseOrder)
@@ -190,6 +191,8 @@ async def list_purchase_orders(
         q = q.where(PurchaseOrder.quotation_id.isnot(None))
     elif po_type == "non_quoted":
         q = q.where(PurchaseOrder.quotation_id.is_(None))
+    if created_by_user_id is not None:
+        q = q.where(PurchaseOrder.created_by_user_id == created_by_user_id)
     res = await db.execute(q)
     return list(res.scalars().all())
 

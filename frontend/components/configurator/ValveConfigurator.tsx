@@ -866,6 +866,11 @@ export function ValveConfigurator({
     return catalogRowToValveProduct(row, displayType, specs.catalog_category)
   }, [isTemporaryProduct, temporaryDescription, specs, catalog, resolve, cascadeSteps, categoryDisplayLabel])
 
+  const fittingsHoseSize = useMemo(
+    () => resolvedValve?.size_id_mm?.trim() || specs.field_values.size_id_mm?.trim() || null,
+    [resolvedValve?.size_id_mm, specs.field_values.size_id_mm],
+  )
+
   const pricingCtx = useMemo(
     () => ({
       resolvedValve,
@@ -1902,6 +1907,7 @@ export function ValveConfigurator({
             specs={fittingEnd1Specs}
             onSpecsChange={setFittingEnd1Specs}
             onResolvedChange={handleResolvedFittingEnd1}
+            hoseSizeForMatch={fittingsHoseSize}
             showQuantity
             quantity={fittingEnd1Qty}
             onQuantityChange={setFittingEnd1Qty}
@@ -1914,6 +1920,7 @@ export function ValveConfigurator({
                 specs={fittingEnd2Specs}
                 onSpecsChange={setFittingEnd2Specs}
                 onResolvedChange={handleResolvedFittingEnd2}
+                hoseSizeForMatch={fittingsHoseSize}
                 listUnitPrice={(base) => componentListPrice('fitting_end_2', base)}
               />
             </>

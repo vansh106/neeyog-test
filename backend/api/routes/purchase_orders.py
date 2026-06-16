@@ -20,7 +20,7 @@ router = APIRouter(prefix="/api/purchase-orders", tags=["purchase-orders"])
 
 @router.get("/", response_model=list[PurchaseOrderListItem])
 async def list_purchase_orders_route(
-    _user: CurrentUser = Depends(require_permission(Permission.VIEW_PURCHASE_ORDERS)),
+    user: CurrentUser = Depends(require_permission(Permission.VIEW_PURCHASE_ORDERS)),
     db: AsyncSession = Depends(get_db),
     limit: int = Query(200, ge=1, le=2000),
     offset: int = Query(0, ge=0),
@@ -32,6 +32,7 @@ async def list_purchase_orders_route(
 ):
     return await purchase_order_controller.handle_list_purchase_orders(
         db,
+        user,
         limit=limit,
         offset=offset,
         search=search,
@@ -54,26 +55,26 @@ async def create_purchase_order_route(
 @router.get("/{po_id}")
 async def get_purchase_order_route(
     po_id: str,
-    _user: CurrentUser = Depends(require_permission(Permission.VIEW_PURCHASE_ORDERS)),
+    user: CurrentUser = Depends(require_permission(Permission.VIEW_PURCHASE_ORDERS)),
     db: AsyncSession = Depends(get_db),
 ):
-    return await purchase_order_controller.handle_get_purchase_order(db, po_id)
+    return await purchase_order_controller.handle_get_purchase_order(db, po_id, user)
 
 
 @router.patch("/{po_id}")
 async def update_purchase_order_route(
     po_id: str,
     body: PurchaseOrderUpdateBody,
-    _user: CurrentUser = Depends(require_permission(Permission.CREATE_PURCHASE_ORDERS)),
+    user: CurrentUser = Depends(require_permission(Permission.CREATE_PURCHASE_ORDERS)),
     db: AsyncSession = Depends(get_db),
 ):
-    return await purchase_order_controller.handle_update_purchase_order(po_id, body, db)
+    return await purchase_order_controller.handle_update_purchase_order(po_id, body, db, user)
 
 
 @router.delete("/{po_id}")
 async def delete_purchase_order_route(
     po_id: str,
-    _user: CurrentUser = Depends(require_permission(Permission.DELETE_PURCHASE_ORDERS)),
+    user: CurrentUser = Depends(require_permission(Permission.DELETE_PURCHASE_ORDERS)),
     db: AsyncSession = Depends(get_db),
 ):
-    return await purchase_order_controller.handle_delete_purchase_order(db, po_id)
+    return await purchase_order_controller.handle_delete_purchase_order(db, po_id, user)

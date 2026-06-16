@@ -194,3 +194,47 @@ export function fittingCategoryLabel(catalogCategory: string | null | undefined)
     FITTING_CATALOG_OPTIONS.find((c) => c.key === catalogCategory)?.label ?? catalogCategory
   )
 }
+
+/** Normalize hose/fitting size labels for comparison (e.g. ``25mm`` → ``25 mm``). */
+export function normalizeSizeMmLabel(raw: string | null | undefined): string | null {
+  if (!raw?.trim()) return null
+  const t = raw.trim().replace(/\s+/g, ' ')
+  const m = t.match(/^(\d+(?:\.\d+)?)\s*mm?$/i)
+  if (m) return `${m[1]} mm`
+  return t
+}
+
+function parseSizeMmNumber(valveSize: string | null | undefined): number | null {
+  if (!valveSize) return null
+  const mDn = valveSize.match(/DN\s*(\d+(?:\.\d+)?)/i)
+  if (mDn) return Number(mDn[1])
+  const mMm = valveSize.match(/(\d+(?:\.\d+)?)\s*MM/i)
+  if (mMm) return Number(mMm[1])
+  const plain = valveSize.match(/^(\d+(?:\.\d+)?)$/)
+  if (plain) return Number(plain[1])
+  return null
+}
+
+/** Pick fittings ``size_mm`` option that matches the selected hose ``size_id_mm``, if any. */
+export function matchHoseSizeToFittingOption(
+  hoseSizeIdMm: string | null | undefined,
+  fittingOptions: string[],
+): string | null {
+  const hoseNorm = normalizeSizeMmLabel(hoseSizeIdMm)
+  if (!hoseNorm || fittingOptions.length === 0) return null
+
+  const hoseLower = hoseNorm.toLowerCase()
+  const exact = fittingOptions.find((o) => o.trim().toLowerCase() === hoseLower)
+  if (exact) return exact
+
+  const hoseNum = parseSizeMmNumber(hoseNorm)
+  if (hoseNum == null) return null
+  for (const opt of fittingOptions) {
+    const optNum = parseSizeMmNumber(opt)
+    if (optNum != null && optNum === hoseNum) return opt
+  }
+  return null
+}
+
+export const HOSE_FITTING_SIZE_FIELD = 'size_mm'
+export const HOSE_SIZE_FIELD = 'size_id_mm'

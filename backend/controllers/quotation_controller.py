@@ -4,6 +4,7 @@ Shapes HTTP responses, converts service exceptions to HTTP status codes.
 No DB queries. No business logic. Calls services only.
 """
 
+import uuid
 from datetime import date
 
 from fastapi import HTTPException
@@ -15,6 +16,21 @@ from core.exceptions import ProductNotFoundError, QuotationBuildError
 from db.models import Quotation
 from services import quotation_service
 from services import quotation_terms_service
+
+
+def _is_admin_scope(user: CurrentUser) -> bool:
+    return user.tier in ("admin", "superadmin")
+
+
+def _request_user_uuid(user: CurrentUser) -> uuid.UUID:
+    return uuid.UUID(str(user.id))
+
+
+def _ensure_quotation_access(q: Quotation, user: CurrentUser) -> None:
+    if _is_admin_scope(user):
+        return
+    if q.created_by_user_id is None or str(q.created_by_user_id) != str(user.id):
+        raise HTTPException(status_code=404, detail="Quotation not found")
 
 
 def _quotation_api_dict(q: Quotation) -> dict:
@@ -54,6 +70,10 @@ def _quotation_api_dict(q: Quotation) -> dict:
         "freight_rate": float(q.freight_rate) if getattr(q, "freight_rate", None) is not None else None,
         "total_amount": q.total_amount,
         "validity_days": q.validity_days,
+        "validity_date": q.validity_date.isoformat() if getattr(q, "validity_date", None) else None,
+        "next_follow_up_date": (
+            q.next_follow_up_date.isoformat() if getattr(q, "next_follow_up_date", None) else None
+        ),
         "status": q.status,
         "status_remarks": q.status_remarks,
         "pdf_path": q.pdf_path,
@@ -88,9 +108,16 @@ class QuotationListItem(BaseModel):
     quote_number: str
     client_name: str
     client_company: str | None = None
+    primary_category: str
+    category_label: str
+    sub_category: str | None = None
+    item_desc_short: str
     total_amount: float
+    po_total_amount: float | None = None
     status: str
     status_remarks: str | None = None
+    validity_date: str | None = None
+    next_follow_up_date: str | None = None
     created_at: str
     created_by_name: str | None = None
 
@@ -158,6 +185,13 @@ class QuotationCrmStatusBody(BaseModel):
     status_remarks: str | None = None
 
 
+class QuotationListingDatesBody(BaseModel):
+    """Editable CRM dates on the quotation list."""
+
+    validity_date: date | None = None
+    next_follow_up_date: date | None = None
+
+
 class QuotationAuditItem(BaseModel):
     at: str
     user: str
@@ -181,6 +215,8 @@ async def handle_patch_quotation_line_items(
     user: CurrentUser,
 ) -> dict:
     try:
+        current = await quotation_service.get_quotation(quotation_id, db)
+        _ensure_quotation_access(current, user)
         q = await quotation_service.update_quotation_from_manual_line_items(
             quotation_id,
             body.lineItems,
@@ -200,10 +236,13 @@ async def handle_patch_quotation_line_items(
 async def handle_get_quotation_audit(
     quotation_id: str,
     db: AsyncSession,
+    user: CurrentUser,
     *,
     limit: int = 25,
 ) -> QuotationAuditResponse:
     try:
+        current = await quotation_service.get_quotation(quotation_id, db)
+        _ensure_quotation_access(current, user)
         rows = await quotation_service.list_quotation_audit(quotation_id, db, limit=limit)
         items: list[QuotationAuditItem] = []
         for r in rows:
@@ -257,9 +296,11 @@ async def handle_get_quotation_audit(
 async def handle_get_quotation(
     quotation_id: str,
     db: AsyncSession,
+    user: CurrentUser,
 ) -> dict:
     try:
         q = await quotation_service.get_quotation(quotation_id, db)
+        _ensure_quotation_access(q, user)
         return _quotation_api_dict(q)
     except ProductNotFoundError:
         raise HTTPException(status_code=404, detail="Quotation not found")
@@ -274,6 +315,8 @@ async def handle_patch_quotation_pdf_display(
     user: CurrentUser,
 ) -> dict:
     try:
+        current = await quotation_service.get_quotation(quotation_id, db)
+        _ensure_quotation_access(current, user)
         q = await quotation_service.update_quotation_pdf_display_overrides(
             quotation_id,
             body.pdf_display_overrides,
@@ -296,6 +339,8 @@ async def handle_get_quotation_pdf(
     user: CurrentUser,
 ) -> str:
     try:
+        current = await quotation_service.get_quotation(quotation_id, db)
+        _ensure_quotation_access(current, user)
         return await quotation_service.get_quotation_pdf_path(
             quotation_id,
             db,
@@ -312,6 +357,7 @@ async def handle_get_quotation_pdf(
 
 async def handle_list_quotations(
     db: AsyncSession,
+    user: CurrentUser,
     limit: int = 50,
     offset: int = 0,
     *,
@@ -322,6 +368,7 @@ async def handle_list_quotations(
     date_to: date | None = None,
 ) -> list[QuotationListItem]:
     try:
+        scope_user_id = None if _is_admin_scope(user) else _request_user_uuid(user)
         quotations = await quotation_service.list_quotations(
             db,
             limit=limit,
@@ -331,26 +378,45 @@ async def handle_list_quotations(
             status=status,
             date_from=date_from,
             date_to=date_to,
+            created_by_user_id=scope_user_id,
         )
-        return [
-            QuotationListItem(
-                quotation_id=str(q.id),
-                enquiry_id=str(q.enquiry_id),
-                enquiry_number=(
-                    (getattr(getattr(q, "enquiry", None), "enquiry_number", None) or "").strip() or None
-                ),
-                client_employee_id=str(q.client_employee_id) if q.client_employee_id else None,
-                quote_number=q.quote_number,
-                client_name=q.client_name,
-                client_company=q.client_company,
-                total_amount=q.total_amount,
-                status=q.status,
-                status_remarks=q.status_remarks,
-                created_at=q.created_at.isoformat() if q.created_at else "",
-                created_by_name=(q.created_by_name or "").strip() or None,
+        po_totals = await quotation_service.po_totals_by_quotation_ids(
+            db, [q.id for q in quotations]
+        )
+        items: list[QuotationListItem] = []
+        for q in quotations:
+            listing = quotation_service.listing_fields_from_quotation(q)
+            validity = getattr(q, "validity_date", None)
+            if validity is None:
+                validity = quotation_service.default_validity_date(q.created_at, q.validity_days)
+            follow_up = getattr(q, "next_follow_up_date", None)
+            po_total = po_totals.get(str(q.id))
+            items.append(
+                QuotationListItem(
+                    quotation_id=str(q.id),
+                    enquiry_id=str(q.enquiry_id),
+                    enquiry_number=(
+                        (getattr(getattr(q, "enquiry", None), "enquiry_number", None) or "").strip() or None
+                    ),
+                    client_employee_id=str(q.client_employee_id) if q.client_employee_id else None,
+                    quote_number=q.quote_number,
+                    client_name=q.client_name,
+                    client_company=q.client_company,
+                    primary_category=listing["primary_category"],
+                    category_label=listing["category_label"],
+                    sub_category=listing["sub_category"],
+                    item_desc_short=listing["item_desc_short"],
+                    total_amount=q.total_amount,
+                    po_total_amount=po_total if po_total is not None else None,
+                    status=q.status,
+                    status_remarks=q.status_remarks,
+                    validity_date=validity.isoformat() if validity else None,
+                    next_follow_up_date=follow_up.isoformat() if follow_up else None,
+                    created_at=q.created_at.isoformat() if q.created_at else "",
+                    created_by_name=(q.created_by_name or "").strip() or None,
+                )
             )
-            for q in quotations
-        ]
+        return items
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -362,6 +428,8 @@ async def handle_patch_quotation_crm_status(
     user: CurrentUser,
 ) -> dict:
     try:
+        current = await quotation_service.get_quotation(quotation_id, db)
+        _ensure_quotation_access(current, user)
         q = await quotation_service.update_quotation_crm_status(
             quotation_id,
             body.status,
@@ -375,6 +443,33 @@ async def handle_patch_quotation_crm_status(
         raise HTTPException(status_code=404, detail="Quotation not found")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+async def handle_patch_quotation_listing_dates(
+    quotation_id: str,
+    body: QuotationListingDatesBody,
+    db: AsyncSession,
+    user: CurrentUser,
+) -> dict:
+    try:
+        current = await quotation_service.get_quotation(quotation_id, db)
+        _ensure_quotation_access(current, user)
+        fields_set = body.model_fields_set
+        q = await quotation_service.update_quotation_listing_dates(
+            quotation_id,
+            db,
+            validity_date=body.validity_date,
+            next_follow_up_date=body.next_follow_up_date,
+            set_validity="validity_date" in fields_set,
+            set_follow_up="next_follow_up_date" in fields_set,
+            performed_by=user.email,
+            performed_by_name=user.full_name or None,
+        )
+        return _quotation_api_dict(q)
+    except ProductNotFoundError:
+        raise HTTPException(status_code=404, detail="Quotation not found")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -458,6 +553,8 @@ async def handle_patch_quotation_financial_summary(
     user: CurrentUser,
 ) -> dict:
     try:
+        current = await quotation_service.get_quotation(quotation_id, db)
+        _ensure_quotation_access(current, user)
         q = await quotation_service.update_quotation_financial_summary(
             quotation_id,
             body.model_dump(by_alias=True),

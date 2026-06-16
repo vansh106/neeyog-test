@@ -31,7 +31,7 @@ class LogoutRequest(BaseModel):
 
 
 class ChangePasswordRequest(BaseModel):
-    old_password: str
+    old_password: str | None = None
     new_password: str
     phone: str | None = None
 
@@ -124,7 +124,7 @@ async def handle_change_password(
     try:
         await auth_service.change_password(
             user_id,
-            body.old_password,
+            body.old_password or "",
             body.new_password,
             db,
             phone=body.phone,

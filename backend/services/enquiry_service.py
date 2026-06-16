@@ -7,7 +7,7 @@ Raises only from core.exceptions.
 import logging
 import uuid
 import json
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import and_, desc, false, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -1436,6 +1436,8 @@ async def process_manual_dropdown(
         freight_rate=freight_rate,
         total_amount=total_amount,
         validity_days=int(client_json.get("quote_validity_days", 15)),
+        validity_date=datetime.now(timezone.utc).date()
+        + timedelta(days=max(0, int(client_json.get("quote_validity_days", 15)))),
         status="ongoing",
         notes=notes or None,
         created_by_user_id=cb_uid,
@@ -1614,6 +1616,7 @@ async def list_enquiries(
     limit: int = 50,
     offset: int = 0,
     company_id: str | None = None,
+    created_by_user_id: uuid.UUID | None = None,
 ) -> list[Enquiry]:
     """Return filtered list of enquiries."""
     stmt = (
@@ -1634,9 +1637,97 @@ async def list_enquiries(
             cid = None
         if cid is not None:
             stmt = stmt.where(Enquiry.company_id == cid)
+    if created_by_user_id is not None:
+        stmt = stmt.where(Enquiry.created_by_user_id == created_by_user_id)
     stmt = stmt.offset(offset).limit(limit)
     result = await db.execute(stmt)
     return list(result.scalars().all())
+
+
+async def latest_quotations_by_enquiry_ids(
+    db: AsyncSession,
+    enquiry_ids: list[uuid.UUID],
+) -> dict[str, Quotation]:
+    """Most recent quotation per enquiry (for listing quote ref + item desc)."""
+    if not enquiry_ids:
+        return {}
+    stmt = (
+        select(Quotation)
+        .where(Quotation.enquiry_id.in_(enquiry_ids))
+        .order_by(Quotation.created_at.desc())
+    )
+    result = await db.execute(stmt)
+    out: dict[str, Quotation] = {}
+    for q in result.scalars().all():
+        key = str(q.enquiry_id)
+        if key not in out:
+            out[key] = q
+    return out
+
+
+def item_desc_short_from_enquiry(e: Enquiry, quotation: Quotation | None = None) -> str:
+    from services.quotation_service import item_desc_short_from_lines
+
+    if quotation is not None and isinstance(quotation.line_items, list) and quotation.line_items:
+        return item_desc_short_from_lines(quotation.line_items)
+    pd = e.parsed_data if isinstance(e.parsed_data, dict) else {}
+    line_items = pd.get("line_items")
+    if isinstance(line_items, list) and line_items:
+        return item_desc_short_from_lines(line_items)
+    products = pd.get("products_requested", []) if isinstance(pd, dict) else []
+    if not isinstance(products, list):
+        return "—"
+    bits: list[str] = []
+    for p in products[:3]:
+        if not isinstance(p, dict):
+            continue
+        desc = str(p.get("product_description") or p.get("description") or "").strip()
+        if not desc:
+            continue
+        if len(desc) > 36:
+            desc = desc[:33] + "..."
+        bits.append(desc)
+    if not bits:
+        return "—"
+    out = " · ".join(bits)
+    if len(products) > 3:
+        out += " …"
+    return out[:250]
+
+
+async def update_enquiry_listing_dates(
+    enquiry_id: str,
+    db: AsyncSession,
+    *,
+    next_follow_up_date: date | None,
+    set_follow_up: bool,
+    performed_by: str = "user",
+    performed_by_name: str | None = None,
+) -> Enquiry:
+    e = await get_enquiry(enquiry_id, db)
+    if not set_follow_up:
+        return e
+    e.next_follow_up_date = next_follow_up_date
+    db.add(
+        AuditLog(
+            id=uuid.uuid4(),
+            entity_type="enquiry",
+            entity_id=e.id,
+            action="enquiry_listing_dates",
+            performed_by=performed_by or "user",
+            details={
+                "performed_by_name": performed_by_name,
+                "enquiry_id": str(e.id),
+                "enquiry_number": e.enquiry_number,
+                "next_follow_up_date": (
+                    next_follow_up_date.isoformat() if next_follow_up_date else None
+                ),
+            },
+        )
+    )
+    await db.commit()
+    await db.refresh(e)
+    return e
 
 
 def _format_for_inbox(e: Enquiry) -> dict:

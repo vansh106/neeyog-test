@@ -3,16 +3,16 @@
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
-import { Download, Eye, FileText, Inbox } from 'lucide-react'
+import { Inbox } from 'lucide-react'
 import PageShell from '@/components/layout/PageShell'
 import StatusBadge from '@/components/ui/StatusBadge'
 import EmptyState from '@/components/ui/EmptyState'
 import { Skeleton } from '@/components/ui/skeleton'
-import { buttonVariants } from '@/components/ui/button'
 import EnquiryListingFiltersPanel from '@/components/enquiries/EnquiryListingFilters'
+import EnquiryListDateEditor from '@/components/enquiries/EnquiryListDateEditor'
 import { enquirySourceBadgeClass, formatEnquirySourceLabel } from '@/lib/enquirySource'
-import { useEnquiriesListingDataset, useQuotations } from '@/lib/queries'
-import { erpExportUrl } from '@/lib/api'
+import { useEnquiriesListingDataset } from '@/lib/queries'
+import { formatQuotationListDate } from '@/components/quotations/QuotationListDateEditor'
 import {
   collectEnquiryFilterOptions,
   defaultEnquiryListingDraft,
@@ -20,7 +20,7 @@ import {
   INITIAL_APPLIED_ENQUIRY_FILTERS,
   type EnquiryListingFilters,
 } from '@/lib/filterEnquiriesLocal'
-import { formatRelativeTime, cn, truncateId } from '@/lib/utils'
+import { formatRelativeTime, cn } from '@/lib/utils'
 import type { EnquiryListItem } from '@/types'
 
 type Pipeline = 'all' | 'complete' | 'incomplete' | 'pending' | 'failed'
@@ -29,36 +29,18 @@ const PENDING_STATUSES = ['received', 'parsing', 'matching', 'quoting'] as const
 
 /** Backend validates `limit` ≤ 500 on GET /api/enquiries/ */
 const LISTING_FETCH_LIMIT = 500
+const COL_COUNT = 10
 
 function TableSkeletonRows() {
   return (
     <tbody>
       {Array.from({ length: 5 }).map((_, i) => (
         <tr key={i} className="border-b border-[#E2E6DC] bg-white">
-          <td className="px-4 py-3">
-            <Skeleton className="h-4 w-28" />
-          </td>
-          <td className="px-4 py-3">
-            <Skeleton className="h-4 w-20" />
-          </td>
-          <td className="px-4 py-3">
-            <Skeleton className="h-5 w-20 rounded-full" />
-          </td>
-          <td className="px-4 py-3">
-            <Skeleton className="h-5 w-24 rounded-full" />
-          </td>
-          <td className="px-4 py-3">
-            <Skeleton className="h-4 w-16" />
-          </td>
-          <td className="px-4 py-3">
-            <Skeleton className="h-3 w-24" />
-          </td>
-          <td className="px-4 py-3">
-            <div className="flex justify-end gap-2">
-              <Skeleton className="h-8 w-8 rounded-md" />
-              <Skeleton className="h-8 w-8 rounded-md" />
-            </div>
-          </td>
+          {Array.from({ length: COL_COUNT }).map((__, j) => (
+            <td key={j} className="px-3 py-3">
+              <Skeleton className="h-4 w-full max-w-[100px]" />
+            </td>
+          ))}
         </tr>
       ))}
     </tbody>
@@ -109,16 +91,6 @@ export default function EnquiriesPage() {
     }),
     [scopedRows],
   )
-
-  const { data: quotationRows = [] } = useQuotations({ limit: 100 })
-
-  const enquiryToQuotationId = useMemo(() => {
-    const m = new Map<string, string>()
-    for (const row of quotationRows) {
-      if (row.enquiry_id) m.set(row.enquiry_id, row.quotation_id)
-    }
-    return m
-  }, [quotationRows])
 
   const chips: { key: Pipeline; label: string }[] = [
     { key: 'all', label: 'All' },
@@ -191,16 +163,19 @@ export default function EnquiriesPage() {
 
         <div className="overflow-hidden rounded-xl border border-surface-border bg-white shadow-sm">
           <div className="overflow-x-auto">
-            <table className="w-full border-collapse text-left">
+            <table className="w-full min-w-[1280px] border-collapse text-left">
               <thead>
                 <tr className="bg-[#F4F5F0] text-[11px] font-medium uppercase tracking-wide text-[#8A9488]">
-                  <th className="px-4 py-3">Client</th>
-                  <th className="px-4 py-3">Ref</th>
-                  <th className="px-4 py-3">Source</th>
-                  <th className="px-4 py-3">Status</th>
-                  <th className="px-4 py-3">Time</th>
-                  <th className="px-4 py-3">Created by</th>
-                  <th className="px-4 py-3 text-right">Actions</th>
+                  <th className="min-w-[100px] whitespace-nowrap px-3 py-3">Enq No.</th>
+                  <th className="min-w-[88px] whitespace-nowrap px-3 py-3">Source</th>
+                  <th className="min-w-[72px] whitespace-nowrap px-3 py-3">Date</th>
+                  <th className="min-w-[140px] whitespace-nowrap px-3 py-3">Client</th>
+                  <th className="min-w-[160px] whitespace-nowrap px-3 py-3">Items Desc</th>
+                  <th className="min-w-[72px] whitespace-nowrap px-3 py-3">Age</th>
+                  <th className="min-w-[120px] whitespace-nowrap px-3 py-3">Status</th>
+                  <th className="min-w-[100px] whitespace-nowrap px-3 py-3">Quote Number</th>
+                  <th className="min-w-[88px] whitespace-nowrap px-3 py-3">User</th>
+                  <th className="min-w-[110px] whitespace-nowrap px-3 py-3">Next follow-up</th>
                 </tr>
               </thead>
               {isPending ? (
@@ -208,7 +183,7 @@ export default function EnquiriesPage() {
               ) : rows.length === 0 ? (
                 <tbody>
                   <tr>
-                    <td colSpan={7} className="p-0">
+                    <td colSpan={COL_COUNT} className="p-0">
                       <EmptyState
                         icon={Inbox}
                         title="No enquiries found"
@@ -223,107 +198,70 @@ export default function EnquiriesPage() {
                 </tbody>
               ) : (
                 <tbody>
-                  {rows.map((e: EnquiryListItem) => {
-                    const quoteId = enquiryToQuotationId.get(e.enquiry_id)
-                    const ext = e as EnquiryListItem & { quotation_id?: string | null }
-                    const resolvedQuoteId = quoteId ?? ext.quotation_id ?? null
-                    return (
-                      <tr
-                        key={e.enquiry_id}
-                        className="cursor-pointer border-b border-[#E2E6DC] bg-white text-[13px] transition-colors hover:bg-[#F4F5F0]"
-                      >
-                        <td className="px-4 py-3 text-[13px] text-surface-foreground">
-                          {(e.client_org_name ?? '').trim() || '—'}
-                        </td>
-                        <td className="px-4 py-3 font-mono text-[12px] text-surface-foreground">
-                          {(e.enquiry_number || '').trim() || truncateId(e.enquiry_id)}
-                        </td>
-                        <td className="px-4 py-3">
-                          <span
-                            className={cn(
-                              'inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium whitespace-nowrap',
-                              enquirySourceBadgeClass(e.source),
-                            )}
-                          >
-                            {formatEnquirySourceLabel(e.source)}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3">
-                          <StatusBadge status={e.status} />
-                        </td>
-                        <td className="px-4 py-3 text-surface-muted" title={e.created_at}>
-                          <span className="block text-[13px]">{formatRelativeTime(e.created_at)}</span>
-                        </td>
-                        <td className="px-4 py-3 align-top text-surface-muted">
-                          {e.created_by_name ? (
-                            <span className="block text-[11px] leading-snug text-[#6B7568]">
-                              {e.created_by_name}
-                            </span>
-                          ) : (
-                            <span className="text-[11px] text-[#6B7568]">—</span>
+                  {rows.map((e: EnquiryListItem) => (
+                    <tr
+                      key={e.enquiry_id}
+                      className="border-b border-[#E2E6DC] bg-white text-[13px] transition-colors hover:bg-[#F4F5F0]"
+                    >
+                      <td className="px-3 py-3 align-top font-mono text-[12px]">
+                        <Link
+                          href={`/enquiries/${e.enquiry_id}`}
+                          className="text-brand-gold-500 hover:underline"
+                        >
+                          {(e.enquiry_number || '').trim() || e.enquiry_id.slice(0, 8)}
+                        </Link>
+                      </td>
+                      <td className="px-3 py-3 align-top">
+                        <span
+                          className={cn(
+                            'inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium whitespace-nowrap',
+                            enquirySourceBadgeClass(e.source),
                           )}
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="flex justify-end gap-2">
-                            <Link
-                              href={`/enquiries/${e.enquiry_id}`}
-                              aria-label="View enquiry"
-                              className={cn(
-                                buttonVariants({ variant: 'ghost', size: 'icon' }),
-                                'text-surface-muted',
-                              )}
-                            >
-                              <Eye className="size-4" />
-                            </Link>
-                            {e.erp_export_available ? (
-                              <a
-                                href={erpExportUrl(e.enquiry_id)}
-                                aria-label="Download ERP Enquiry List"
-                                className={cn(
-                                  buttonVariants({ variant: 'ghost', size: 'icon' }),
-                                  'text-surface-muted',
-                                )}
-                              >
-                                <Download className="size-4" />
-                              </a>
-                            ) : (
-                              <span
-                                className={cn(
-                                  buttonVariants({ variant: 'ghost', size: 'icon' }),
-                                  'pointer-events-none text-surface-muted opacity-40',
-                                )}
-                                aria-label="No ERP export"
-                              >
-                                <Download className="size-4" />
-                              </span>
-                            )}
-                            {resolvedQuoteId ? (
-                              <Link
-                                href={`/quotations/${resolvedQuoteId}`}
-                                aria-label="View quotation"
-                                className={cn(
-                                  buttonVariants({ variant: 'ghost', size: 'icon' }),
-                                  'text-surface-muted',
-                                )}
-                              >
-                                <FileText className="size-4" />
-                              </Link>
-                            ) : (
-                              <span
-                                className={cn(
-                                  buttonVariants({ variant: 'ghost', size: 'icon' }),
-                                  'pointer-events-none text-surface-muted opacity-40',
-                                )}
-                                aria-label="No quotation"
-                              >
-                                <FileText className="size-4" />
-                              </span>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    )
-                  })}
+                        >
+                          {formatEnquirySourceLabel(e.source)}
+                        </span>
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-3 align-top text-gray-900">
+                        {formatQuotationListDate(e.created_at)}
+                      </td>
+                      <td className="px-3 py-3 align-top text-[13px] text-surface-foreground">
+                        {(e.client_org_name ?? '').trim() || '—'}
+                      </td>
+                      <td
+                        className="max-w-[200px] truncate px-3 py-3 align-top text-[12px] text-surface-muted"
+                        title={e.item_desc_short || ''}
+                      >
+                        {e.item_desc_short || '—'}
+                      </td>
+                      <td className="px-3 py-3 align-top text-surface-muted" title={e.created_at}>
+                        <span className="block text-[13px]">{formatRelativeTime(e.created_at)}</span>
+                      </td>
+                      <td className="px-3 py-3 align-top">
+                        <StatusBadge status={e.status} />
+                      </td>
+                      <td className="px-3 py-3 align-top font-mono text-[12px]">
+                        {e.quote_number && e.quotation_id ? (
+                          <Link
+                            href={`/quotations/${e.quotation_id}`}
+                            className="text-brand-navy-600 hover:underline"
+                          >
+                            {e.quote_number}
+                          </Link>
+                        ) : (
+                          <span className="text-surface-muted">—</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-3 align-top text-[12px] text-surface-muted">
+                        {e.created_by_name || '—'}
+                      </td>
+                      <td className="px-3 py-3 align-top">
+                        <EnquiryListDateEditor
+                          enquiryId={e.enquiry_id}
+                          value={e.next_follow_up_date}
+                        />
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               )}
             </table>

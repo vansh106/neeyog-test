@@ -326,6 +326,16 @@ export default function AdminPage() {
     saveMbAccessMut.isPending ||
     createMailboxMut.isPending
 
+  if (!isAdmin) {
+    return (
+      <PageShell title="Administration">
+        <div className="mx-auto max-w-3xl rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-950">
+          Admin access is required to view or manage team members.
+        </div>
+      </PageShell>
+    )
+  }
+
   return (
     <PageShell title="Administration" subtitle="Team members and access permissions.">
       <div className="mx-auto max-w-6xl space-y-6">
@@ -409,12 +419,6 @@ export default function AdminPage() {
               </Table>
             </CardContent>
           </Card>
-        )}
-
-        {!isAdmin && (
-          <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-950">
-            Admin navigation is limited to Admin or Super Admin accounts.
-          </div>
         )}
 
         <Card>
