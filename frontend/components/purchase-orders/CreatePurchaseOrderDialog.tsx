@@ -77,6 +77,7 @@ export default function CreatePurchaseOrderDialog({
   const [error, setError] = useState<string | null>(null)
   const [previewQuotationId, setPreviewQuotationId] = useState<string | null>(null)
   const [previewOpen, setPreviewOpen] = useState(false)
+  const [soNumber, setSoNumber] = useState('')
 
   const clientPicker = useManualClientPicker()
   const [assembledProducts, setAssembledProducts] = useState<AssembledProduct[]>([])
@@ -90,7 +91,10 @@ export default function CreatePurchaseOrderDialog({
   }, [open])
 
   useEffect(() => {
-    if (!open) clientPicker.reset()
+    if (!open) {
+      clientPicker.reset()
+      setSoNumber('')
+    }
   }, [open, clientPicker.reset])
 
   const handleProductComplete = useCallback(
@@ -198,6 +202,7 @@ export default function CreatePurchaseOrderDialog({
     setCreating(true)
     setError(null)
     try {
+      const so = soNumber.trim() || undefined
       let payload: import('@/types').PurchaseOrderCreatePayload
       if (linkToQuote) {
         if (!selectedQuotationId || selectedQuotedLines.length === 0) {
@@ -206,6 +211,7 @@ export default function CreatePurchaseOrderDialog({
         payload = {
           quotation_id: selectedQuotationId,
           selected_lines: selectedQuotedLines,
+          so_number: so,
           ...apiBody,
         }
       } else {
@@ -219,6 +225,7 @@ export default function CreatePurchaseOrderDialog({
           client_email: client.client_email,
           client_phone: client.client_phone,
           client_employee_id: client.client_employee_id,
+          so_number: so,
           ...apiBody,
         }
       }
@@ -461,6 +468,19 @@ export default function CreatePurchaseOrderDialog({
           )}
 
           {error && <p className="mt-4 text-[13px] text-red-600">{error}</p>}
+
+          {(step === 'quoted_lines' || step === 'manual') && (
+            <label className="mt-4 block max-w-xs text-[12px]">
+              <span className="text-surface-muted">SO number (optional)</span>
+              <Input
+                className="mt-1"
+                value={soNumber}
+                onChange={(e) => setSoNumber(e.target.value)}
+                placeholder="e.g. SO-332"
+                disabled={creating}
+              />
+            </label>
+          )}
         </div>
 
         <DialogFooter className="border-t border-[#E2E6DC] px-6 py-4">

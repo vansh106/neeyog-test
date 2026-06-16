@@ -9,13 +9,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from core.config import get_settings
 from core.exceptions import ProductNotFoundError
 from db.models import PurchaseOrder, Quotation
 from services import enquiry_service as enquiry_svc
 from services.fiscal_numbering import allocate_po_number
 from services.quotation_service import compute_financial_summary_from_config
-from services.po_pdf_service import generate_purchase_order_pdf
 
 
 def _utcnow() -> datetime:
@@ -104,6 +102,7 @@ def _build_lines_from_quotation(
         base["unit_price"] = unit_price
         base["line_total"] = line_total
         base["total"] = line_total
+        base["quotation_line_index"] = idx
         if sel.get("quoted_unit_price") is not None:
             base["quoted_unit_price"] = float(sel["quoted_unit_price"])
         elif sel.get("quotedUnitPrice") is not None:
@@ -134,61 +133,7 @@ def _item_total_from_lines(lines: list[dict]) -> float:
     return round(total, 2)
 
 
-def _po_pdf_payload(po: PurchaseOrder, user_email: str | None = None) -> dict:
-    emp = getattr(po, "client_employee", None)
-    emp_payload = None
-    if emp is not None:
-        emp_payload = {
-            "full_name": emp.full_name,
-            "phone": emp.phone,
-            "email": emp.email,
-            "designation": emp.designation,
-        }
-    return {
-        "po_number": po.po_number,
-        "po_date": po.created_at.strftime("%d/%m/%Y") if po.created_at else "",
-        "quote_number": po.quote_number,
-        "client_name": po.client_name,
-        "client_company": po.client_company,
-        "client_email": po.client_email,
-        "client_phone": po.client_phone,
-        "quotation_client_employee": emp_payload,
-        "line_items": po.line_items if isinstance(po.line_items, list) else [],
-        "subtotal": po.subtotal,
-        "gst_rate": po.gst_rate,
-        "gst_amount": po.gst_amount,
-        "pf_rate": po.pf_rate,
-        "pf_amount": po.pf_amount,
-        "freight_note": po.freight_note,
-        "freight_amount": po.freight_amount,
-        "freight_rate": po.freight_rate,
-        "total_amount": po.total_amount,
-        "financial_config": po.financial_config if isinstance(po.financial_config, dict) else {},
-        "notes": po.notes,
-        "prepared_by_name": (po.created_by_name or "").strip() or None,
-        "prepared_by_email": user_email,
-    }
-
-
-async def regenerate_purchase_order_pdf(
-    db: AsyncSession,
-    po: PurchaseOrder,
-    *,
-    user_email: str | None = None,
-) -> str | None:
-    settings = get_settings()
-    client_config = settings.get_client_json()
-    payload = _po_pdf_payload(po, user_email=user_email)
-    path = await generate_purchase_order_pdf(payload, client_config)
-    if path:
-        po.pdf_path = path
-        po.updated_at = _utcnow()
-        await db.commit()
-        await db.refresh(po)
-    return path
-
-
-async def get_purchase_order(db: AsyncSession, po_id: str, *, include_archived: bool = False) -> PurchaseOrder:
+async def get_purchase_order(db: AsyncSession, po_id: str) -> PurchaseOrder:
     try:
         uid = uuid.UUID(str(po_id))
     except ValueError as exc:
@@ -203,7 +148,7 @@ async def get_purchase_order(db: AsyncSession, po_id: str, *, include_archived: 
         .where(PurchaseOrder.id == uid)
     )
     po = res.scalar_one_or_none()
-    if po is None or (po.is_archived and not include_archived):
+    if po is None:
         raise ProductNotFoundError(f"Purchase order not found: {po_id}")
     return po
 
@@ -222,7 +167,6 @@ async def list_purchase_orders(
     q = (
         select(PurchaseOrder)
         .options(selectinload(PurchaseOrder.quotation))
-        .where(PurchaseOrder.is_archived.is_(False))
         .order_by(PurchaseOrder.created_at.desc())
         .limit(limit)
         .offset(offset)
@@ -233,6 +177,7 @@ async def list_purchase_orders(
             PurchaseOrder.po_number.ilike(s)
             | PurchaseOrder.client_name.ilike(s)
             | PurchaseOrder.quote_number.ilike(s)
+            | PurchaseOrder.so_number.ilike(s)
             | PurchaseOrder.item_desc_short.ilike(s)
         )
     if client_name and client_name.strip():
@@ -310,9 +255,15 @@ async def create_purchase_order(
     fin_body = _financial_body(body)
     computed = compute_financial_summary_from_config(item_total, fin_body)
 
+    so_raw = body.get("so_number") or body.get("soNumber")
+    so_number = str(so_raw).strip() if so_raw else None
+    if so_number == "":
+        so_number = None
+
     po_number = await allocate_po_number(db)
     po = PurchaseOrder(
         po_number=po_number,
+        so_number=so_number,
         quotation_id=uuid.UUID(str(quotation_id_raw)) if quotation_id_raw else None,
         quote_number=quote_number,
         client_name=client_name,
@@ -344,37 +295,141 @@ async def create_purchase_order(
     await db.refresh(po)
 
     po = await get_purchase_order(db, str(po.id))
-    await regenerate_purchase_order_pdf(db, po, user_email=user_email)
+    return po
+
+
+def _merge_financial_config(existing: dict | None, body: dict) -> dict:
+    fin = _financial_body(body)
+    base = dict(existing) if isinstance(existing, dict) else {}
+    base.update(fin)
+    return base
+
+
+def _apply_computed_financials(po: PurchaseOrder, lines: list[dict], fin_body: dict) -> None:
+    item_total = _item_total_from_lines(lines)
+    computed = compute_financial_summary_from_config(item_total, fin_body)
+    po.line_items = lines
+    po.subtotal = computed["item_total"]
+    po.gst_amount = computed["gst_amount"]
+    po.pf_rate = float(computed.get("pf_rate") or 3)
+    po.pf_amount = computed["pf_amount"]
+    po.freight_amount = computed["freight_amount"]
+    po.freight_rate = computed.get("freight_rate")
+    po.total_amount = computed["total_amount"]
+    po.primary_category = _primary_category_from_lines(lines)
+    po.item_desc_short = _item_desc_short_from_lines(lines)
+    po.financial_config = {
+        **fin_body,
+        **{
+            k: computed[k]
+            for k in (
+                "cgst_amount",
+                "sgst_amount",
+                "igst_amount",
+                "pf_amount",
+                "freight_amount",
+                "gst_amount",
+                "total_amount",
+            )
+            if k in computed
+        },
+    }
+
+
+async def update_purchase_order(
+    db: AsyncSession,
+    po_id: str,
+    body: dict,
+) -> PurchaseOrder:
+    po = await get_purchase_order(db, po_id)
+    is_quoted = po.quotation_id is not None
+
+    selected = body.get("selected_lines") or body.get("selectedLines")
+    manual_items = body.get("manual_line_items") or body.get("manualLineItems")
+    client_keys = (
+        "client_name", "clientName", "client_company", "clientCompany",
+        "client_email", "clientEmail", "client_phone", "clientPhone",
+        "client_employee_id", "clientEmployeeId",
+    )
+    has_client_update = any(k in body for k in client_keys)
+
+    if is_quoted:
+        if has_client_update:
+            raise ValueError("Client cannot be changed on a quoted purchase order")
+        if manual_items is not None:
+            raise ValueError("manual_line_items not allowed for quoted purchase orders")
+    else:
+        if selected is not None:
+            raise ValueError("selected_lines not allowed for non-quoted purchase orders")
+
+    lines = list(po.line_items) if isinstance(po.line_items, list) else []
+
+    if is_quoted and isinstance(selected, list):
+        if not selected:
+            raise ValueError("Select at least one quotation line")
+        quotation = po.quotation
+        if quotation is None:
+            res = await db.execute(select(Quotation).where(Quotation.id == po.quotation_id))
+            quotation = res.scalar_one_or_none()
+        if quotation is None:
+            raise ProductNotFoundError("Linked quotation not found")
+        lines = _build_lines_from_quotation(quotation, selected)
+        if not lines:
+            raise ValueError("Could not build PO lines from quotation selection")
+    elif not is_quoted and isinstance(manual_items, list):
+        if not manual_items:
+            raise ValueError("At least one product is required")
+        lines = _build_lines_from_manual(manual_items)
+
+    if not is_quoted and has_client_update:
+        client_name = str(body.get("client_name") or body.get("clientName") or po.client_name).strip()
+        if not client_name:
+            raise ValueError("client_name is required")
+        po.client_name = client_name
+        if "client_company" in body or "clientCompany" in body:
+            po.client_company = body.get("client_company") or body.get("clientCompany") or None
+        if "client_email" in body or "clientEmail" in body:
+            po.client_email = body.get("client_email") or body.get("clientEmail") or None
+        if "client_phone" in body or "clientPhone" in body:
+            po.client_phone = body.get("client_phone") or body.get("clientPhone") or None
+        ce_raw = body.get("client_employee_id") or body.get("clientEmployeeId")
+        if ce_raw is not None:
+            if ce_raw == "" or ce_raw is False:
+                po.client_employee_id = None
+            else:
+                try:
+                    po.client_employee_id = uuid.UUID(str(ce_raw))
+                except ValueError:
+                    po.client_employee_id = None
+
+    if "so_number" in body or "soNumber" in body:
+        so_raw = body.get("so_number") if "so_number" in body else body.get("soNumber")
+        so_number = str(so_raw).strip() if so_raw else None
+        po.so_number = so_number or None
+
+    if "notes" in body:
+        notes_raw = body.get("notes")
+        po.notes = str(notes_raw).strip() if notes_raw else None
+
+    if "freight_note" in body or "freightNote" in body:
+        fn = body.get("freight_note") if "freight_note" in body else body.get("freightNote")
+        if fn is not None:
+            po.freight_note = str(fn).strip() or "Included"
+
+    fin_body = _merge_financial_config(
+        po.financial_config if isinstance(po.financial_config, dict) else None,
+        body,
+    )
+    _apply_computed_financials(po, lines, fin_body)
+
+    await db.commit()
+    await db.refresh(po)
     return await get_purchase_order(db, str(po.id))
 
 
-async def get_purchase_order_pdf_path(
-    db: AsyncSession,
-    po_id: str,
-    *,
-    user_email: str | None = None,
-) -> str:
+async def delete_purchase_order(db: AsyncSession, po_id: str) -> str:
     po = await get_purchase_order(db, po_id)
-    await regenerate_purchase_order_pdf(db, po, user_email=user_email)
-    po = await get_purchase_order(db, po_id)
-    if not po.pdf_path:
-        raise ValueError("PDF generation failed")
-    return po.pdf_path
-
-
-async def archive_purchase_order(db: AsyncSession, po_id: str) -> PurchaseOrder:
-    try:
-        uid = uuid.UUID(str(po_id))
-    except ValueError as exc:
-        raise ProductNotFoundError(f"Invalid purchase order id: {po_id}") from exc
-    res = await db.execute(select(PurchaseOrder).where(PurchaseOrder.id == uid))
-    po = res.scalar_one_or_none()
-    if po is None:
-        raise ProductNotFoundError(f"Purchase order not found: {po_id}")
-    if po.is_archived:
-        return po
-    po.is_archived = True
-    po.updated_at = _utcnow()
+    deleted_id = str(po.id)
+    await db.delete(po)
     await db.commit()
-    await db.refresh(po)
-    return po
+    return deleted_id

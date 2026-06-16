@@ -36,7 +36,7 @@ const PERM_LABELS: Record<string, string> = {
   download_pdf: 'Download PDF',
   view_purchase_orders: 'View Purchase Orders',
   create_purchase_orders: 'Create Purchase Orders',
-  delete_purchase_orders: 'Archive Purchase Orders',
+  delete_purchase_orders: 'Delete Purchase Orders',
   download_po_pdf: 'Download PO PDF',
   hitl_approve: 'Approve HITL Decisions',
   hitl_edit_email: 'Edit Email in HITL',

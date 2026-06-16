@@ -46,8 +46,11 @@ async def logout_route(
 
 
 @router.get("/me")
-async def me_route(current: CurrentUser = Depends(get_current_user)):
-    return await auth_controller.handle_me(current)
+async def me_route(
+    current: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await auth_controller.handle_me(current.id, db)
 
 
 @router.post("/change-password")

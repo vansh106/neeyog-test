@@ -39,13 +39,8 @@ if config.config_file_name is not None:
 
 settings = get_settings()
 
-# IMPORTANT FOR SUPABASE:
-# Alembic must use DATABASE_URL_DIRECT (port 5432 — the direct connection),
-# NOT the transaction pooler (port 6543 / PgBouncer). PgBouncer in
-# transaction mode does not support the DDL / advisory-lock patterns
-# Alembic relies on. ``settings.migration_url`` resolves to DIRECT when
-# set, otherwise falls back to DATABASE_URL_SYNC (suitable for local dev).
-config.set_main_option("sqlalchemy.url", settings.migration_url)
+# Session pooler (5432) supports DDL; transaction pooler (6543) does not.
+config.set_main_option("sqlalchemy.url", settings.migration_url.replace("%", "%%"))
 
 target_metadata = Base.metadata
 

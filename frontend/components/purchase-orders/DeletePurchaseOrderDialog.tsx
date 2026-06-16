@@ -20,7 +20,7 @@ type Props = {
   error?: string | null
 }
 
-export default function ArchivePurchaseOrderDialog({
+export default function DeletePurchaseOrderDialog({
   po,
   open,
   onOpenChange,
@@ -32,16 +32,16 @@ export default function ArchivePurchaseOrderDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Archive purchase order?</DialogTitle>
+          <DialogTitle>Delete purchase order?</DialogTitle>
           <DialogDescription>
             {po ? (
               <>
                 <span className="font-medium text-gray-900">{po.po_number}</span> for{' '}
-                <span className="font-medium text-gray-900">{po.client_name}</span> will be removed from
-                the purchase orders list. This cannot be undone from the app.
+                <span className="font-medium text-gray-900">{po.client_name}</span> will be permanently
+                deleted. This action cannot be undone.
               </>
             ) : (
-              'This purchase order will be removed from the listing.'
+              'This purchase order will be permanently deleted.'
             )}
           </DialogDescription>
         </DialogHeader>
@@ -51,7 +51,7 @@ export default function ArchivePurchaseOrderDialog({
             Cancel
           </Button>
           <Button type="button" variant="destructive" disabled={busy || !po} onClick={onConfirm}>
-            {busy ? 'Archiving…' : 'Archive PO'}
+            {busy ? 'Deleting…' : 'Delete PO'}
           </Button>
         </DialogFooter>
       </DialogContent>

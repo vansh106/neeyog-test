@@ -8,6 +8,7 @@ from typing import Any
 from fastapi import HTTPException, Request, Response
 from pydantic import BaseModel, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.exceptions import AuthenticationError, UserNotFoundError
 from core.config import get_settings
@@ -32,6 +33,7 @@ class LogoutRequest(BaseModel):
 class ChangePasswordRequest(BaseModel):
     old_password: str
     new_password: str
+    phone: str | None = None
 
     @model_validator(mode="after")
     def validate_new(self) -> ChangePasswordRequest:
@@ -92,14 +94,25 @@ async def handle_logout(
     response.delete_cookie("refresh_token", path="/")
 
 
-async def handle_me(current: Any) -> dict:
+async def handle_me(user_id: str, db: AsyncSession) -> dict:
+    import uuid
+
+    from db.models import User
+
+    user = await db.get(User, uuid.UUID(user_id))
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    from services.auth_service import get_user_permissions
+
+    permissions = await get_user_permissions(user, db)
     return {
-        "id": current.id,
-        "email": current.email,
-        "full_name": current.full_name,
-        "tier": current.tier,
-        "job_title": current.job_title,
-        "permissions": current.permissions,
+        "id": str(user.id),
+        "email": user.email,
+        "full_name": user.full_name,
+        "tier": user.tier,
+        "job_title": user.job_title,
+        "phone": (user.phone or "").strip() or None,
+        "permissions": permissions,
     }
 
 
@@ -109,8 +122,22 @@ async def handle_change_password(
     db: AsyncSession,
 ) -> dict:
     try:
-        await auth_service.change_password(user_id, body.old_password, body.new_password, db)
-        return {"message": "Password changed"}
+        await auth_service.change_password(
+            user_id,
+            body.old_password,
+            body.new_password,
+            db,
+            phone=body.phone,
+        )
+        import uuid
+
+        from db.models import User
+
+        user = await db.get(User, uuid.UUID(user_id))
+        return {
+            "message": "Password changed",
+            "phone": (user.phone or "").strip() if user else None,
+        }
     except AuthenticationError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except UserNotFoundError as e:

@@ -1202,10 +1202,14 @@ async def process_manual_dropdown(
     cb_raw = (created_by_name or "").strip()
     cb_name = cb_raw[:255] if cb_raw else None
     prepared_by_email: str | None = None
+    prepared_by_phone: str | None = None
     if cb_uid is not None:
         creator_user = await db.get(User, cb_uid)
-        if creator_user is not None and getattr(creator_user, "email", None):
-            prepared_by_email = str(creator_user.email).strip() or None
+        if creator_user is not None:
+            if getattr(creator_user, "email", None):
+                prepared_by_email = str(creator_user.email).strip() or None
+            if getattr(creator_user, "phone", None):
+                prepared_by_phone = str(creator_user.phone).strip() or None
 
     line_items_in = body.get("lineItems") or []
     notes = str(body.get("notes") or "").strip()
@@ -1400,6 +1404,8 @@ async def process_manual_dropdown(
         quotation_data["prepared_by_name"] = cb_name
     if prepared_by_email:
         quotation_data["prepared_by_email"] = prepared_by_email
+    if prepared_by_phone:
+        quotation_data["prepared_by_phone"] = prepared_by_phone
     if employee_for_quote is not None:
         quotation_data["quotation_client_employee"] = {
             "full_name": str(employee_for_quote.full_name or "").strip(),
@@ -1434,6 +1440,7 @@ async def process_manual_dropdown(
         notes=notes or None,
         created_by_user_id=cb_uid,
         created_by_name=cb_name,
+        created_by_phone=prepared_by_phone,
     )
     db.add(quotation)
     await db.commit()

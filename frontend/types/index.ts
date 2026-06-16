@@ -195,6 +195,7 @@ export interface Quotation {
   created_at: string | null
   created_by_name?: string | null
   created_by_email?: string | null
+  created_by_phone?: string | null
 }
 
 export interface QuotationHistoryItem {
@@ -298,12 +299,14 @@ export interface PurchaseOrderListItem {
   primary_category: string
   item_desc_short: string
   total_amount: number
+  so_number?: string | null
   created_by_name?: string | null
 }
 
 export interface PurchaseOrder {
   po_id: string
   po_number: string
+  so_number?: string | null
   quotation_id?: string | null
   quote_number?: string | null
   po_type: 'quoted' | 'non_quoted'
@@ -346,6 +349,7 @@ export interface PurchaseOrderCreatePayload {
   client_email?: string
   client_phone?: string
   client_employee_id?: string
+  so_number?: string
   notes?: string
   pf_applicable?: boolean
   pf_mode?: 'percent' | 'amount'
@@ -362,7 +366,27 @@ export interface PurchaseOrderCreatePayload {
   igst_applicable?: boolean
   igst_mode?: 'percent' | 'amount'
   igst_draft?: string
+  /** CamelCase aliases accepted by the API (from financialDraftToApiBody). */
+  pfApplicable?: boolean
+  pfMode?: 'percent' | 'amount'
+  pfDraft?: string
+  freightApplicable?: boolean
+  freightMode?: 'percent' | 'amount'
+  freightDraft?: string
+  cgstApplicable?: boolean
+  cgstMode?: 'percent' | 'amount'
+  cgstDraft?: string
+  sgstApplicable?: boolean
+  sgstMode?: 'percent' | 'amount'
+  sgstDraft?: string
+  igstApplicable?: boolean
+  igstMode?: 'percent' | 'amount'
+  igstDraft?: string
 }
+
+export type PurchaseOrderUpdatePayload = Partial<
+  Omit<PurchaseOrderCreatePayload, 'quotation_id'>
+>
 
 export interface Product {
   id: string

@@ -18,6 +18,7 @@ def _po_api_dict(po: PurchaseOrder) -> dict:
     return {
         "po_id": str(po.id),
         "po_number": po.po_number,
+        "so_number": po.so_number,
         "quotation_id": str(po.quotation_id) if po.quotation_id else None,
         "quote_number": po.quote_number,
         "po_type": po_type,
@@ -63,6 +64,7 @@ class PurchaseOrderListItem(BaseModel):
     primary_category: str
     item_desc_short: str
     total_amount: float
+    so_number: str | None = None
     created_by_name: str | None = None
 
 
@@ -82,6 +84,7 @@ class PurchaseOrderCreateBody(BaseModel):
     client_email: str | None = Field(None, alias="clientEmail")
     client_phone: str | None = Field(None, alias="clientPhone")
     client_employee_id: str | None = Field(None, alias="clientEmployeeId")
+    so_number: str | None = Field(None, alias="soNumber")
     notes: str | None = None
     freight_note: str | None = Field(None, alias="freightNote")
     pf_applicable: bool = Field(True, alias="pfApplicable")
@@ -99,6 +102,36 @@ class PurchaseOrderCreateBody(BaseModel):
     igst_applicable: bool = Field(False, alias="igstApplicable")
     igst_mode: str = Field("percent", alias="igstMode")
     igst_draft: str = Field("18", alias="igstDraft")
+
+    model_config = {"populate_by_name": True}
+
+
+class PurchaseOrderUpdateBody(BaseModel):
+    selected_lines: list[PurchaseOrderSelectedLine] | None = Field(None, alias="selectedLines")
+    manual_line_items: list | None = Field(None, alias="manualLineItems")
+    client_name: str | None = Field(None, alias="clientName")
+    client_company: str | None = Field(None, alias="clientCompany")
+    client_email: str | None = Field(None, alias="clientEmail")
+    client_phone: str | None = Field(None, alias="clientPhone")
+    client_employee_id: str | None = Field(None, alias="clientEmployeeId")
+    so_number: str | None = Field(None, alias="soNumber")
+    notes: str | None = None
+    freight_note: str | None = Field(None, alias="freightNote")
+    pf_applicable: bool | None = Field(None, alias="pfApplicable")
+    pf_mode: str | None = Field(None, alias="pfMode")
+    pf_draft: str | None = Field(None, alias="pfDraft")
+    freight_applicable: bool | None = Field(None, alias="freightApplicable")
+    freight_mode: str | None = Field(None, alias="freightMode")
+    freight_draft: str | None = Field(None, alias="freightDraft")
+    cgst_applicable: bool | None = Field(None, alias="cgstApplicable")
+    cgst_mode: str | None = Field(None, alias="cgstMode")
+    cgst_draft: str | None = Field(None, alias="cgstDraft")
+    sgst_applicable: bool | None = Field(None, alias="sgstApplicable")
+    sgst_mode: str | None = Field(None, alias="sgstMode")
+    sgst_draft: str | None = Field(None, alias="sgstDraft")
+    igst_applicable: bool | None = Field(None, alias="igstApplicable")
+    igst_mode: str | None = Field(None, alias="igstMode")
+    igst_draft: str | None = Field(None, alias="igstDraft")
 
     model_config = {"populate_by_name": True}
 
@@ -137,6 +170,7 @@ async def handle_list_purchase_orders(
             "primary_category": po.primary_category,
             "item_desc_short": po.item_desc_short,
             "total_amount": po.total_amount,
+            "so_number": po.so_number,
             "created_by_name": po.created_by_name,
         }
         for po in rows
@@ -189,26 +223,24 @@ async def handle_create_purchase_order(
     return _po_api_dict(po)
 
 
-async def handle_get_purchase_order_pdf_path(
-    db: AsyncSession,
+async def handle_update_purchase_order(
     po_id: str,
-    user: CurrentUser,
-) -> str:
+    body: PurchaseOrderUpdateBody,
+    db: AsyncSession,
+) -> dict:
+    payload = body.model_dump(exclude_unset=True)
     try:
-        return await purchase_order_service.get_purchase_order_pdf_path(
-            db,
-            po_id,
-            user_email=user.email,
-        )
+        po = await purchase_order_service.update_purchase_order(db, po_id, payload)
     except ProductNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _po_api_dict(po)
 
 
-async def handle_archive_purchase_order(db: AsyncSession, po_id: str) -> dict:
+async def handle_delete_purchase_order(db: AsyncSession, po_id: str) -> dict:
     try:
-        po = await purchase_order_service.archive_purchase_order(db, po_id)
+        deleted_id = await purchase_order_service.delete_purchase_order(db, po_id)
     except ProductNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return {"po_id": str(po.id), "archived": True}
+    return {"po_id": deleted_id, "deleted": True}

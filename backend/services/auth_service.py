@@ -29,6 +29,15 @@ def verify_password(plain: str, hashed: str) -> bool:
     return pwd_context.verify(plain, hashed)
 
 
+def normalize_phone(phone: str) -> str:
+    digits = "".join(ch for ch in str(phone or "") if ch.isdigit())
+    if len(digits) == 12 and digits.startswith("91"):
+        digits = digits[2:]
+    if len(digits) != 10:
+        raise ValueError("Enter a valid 10-digit mobile number")
+    return digits
+
+
 def is_strong_password(password: str) -> tuple[bool, str]:
     if len(password) < 8:
         return False, "Minimum 8 characters"
@@ -144,6 +153,7 @@ async def login(
             "full_name": user.full_name,
             "tier": user.tier,
             "job_title": user.job_title,
+            "phone": (user.phone or "").strip() or None,
             "permissions": permissions,
         },
     }
@@ -206,7 +216,14 @@ async def logout(raw_refresh_token: str, db: AsyncSession) -> None:
         await db.commit()
 
 
-async def change_password(user_id: str, old_password: str, new_password: str, db: AsyncSession) -> None:
+async def change_password(
+    user_id: str,
+    old_password: str,
+    new_password: str,
+    db: AsyncSession,
+    *,
+    phone: str | None = None,
+) -> None:
     result = await db.execute(select(User).where(User.id == uuid.UUID(user_id)))
     user = result.scalar_one_or_none()
     if not user:
@@ -216,6 +233,13 @@ async def change_password(user_id: str, old_password: str, new_password: str, db
     ok, msg = is_strong_password(new_password)
     if not ok:
         raise ValueError(f"Weak password: {msg}")
+
+    needs_phone = bool(user.is_first_login) or not (user.phone or "").strip()
+    if phone is not None and str(phone).strip():
+        user.phone = normalize_phone(phone)
+    elif needs_phone:
+        raise ValueError("Phone number is required")
+
     user.hashed_password = hash_password(new_password)
     user.is_first_login = False
     await db.commit()

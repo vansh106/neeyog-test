@@ -7,6 +7,7 @@ import { Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { changePasswordApi } from '@/lib/api'
+import { cleanPhone } from '@/lib/manualClientPicker'
 import { useAuthStore, type AuthUser } from '@/stores/authStore'
 
 function strengthScore(pw: string): number {
@@ -24,12 +25,19 @@ export default function ChangePasswordPage() {
   const [current, setCurrent] = useState('')
   const [nextPw, setNextPw] = useState('')
   const [confirm, setConfirm] = useState('')
+  const [phone, setPhone] = useState(user?.phone ?? '')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+
+  const needsPhone = Boolean(user?.is_first_login || !user?.phone?.trim())
 
   useEffect(() => {
     if (!user || !access_token) router.replace('/login')
   }, [user, access_token, router])
+
+  useEffect(() => {
+    setPhone(user?.phone ?? '')
+  }, [user?.phone])
 
   const bars = useMemo(() => strengthScore(nextPw), [nextPw])
   const labels = ['Weak', 'Fair', 'Good', 'Strong']
@@ -41,10 +49,25 @@ export default function ChangePasswordPage() {
       setError('New password and confirmation do not match.')
       return
     }
+    if (needsPhone) {
+      const digits = cleanPhone(phone)
+      if (digits.length !== 10) {
+        setError('Enter a valid 10-digit mobile number.')
+        return
+      }
+    }
     setLoading(true)
     try {
-      await changePasswordApi(current, nextPw)
-      const updated: AuthUser = { ...user!, is_first_login: false }
+      const res = await changePasswordApi(
+        current,
+        nextPw,
+        needsPhone ? cleanPhone(phone) : undefined,
+      )
+      const updated: AuthUser = {
+        ...user!,
+        is_first_login: false,
+        phone: res.phone ?? (needsPhone ? cleanPhone(phone) : user?.phone ?? null),
+      }
       setUser(updated)
       router.replace('/dashboard')
     } catch (err) {
@@ -59,16 +82,40 @@ export default function ChangePasswordPage() {
   return (
     <div className="min-h-screen flex flex-col justify-center bg-surface-page px-6 py-12">
       <div className="w-full max-w-md mx-auto rounded-xl border border-[#E2E6DC] bg-white p-8 shadow-sm">
-        <h1 className="text-[22px] font-semibold text-gray-900">Set your password</h1>
+        <h1 className="text-[22px] font-semibold text-gray-900">
+          {user.is_first_login ? 'Complete your account' : 'Set your password'}
+        </h1>
         <p className="mt-2 text-[14px] text-surface-muted">
           {user.is_first_login
-            ? 'Welcome! Please set a new password before continuing.'
+            ? 'Welcome! Set a new password and your mobile number before continuing.'
             : 'Update your password. You will stay signed in.'}
         </p>
 
         <form onSubmit={handleSubmit} className="mt-8 space-y-4">
           {error && (
             <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[13px] text-red-900">{error}</div>
+          )}
+
+          {needsPhone && (
+            <div className="space-y-2">
+              <label className="text-[12px] font-medium text-gray-700" htmlFor="phone">
+                Mobile number
+              </label>
+              <Input
+                id="phone"
+                type="tel"
+                inputMode="numeric"
+                autoComplete="tel"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                className="h-10"
+                placeholder="10-digit mobile number"
+                required
+              />
+              <p className="text-[11px] text-surface-muted">
+                Shown on quotations you create, alongside your email and name.
+              </p>
+            </div>
           )}
 
           <div className="space-y-2">
@@ -149,7 +196,7 @@ export default function ChangePasswordPage() {
                   Saving…
                 </>
               ) : (
-                'Save password'
+                'Save and continue'
               )}
             </Button>
             {!user.is_first_login && (

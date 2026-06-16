@@ -1,4 +1,4 @@
-import type { Quotation, QuotationPdfDisplayOverrides } from '@/types'
+import type { PurchaseOrder, Quotation, QuotationPdfDisplayOverrides } from '@/types'
 import { quotationGrandTotal, quotationItemTotal } from '@/lib/quotationTotals'
 
 export type ChargeMode = 'percent' | 'amount'
@@ -156,6 +156,62 @@ export function hydrateFinancialDraft(quotation: Quotation): QuotationFinancialD
         ? String(quotation.freight_rate)
         : Number(quotation.freight_amount ?? 0) > 0
           ? String(quotation.freight_amount)
+          : '',
+    cgstApplicable: true,
+    cgstMode: 'percent',
+    cgstDraft: '9',
+    sgstApplicable: true,
+    sgstMode: 'percent',
+    sgstDraft: '9',
+    igstApplicable: false,
+    igstMode: 'percent',
+    igstDraft: '18',
+  }
+}
+
+export function hydrateFinancialDraftFromPo(po: PurchaseOrder): QuotationFinancialDraft {
+  const fc = po.financial_config as StoredFinancialConfig | undefined
+  if (fc) {
+    return {
+      pfApplicable: fc.pf_applicable ?? true,
+      pfMode: fc.pf_mode === 'amount' ? 'amount' : 'percent',
+      pfDraft: fc.pf_draft ?? (po.pf_rate != null ? String(po.pf_rate) : '3'),
+      freightApplicable: fc.freight_applicable ?? Number(po.freight_amount ?? 0) > 0,
+      freightMode: fc.freight_mode === 'amount' ? 'amount' : 'percent',
+      freightDraft:
+        fc.freight_draft ??
+        (po.freight_rate != null
+          ? String(po.freight_rate)
+          : Number(po.freight_amount ?? 0) > 0
+            ? String(po.freight_amount)
+            : ''),
+      cgstApplicable: fc.cgst_applicable ?? true,
+      cgstMode: fc.cgst_mode === 'amount' ? 'amount' : 'percent',
+      cgstDraft: fc.cgst_draft ?? '9',
+      sgstApplicable: fc.sgst_applicable ?? true,
+      sgstMode: fc.sgst_mode === 'amount' ? 'amount' : 'percent',
+      sgstDraft: fc.sgst_draft ?? '9',
+      igstApplicable: fc.igst_applicable ?? false,
+      igstMode: fc.igst_mode === 'amount' ? 'amount' : 'percent',
+      igstDraft: fc.igst_draft ?? '18',
+    }
+  }
+  return {
+    pfApplicable: Number(po.pf_amount ?? 0) > 0,
+    pfMode: po.pf_rate != null ? 'percent' : 'amount',
+    pfDraft:
+      po.pf_rate != null
+        ? String(po.pf_rate)
+        : Number(po.pf_amount ?? 0) > 0
+          ? String(po.pf_amount)
+          : '3',
+    freightApplicable: Number(po.freight_amount ?? 0) > 0,
+    freightMode: po.freight_rate != null ? 'percent' : 'amount',
+    freightDraft:
+      po.freight_rate != null
+        ? String(po.freight_rate)
+        : Number(po.freight_amount ?? 0) > 0
+          ? String(po.freight_amount)
           : '',
     cgstApplicable: true,
     cgstMode: 'percent',

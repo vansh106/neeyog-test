@@ -235,6 +235,7 @@ class Quotation(Base):
     )
     #: Snapshot for listing (set at quote creation; kept if user is renamed or removed).
     created_by_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_by_phone: Mapped[str | None] = mapped_column(String(20), nullable=True)
     created_by_user: Mapped["User | None"] = relationship("User", foreign_keys=[created_by_user_id])
 
     is_archived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
@@ -319,6 +320,7 @@ class User(Base):
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
     tier: Mapped[str] = mapped_column(String(50), nullable=False, default=UserTier.MEMBER.value)
     job_title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    phone: Mapped[str | None] = mapped_column(String(20), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     is_first_login: Mapped[bool] = mapped_column(Boolean, default=True)
 
@@ -677,6 +679,7 @@ class PurchaseOrder(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     po_number: Mapped[str] = mapped_column(String(50), unique=True, nullable=False, index=True)
+    so_number: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
 
     quotation_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
@@ -726,8 +729,6 @@ class PurchaseOrder(Base):
     )
     created_by_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_by_user: Mapped["User | None"] = relationship("User", foreign_keys=[created_by_user_id])
-
-    is_archived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)

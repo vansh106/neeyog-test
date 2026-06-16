@@ -33,6 +33,7 @@ export function refreshAccessToken(): Promise<string | null> {
             full_name: string
             tier: string
             job_title: string | null
+            phone?: string | null
             permissions: string[]
           }>('/api/auth/me')
           const prev = useAuthStore.getState().user
@@ -44,6 +45,7 @@ export function refreshAccessToken(): Promise<string | null> {
               full_name: me.full_name,
               tier: me.tier,
               job_title: me.job_title,
+              phone: me.phone ?? null,
               permissions: me.permissions,
             })
           }
@@ -353,35 +355,9 @@ export const purchaseOrdersApi = {
   get: <T = unknown>(id: string) => get<T>(`/api/purchase-orders/${id}`),
   create: <T = unknown>(body: import('@/types').PurchaseOrderCreatePayload) =>
     post<T>('/api/purchase-orders/', body),
-  archive: <T = unknown>(id: string) => del<T>(`/api/purchase-orders/${encodeURIComponent(id)}`),
-  getPdfUrl: (id: string) => {
-    const base = apiBaseURL()
-    return `${base}/api/purchase-orders/${id}/pdf`
-  },
-}
-
-export async function fetchPurchaseOrderPdfBlob(poId: string): Promise<Blob> {
-  const url = purchaseOrdersApi.getPdfUrl(poId)
-  const response = await fetch(url, {
-    headers: bearerHeaders(true),
-    cache: 'no-store',
-  })
-  if (!response.ok) {
-    throw new Error(`Failed to fetch PO PDF (${response.status})`)
-  }
-  return response.blob()
-}
-
-export async function downloadPurchaseOrderPdf(poId: string, filename?: string): Promise<void> {
-  const blob = await fetchPurchaseOrderPdfBlob(poId)
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename || `purchase-order-${poId}.pdf`
-  document.body.appendChild(a)
-  a.click()
-  a.remove()
-  URL.revokeObjectURL(url)
+  update: <T = unknown>(id: string, body: import('@/types').PurchaseOrderUpdatePayload) =>
+    patch<T>(`/api/purchase-orders/${encodeURIComponent(id)}`, body),
+  delete: <T = unknown>(id: string) => del<T>(`/api/purchase-orders/${encodeURIComponent(id)}`),
 }
 
 export const mastersApi = {
@@ -772,8 +748,13 @@ export const usersApi = {
 export async function changePasswordApi(
   old_password: string,
   new_password: string,
-): Promise<{ message?: string }> {
-  return post<{ message?: string }>('/api/auth/change-password', { old_password, new_password })
+  phone?: string,
+): Promise<{ message?: string; phone?: string | null }> {
+  return post<{ message?: string; phone?: string | null }>('/api/auth/change-password', {
+    old_password,
+    new_password,
+    phone,
+  })
 }
 
 /**

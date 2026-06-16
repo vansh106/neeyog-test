@@ -66,6 +66,15 @@ def _quotation_api_dict(q: Quotation) -> dict:
             if getattr(q, "created_by_user", None) is not None and getattr(q.created_by_user, "email", None)
             else None
         ),
+        "created_by_phone": (
+            (q.created_by_phone or "").strip()
+            or (
+                str(q.created_by_user.phone).strip()
+                if getattr(q, "created_by_user", None) is not None and getattr(q.created_by_user, "phone", None)
+                else None
+            )
+            or None
+        ),
     }
 
 

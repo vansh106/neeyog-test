@@ -24,16 +24,43 @@ function validUntilDdMmYyyy(createdAt: string | null, validityDays: number): str
 export type QuotationPreparer = {
   email?: string | null
   name?: string | null
+  phone?: string | null
 }
 
 export function resolveQuotationPreparer(
-  quotation: { created_by_name?: string | null; created_by_email?: string | null },
-  sessionUser?: { email: string; full_name: string } | null,
+  quotation: {
+    created_by_name?: string | null
+    created_by_email?: string | null
+    created_by_phone?: string | null
+  },
+  sessionUser?: { email: string; full_name: string; phone?: string | null } | null,
 ): QuotationPreparer {
   return {
     email: sessionUser?.email?.trim() || quotation.created_by_email?.trim() || null,
     name: sessionUser?.full_name?.trim() || quotation.created_by_name?.trim() || null,
+    phone: sessionUser?.phone?.trim() || quotation.created_by_phone?.trim() || null,
   }
+}
+
+function appendPreparerContactRows(
+  rows: PdfKvRow[],
+  preparer?: QuotationPreparer,
+  clientConfig?: ClientConfig,
+): void {
+  const phone = preparer?.phone?.trim() || null
+  const email = (
+    preparer?.email?.trim() ||
+    (clientConfig?.sales_email as string | undefined)?.trim() ||
+    (clientConfig?.email || '').trim() ||
+    null
+  )
+  const prepared = (
+    preparer?.name?.trim() ||
+    ((clientConfig?.prepared_by as string | undefined) || 'Sales Team').trim()
+  )
+  if (phone) rows.push({ label: 'Phone', value: phone })
+  if (email) rows.push({ label: 'E-Mail', value: email })
+  if (prepared) rows.push({ label: 'Prepared By', value: prepared })
 }
 
 export function buildDefaultHeaderLeft(
@@ -45,17 +72,7 @@ export function buildDefaultHeaderLeft(
   if (addr) rows.push({ label: 'Address', value: addr })
   const website = (clientConfig?.website as string | undefined)?.trim()
   if (website) rows.push({ label: 'Website', value: website })
-  const salesEmail = (
-    preparer?.email?.trim() ||
-    (clientConfig?.sales_email as string | undefined)?.trim() ||
-    (clientConfig?.email || '').trim()
-  ).trim()
-  if (salesEmail) rows.push({ label: 'E-Mail', value: salesEmail })
-  const prepared = (
-    preparer?.name?.trim() ||
-    ((clientConfig?.prepared_by as string | undefined) || 'Sales Team').trim()
-  ).trim()
-  rows.push({ label: 'Prepared By', value: prepared })
+  appendPreparerContactRows(rows, preparer, clientConfig)
   return rows
 }
 
@@ -127,14 +144,16 @@ export function buildDefaultFooterContact(
     preparer?.name?.trim() ||
     ((clientConfig?.prepared_by as string | undefined) || 'Sales Team').trim()
   ).trim()
-  const phone = (clientConfig?.phone || '').trim()
+  const prepPhone = preparer?.phone?.trim()
+  const companyPhone = (clientConfig?.phone || '').trim()
   const letterEmail = (
     preparer?.email?.trim() ||
     (clientConfig?.sales_email as string | undefined)?.trim() ||
     (clientConfig?.email || '').trim()
   ).trim()
   let line = `If you have any questions about this quote, please contact ${prepared}`
-  if (phone) line += `, ${phone}`
+  if (prepPhone) line += `, ${prepPhone}`
+  else if (companyPhone) line += `, ${companyPhone}`
   if (letterEmail) line += `, ${letterEmail}`
   return `${line}.`
 }

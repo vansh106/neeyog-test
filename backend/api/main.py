@@ -39,6 +39,7 @@ async def lifespan(app: FastAPI):
                         hashed_password=hash_password(settings.superadmin_password),
                         tier=UserTier.SUPERADMIN.value,
                         job_title="Super Administrator",
+                        phone=settings.superadmin_phone,
                         is_active=True,
                         is_first_login=False,
                     )

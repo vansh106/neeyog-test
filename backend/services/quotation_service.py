@@ -364,16 +364,19 @@ async def update_quotation_financial_summary(
     return q
 
 
-def _preparer_from_quotation(q: Quotation) -> tuple[str | None, str | None]:
+def _preparer_from_quotation(q: Quotation) -> tuple[str | None, str | None, str | None]:
     name = (getattr(q, "created_by_name", None) or "").strip()
     email = ""
+    phone = (getattr(q, "created_by_phone", None) or "").strip()
     creator = getattr(q, "created_by_user", None)
     if creator is not None:
         if not name and getattr(creator, "full_name", None):
             name = str(creator.full_name).strip()
         if getattr(creator, "email", None):
             email = str(creator.email).strip()
-    return name or None, email or None
+        if not phone and getattr(creator, "phone", None):
+            phone = str(creator.phone).strip()
+    return name or None, email or None, phone or None
 
 
 def _quotation_payload_for_pdf(
@@ -381,6 +384,7 @@ def _quotation_payload_for_pdf(
     *,
     prepared_by_email: str | None = None,
     prepared_by_name: str | None = None,
+    prepared_by_phone: str | None = None,
 ) -> dict:
     li = q.line_items if isinstance(q.line_items, list) else []
     ov = q.pdf_display_overrides if isinstance(q.pdf_display_overrides, dict) else {}
@@ -425,15 +429,19 @@ def _quotation_payload_for_pdf(
             "department": str(getattr(emp, "department", None) or "").strip(),
             "designation": str(emp.designation).strip() if getattr(emp, "designation", None) else "",
         }
-    prep_name, prep_email = _preparer_from_quotation(q)
+    prep_name, prep_email, prep_phone = _preparer_from_quotation(q)
     if prepared_by_name and str(prepared_by_name).strip():
         prep_name = str(prepared_by_name).strip()
     if prepared_by_email and str(prepared_by_email).strip():
         prep_email = str(prepared_by_email).strip()
+    if prepared_by_phone and str(prepared_by_phone).strip():
+        prep_phone = str(prepared_by_phone).strip()
     if prep_name:
         out["prepared_by_name"] = prep_name
     if prep_email:
         out["prepared_by_email"] = prep_email
+    if prep_phone:
+        out["prepared_by_phone"] = prep_phone
     return out
 
 

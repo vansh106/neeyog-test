@@ -3,12 +3,15 @@
 from datetime import date
 
 from fastapi import APIRouter, Depends, Query
-from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config.permissions import Permission
 from controllers import purchase_order_controller
-from controllers.purchase_order_controller import PurchaseOrderCreateBody, PurchaseOrderListItem
+from controllers.purchase_order_controller import (
+    PurchaseOrderCreateBody,
+    PurchaseOrderListItem,
+    PurchaseOrderUpdateBody,
+)
 from core.auth_middleware import CurrentUser, require_permission
 from core.database import get_db
 
@@ -57,24 +60,20 @@ async def get_purchase_order_route(
     return await purchase_order_controller.handle_get_purchase_order(db, po_id)
 
 
-@router.get("/{po_id}/pdf")
-async def get_purchase_order_pdf_route(
+@router.patch("/{po_id}")
+async def update_purchase_order_route(
     po_id: str,
-    user: CurrentUser = Depends(require_permission(Permission.DOWNLOAD_PO_PDF)),
+    body: PurchaseOrderUpdateBody,
+    _user: CurrentUser = Depends(require_permission(Permission.CREATE_PURCHASE_ORDERS)),
     db: AsyncSession = Depends(get_db),
 ):
-    path = await purchase_order_controller.handle_get_purchase_order_pdf_path(db, po_id, user)
-    return FileResponse(
-        path,
-        media_type="application/pdf",
-        filename=f"{po_id}.pdf",
-    )
+    return await purchase_order_controller.handle_update_purchase_order(po_id, body, db)
 
 
 @router.delete("/{po_id}")
-async def archive_purchase_order_route(
+async def delete_purchase_order_route(
     po_id: str,
     _user: CurrentUser = Depends(require_permission(Permission.DELETE_PURCHASE_ORDERS)),
     db: AsyncSession = Depends(get_db),
 ):
-    return await purchase_order_controller.handle_archive_purchase_order(db, po_id)
+    return await purchase_order_controller.handle_delete_purchase_order(db, po_id)

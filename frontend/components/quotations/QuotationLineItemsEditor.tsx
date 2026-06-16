@@ -30,12 +30,17 @@ type ProductPricingCalc = {
 }
 
 type Props = {
-  quotationId: string
+  quotationId?: string
   /** Bumps on each Edit open — keeps cascade + pricing effects in sync with server prefill. */
   prefillRevision: number
   initialAssembledProducts: AssembledProduct[]
   onCancel: () => void
   onSaved: () => void | Promise<void>
+  /** When set, saves via this handler instead of the quotations API (e.g. PO manual edit). */
+  saveHandler?: (lineItems: ReturnType<typeof assembledToLineItem>[]) => Promise<void>
+  saveLabel?: string
+  title?: string
+  description?: string
 }
 
 export default function QuotationLineItemsEditor({
@@ -44,6 +49,10 @@ export default function QuotationLineItemsEditor({
   initialAssembledProducts,
   onCancel,
   onSaved,
+  saveHandler,
+  saveLabel = 'Save changes',
+  title = 'Products Requested',
+  description = 'Same manual dropdown flow as Upload — edit lines, then save to refresh totals and PDF.',
 }: Props) {
   const [assembledProducts, setAssembledProducts] = useState<AssembledProduct[]>(initialAssembledProducts)
   const [activeConfigIds, setActiveConfigIds] = useState<string[]>([])
@@ -282,11 +291,17 @@ export default function QuotationLineItemsEditor({
     setSaving(true)
     setErrors({})
     try {
-      await quotationsApi.updateLineItems(quotationId, { lineItems: lineItems })
+      if (saveHandler) {
+        await saveHandler(lineItems)
+      } else if (quotationId) {
+        await quotationsApi.updateLineItems(quotationId, { lineItems: lineItems })
+      } else {
+        throw new Error('No save target configured')
+      }
       await Promise.resolve(onSaved())
     } catch (err: unknown) {
       setErrors({
-        save: err instanceof Error ? err.message : 'Failed to update quotation',
+        save: err instanceof Error ? err.message : 'Failed to save products',
       })
     } finally {
       setSaving(false)
@@ -296,10 +311,8 @@ export default function QuotationLineItemsEditor({
   return (
     <div className="space-y-4">
       <section className="rounded-xl border border-surface-border bg-white p-4 shadow-sm border-t-2 border-t-brand-gold-200">
-        <h2 className="text-[15px] font-semibold text-gray-900">Products Requested</h2>
-        <p className="mt-1 text-[12px] text-surface-muted">
-          Same manual dropdown flow as Upload — edit lines, then save to refresh totals and PDF.
-        </p>
+        <h2 className="text-[15px] font-semibold text-gray-900">{title}</h2>
+        <p className="mt-1 text-[12px] text-surface-muted">{description}</p>
 
         <div className="mt-4 space-y-4">
           {assembledProducts.map((p, idx) =>
@@ -567,7 +580,7 @@ export default function QuotationLineItemsEditor({
               Saving…
             </>
           ) : (
-            'Save quotation'
+            saveLabel
           )}
         </Button>
         <Button type="button" variant="outline" onClick={onCancel} disabled={saving}>

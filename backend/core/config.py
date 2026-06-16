@@ -45,6 +45,7 @@ class Settings(BaseSettings):
     superadmin_email: str = "admin@parthvalve.com"
     superadmin_password: str = "ChangeMe@123"
     superadmin_name: str = "Super Admin"
+    superadmin_phone: str = "9823012345"
 
     #: Optional Fernet key (44 chars) for mailbox IMAP secrets; if unset, derived from ``jwt_secret_key``.
     mailbox_credentials_fernet_key: str = ""

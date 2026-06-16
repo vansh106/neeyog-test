@@ -12,6 +12,7 @@ export interface AuthUser {
   full_name: string
   tier: string
   job_title: string | null
+  phone?: string | null
   permissions: string[]
   is_first_login: boolean
 }
@@ -89,6 +90,7 @@ export const useAuthStore = create<AuthStore>()(
               full_name: string
               tier: string
               job_title: string | null
+              phone?: string | null
               permissions: string[]
             }
             detail?: string

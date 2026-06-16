@@ -278,6 +278,7 @@ async def generate_quotation_pdf(
         prepared = client_config.get("prepared_by", "Sales Team")
         prep_email = (quotation_data.get("prepared_by_email") or "").strip() or sales_email
         prep_name = (quotation_data.get("prepared_by_name") or "").strip() or prepared
+        prep_phone = (quotation_data.get("prepared_by_phone") or "").strip()
 
         el: list = []
 
@@ -337,6 +338,8 @@ async def generate_quotation_pdf(
                 left_info.append(Paragraph(f"<b>Address</b> : {escape(str(address))}", s_addr))
             if website:
                 left_info.append(Paragraph(f"<b>Website</b> : {escape(str(website))}", s_addr))
+            if prep_phone:
+                left_info.append(Paragraph(f"<b>Phone</b> : {escape(str(prep_phone))}", s_addr))
             if prep_email:
                 left_info.append(Paragraph(f"<b>E-Mail</b> : {escape(str(prep_email))}", s_addr))
             left_info.append(Paragraph(f"<b>Prepared By</b> : {escape(str(prep_name))}", s_addr))
@@ -816,8 +819,9 @@ async def generate_quotation_pdf(
 
         el.append(Spacer(1, 6 * mm))
         contact_line = f"If you have any questions about this quote, please contact {escape(str(prep_name))}"
-        if phone:
-            contact_line += f", {escape(str(phone))}"
+        footer_phone = prep_phone or phone
+        if footer_phone:
+            contact_line += f", {escape(str(footer_phone))}"
         if prep_email:
             contact_line += f", {escape(str(prep_email))}"
         contact_line += "."
