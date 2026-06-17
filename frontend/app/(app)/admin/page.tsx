@@ -88,6 +88,7 @@ type TeamUser = {
   full_name: string
   tier: string
   job_title: string | null
+  monthly_booking_target?: number
   is_active: boolean
   is_first_login: boolean
   permissions: string[]
@@ -115,6 +116,7 @@ export default function AdminPage() {
   const [email, setEmail] = useState('')
   const [jobTitle, setJobTitle] = useState('')
   const [tier, setTier] = useState<'member' | 'admin'>('member')
+  const [monthlyBookingTarget, setMonthlyBookingTarget] = useState('1000000')
   const [selected, setSelected] = useState<Set<string>>(new Set())
 
   const [pwModal, setPwModal] = useState<{ title: string; email: string; name: string; temp: string } | null>(null)
@@ -184,6 +186,19 @@ export default function AdminPage() {
     },
   })
 
+  const saveMonthlyTargetMut = useMutation({
+    mutationFn: () => {
+      if (!editUser) throw new Error('No user')
+      const value = Number(monthlyBookingTarget)
+      if (!Number.isFinite(value) || value < 0) throw new Error('Enter a valid monthly target')
+      return usersApi.updateMonthlyTarget(editUser.id, value)
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin-users'] })
+      qc.invalidateQueries({ queryKey: ['analytics', 'booking-target'] })
+    },
+  })
+
   const createMailboxMut = useMutation({
     mutationFn: () =>
       mailboxesApi.create({
@@ -239,6 +254,7 @@ export default function AdminPage() {
     setEmail('')
     setJobTitle('')
     setTier('member')
+    setMonthlyBookingTarget('1000000')
     setSelected(new Set())
   }
 
@@ -282,6 +298,7 @@ export default function AdminPage() {
     setEmail(u.email)
     setJobTitle(u.job_title ?? '')
     setTier(u.tier === 'admin' ? 'admin' : 'member')
+    setMonthlyBookingTarget(String(u.monthly_booking_target ?? 1000000))
     setSelected(new Set(u.permissions))
     setSheetOpen(true)
   }
@@ -324,6 +341,7 @@ export default function AdminPage() {
     createMut.isPending ||
     savePermsMut.isPending ||
     saveMbAccessMut.isPending ||
+    saveMonthlyTargetMut.isPending ||
     createMailboxMut.isPending
 
   if (!isAdmin) {
@@ -566,13 +584,46 @@ export default function AdminPage() {
             )}
 
             {mode === 'edit' && editUser && (
-              <div className="rounded-lg border border-surface-border bg-surface-page/60 p-3 text-[13px] text-surface-muted">
-                <div>
-                  <span className="font-medium text-gray-800">Tier:</span> {editUser.tier}
+              <div className="space-y-3">
+                <div className="rounded-lg border border-surface-border bg-surface-page/60 p-3 text-[13px] text-surface-muted">
+                  <div>
+                    <span className="font-medium text-gray-800">Tier:</span> {editUser.tier}
+                  </div>
+                  <div>
+                    <span className="font-medium text-gray-800">Last active:</span> {relTime(editUser.last_login_at)}
+                  </div>
                 </div>
-                <div>
-                  <span className="font-medium text-gray-800">Last active:</span> {relTime(editUser.last_login_at)}
-                </div>
+                <PermissionGate permission={Permissions.USERS_EDIT}>
+                  <div className="space-y-2">
+                    <label className="text-[12px] font-medium">Monthly booking target (₹)</label>
+                    <Input
+                      type="number"
+                      min={0}
+                      step={1000}
+                      value={monthlyBookingTarget}
+                      onChange={(e) => setMonthlyBookingTarget(e.target.value)}
+                      disabled={editUser.id === self?.id || editUser.tier === 'superadmin'}
+                    />
+                    <p className="text-[11px] text-surface-muted">
+                      Revenue target for dashboard booking tracker. Default is ₹10,00,000.
+                    </p>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={
+                        busy || editUser.id === self?.id || editUser.tier === 'superadmin'
+                      }
+                      onClick={() => saveMonthlyTargetMut.mutate()}
+                    >
+                      {saveMonthlyTargetMut.isPending ? (
+                        <Loader2 className="size-4 animate-spin" />
+                      ) : (
+                        'Save monthly target'
+                      )}
+                    </Button>
+                  </div>
+                </PermissionGate>
               </div>
             )}
 
@@ -708,10 +759,10 @@ export default function AdminPage() {
                 </div>
               )}
             </div>
-            {(createMut.error || savePermsMut.error || saveMbAccessMut.error) && (
+            {(createMut.error || savePermsMut.error || saveMbAccessMut.error || saveMonthlyTargetMut.error) && (
               <p className="text-[12px] text-red-700">
-                {(createMut.error || savePermsMut.error || saveMbAccessMut.error) instanceof Error
-                  ? (createMut.error || savePermsMut.error || saveMbAccessMut.error)!.message
+                {(createMut.error || savePermsMut.error || saveMbAccessMut.error || saveMonthlyTargetMut.error) instanceof Error
+                  ? (createMut.error || savePermsMut.error || saveMbAccessMut.error || saveMonthlyTargetMut.error)!.message
                   : 'Request failed'}
               </p>
             )}

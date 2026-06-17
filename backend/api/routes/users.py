@@ -9,6 +9,7 @@ from controllers import user_controller
 from controllers.user_controller import (
     CreateUserRequest,
     UpdateMailboxAccessRequest,
+    UpdateMonthlyBookingTargetRequest,
     UpdatePermissionsRequest,
 )
 from core.auth_middleware import CurrentUser, get_current_user, require_admin_permissions
@@ -77,6 +78,16 @@ async def patch_mailbox_access_route(
     db: AsyncSession = Depends(get_db),
 ):
     return await user_controller.handle_update_mailbox_access(user_id, body, actor, db)
+
+
+@router.patch("/{user_id}/monthly-target")
+async def patch_monthly_target_route(
+    user_id: str,
+    body: UpdateMonthlyBookingTargetRequest,
+    actor: CurrentUser = Depends(require_admin_permissions(Permission.USERS_EDIT)),
+    db: AsyncSession = Depends(get_db),
+):
+    return await user_controller.handle_update_monthly_booking_target(user_id, body, actor, db)
 
 
 @router.patch("/{user_id}/deactivate", status_code=204)

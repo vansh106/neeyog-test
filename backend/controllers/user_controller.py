@@ -65,6 +65,17 @@ class UpdateMailboxAccessRequest(BaseModel):
     access: list[MailboxAccessIn]
 
 
+class UpdateMonthlyBookingTargetRequest(BaseModel):
+    monthly_booking_target: float
+
+    @field_validator("monthly_booking_target")
+    @classmethod
+    def validate_target(cls, v: float) -> float:
+        if v < 0:
+            raise ValueError("Monthly booking target must be zero or positive")
+        return v
+
+
 def permission_groups_dict() -> dict[str, list[str]]:
     return {k: [p.value for p in v] for k, v in PERMISSION_GROUPS.items()}
 
@@ -146,6 +157,28 @@ async def handle_update_permissions(
     try:
         await user_management_service.update_user_permissions(
             user_id, body.permissions, actor.id, db
+        )
+        return await user_management_service.get_user(user_id, db)
+    except UserNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except AuthorizationError as e:
+        raise HTTPException(status_code=403, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+async def handle_update_monthly_booking_target(
+    user_id: str,
+    body: UpdateMonthlyBookingTargetRequest,
+    actor: CurrentUser,
+    db: Any,
+) -> dict:
+    try:
+        await user_management_service.update_monthly_booking_target(
+            user_id,
+            body.monthly_booking_target,
+            actor.id,
+            db,
         )
         return await user_management_service.get_user(user_id, db)
     except UserNotFoundError as e:

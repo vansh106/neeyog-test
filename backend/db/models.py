@@ -327,6 +327,7 @@ class User(Base):
     tier: Mapped[str] = mapped_column(String(50), nullable=False, default=UserTier.MEMBER.value)
     job_title: Mapped[str | None] = mapped_column(String(255), nullable=True)
     phone: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    monthly_booking_target: Mapped[float] = mapped_column(Float, nullable=False, default=1_000_000.0)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     is_first_login: Mapped[bool] = mapped_column(Boolean, default=True)
 

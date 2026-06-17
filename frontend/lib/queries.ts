@@ -9,6 +9,7 @@ import {
   configuratorApi,
   usersApi,
   mailboxesApi,
+  analyticsApi,
 } from './api'
 import { Permissions } from '@/lib/permissions'
 import { useAuthStore } from '@/stores/authStore'
@@ -245,6 +246,78 @@ export function useMailboxes() {
     queryFn: () => mailboxesApi.list<Record<string, unknown>[]>(),
     enabled: authed,
     staleTime: 60000,
+  })
+}
+
+export function useBookingTargetTracker(userId?: string) {
+  const authed = useAuthStore((s) => Boolean(s.access_token))
+  return useQuery({
+    queryKey: ['analytics', 'booking-target', userId ?? 'self'],
+    queryFn: () =>
+      analyticsApi.bookingTarget(userId ? { user_id: userId } : undefined),
+    enabled: authed,
+    staleTime: 30000,
+  })
+}
+
+export function useDashboardKpis(userId?: string) {
+  const authed = useAuthStore((s) => Boolean(s.access_token))
+  return useQuery({
+    queryKey: ['analytics', 'kpis', userId ?? 'self'],
+    queryFn: () => analyticsApi.kpis(userId ? { user_id: userId } : undefined),
+    enabled: authed,
+    staleTime: 30000,
+  })
+}
+
+export function useActionQueues(userId?: string) {
+  const authed = useAuthStore((s) => Boolean(s.access_token))
+  return useQuery({
+    queryKey: ['analytics', 'action-queues', userId ?? 'self'],
+    queryFn: () => analyticsApi.actionQueues(userId ? { user_id: userId } : undefined),
+    enabled: authed,
+    staleTime: 30000,
+  })
+}
+
+export function useSalesFunnel(userId?: string) {
+  const authed = useAuthStore((s) => Boolean(s.access_token))
+  return useQuery({
+    queryKey: ['analytics', 'sales-funnel', userId ?? 'self'],
+    queryFn: () => analyticsApi.salesFunnel(userId ? { user_id: userId } : undefined),
+    enabled: authed,
+    staleTime: 30000,
+  })
+}
+
+export function useDashboardCharts(userId?: string) {
+  const authed = useAuthStore((s) => Boolean(s.access_token))
+  return useQuery({
+    queryKey: ['analytics', 'charts', userId ?? 'self'],
+    queryFn: () => analyticsApi.charts(userId ? { user_id: userId } : undefined),
+    enabled: authed,
+    staleTime: 30000,
+  })
+}
+
+export function usePipelineRegister(userId?: string) {
+  const authed = useAuthStore((s) => Boolean(s.access_token))
+  return useQuery({
+    queryKey: ['analytics', 'pipeline-register', userId ?? 'self'],
+    queryFn: () => analyticsApi.pipelineRegister(userId ? { user_id: userId } : undefined),
+    enabled: authed,
+    staleTime: 30000,
+  })
+}
+
+export function usePipelineMonthEnquiries(year: number, month: number, userId?: string) {
+  const authed = useAuthStore((s) => Boolean(s.access_token))
+  return useQuery({
+    queryKey: ['analytics', 'pipeline-enquiries', userId ?? 'self', year, month],
+    queryFn: () =>
+      analyticsApi.pipelineMonthEnquiries(year, month, userId ? { user_id: userId } : undefined),
+    enabled: authed,
+    staleTime: 30000,
   })
 }
 

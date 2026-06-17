@@ -165,6 +165,37 @@ async def reactivate_user(target_user_id: str, db: AsyncSession) -> None:
         await db.commit()
 
 
+async def update_monthly_booking_target(
+    target_user_id: str,
+    monthly_booking_target: float,
+    updated_by_id: str,
+    db: AsyncSession,
+) -> None:
+    if monthly_booking_target < 0:
+        raise ValueError("Monthly booking target must be zero or positive")
+
+    uid = uuid.UUID(target_user_id)
+    urow = await db.execute(select(User).where(User.id == uid))
+    target = urow.scalar_one_or_none()
+    if not target:
+        raise UserNotFoundError("User not found")
+    if target.tier == UserTier.SUPERADMIN.value and str(updated_by_id) != str(target.id):
+        raise AuthorizationError("Cannot change another superadmin's monthly target")
+
+    target.monthly_booking_target = monthly_booking_target
+
+    db.add(
+        AuditLog(
+            entity_type="user",
+            entity_id=uid,
+            action="monthly_booking_target_updated",
+            performed_by=updated_by_id,
+            details={"monthly_booking_target": monthly_booking_target},
+        )
+    )
+    await db.commit()
+
+
 async def reset_user_password(target_user_id: str, db: AsyncSession) -> str:
     result = await db.execute(select(User).where(User.id == uuid.UUID(target_user_id)))
     user = result.scalar_one_or_none()
@@ -195,6 +226,7 @@ async def list_users(db: AsyncSession, *, include_inactive: bool = False) -> lis
                 "full_name": user.full_name,
                 "tier": user.tier,
                 "job_title": user.job_title,
+                "monthly_booking_target": user.monthly_booking_target,
                 "is_active": user.is_active,
                 "is_first_login": user.is_first_login,
                 "permissions": perms,
@@ -219,6 +251,7 @@ async def get_user(user_id: str, db: AsyncSession) -> dict:
         "full_name": user.full_name,
         "tier": user.tier,
         "job_title": user.job_title,
+        "monthly_booking_target": user.monthly_booking_target,
         "is_active": user.is_active,
         "is_first_login": user.is_first_login,
         "permissions": perms,

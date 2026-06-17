@@ -751,6 +751,228 @@ export const usersApi = {
   reactivate: (id: string) => patch<unknown>(`/api/users/${id}/reactivate`, {}),
   resetPassword: <T = { message: string; temp_password: string }>(id: string) =>
     post<T>(`/api/users/${id}/reset-password`, {}),
+  updateMonthlyTarget: <T = unknown>(id: string, monthly_booking_target: number) =>
+    patch<T>(`/api/users/${id}/monthly-target`, { monthly_booking_target }),
+}
+
+export type BookingTargetTrackerResponse = {
+  month_label: string
+  month: number
+  year: number
+  scope_label: string
+  total_target: number
+  achieved_value: number
+  pct_achieved: number
+  expected_pace_pct: number
+  working_days_left: number
+  working_days_total: number
+  working_days_elapsed: number
+  required_daily_pace: number
+  is_behind_schedule: boolean
+}
+
+export type DashboardKpisResponse = {
+  month_label: string
+  compare_month_label: string
+  quoted_value: {
+    total: number
+    count: number
+    mom_pct_change: number
+  }
+  po_received: {
+    total: number
+    count: number
+  }
+  win_rate: {
+    pct: number
+    pts_change: number
+  }
+  avg_response: {
+    hours: number | null
+    week1_hours: number | null
+  }
+}
+
+export type ActionQueuesResponse = {
+  incomplete_enquiries: {
+    count: number
+    items: Array<{
+      enquiry_id: string
+      subject: string
+      required_action: string
+      action_type: string
+      aging_days: number
+    }>
+  }
+  follow_ups_due: {
+    count: number
+    pipeline_value: number
+    items: Array<{
+      quotation_id: string
+      enquiry_id: string
+      client_product: string
+      deal_value: number
+      due_label: string
+      due_urgency: string
+      status: string
+      status_label: string
+    }>
+  }
+  quote_expiry: {
+    has_expiring_quotes: boolean
+    expiring_value: number
+    timeframe_days: number
+    accounts: Array<{
+      account_name: string
+      expiring_value: number
+      no_follow_up_logged: boolean
+    }>
+  }
+}
+
+export type SalesFunnelResponse = {
+  month_label: string
+  month: number
+  year: number
+  enquiries: {
+    count: number
+    bar_width_pct: number
+  }
+  quoted: {
+    count: number
+    value: number
+    bar_width_pct: number
+    conversion_from_enquiries_pct: number
+  }
+  po_won: {
+    count: number
+    value: number
+    bar_width_pct: number
+    conversion_from_quoted_pct: number
+  }
+}
+
+export type DashboardChartsResponse = {
+  month_label: string
+  lost_reasons: {
+    total: number
+    reasons: Array<{
+      reason: string
+      count: number
+      bar_width_pct: number
+      is_top: boolean
+    }>
+    insights: string[]
+  }
+  won_by_source: {
+    total_won_value: number
+    sources: Array<{
+      channel_key: string
+      channel_label: string
+      won_value: number
+      po_count: number
+      share_pct: number
+      bar_color: string
+    }>
+  }
+  weekly_response: {
+    weeks: Array<{
+      week_label: string
+      week: number
+      avg_hours: number
+      is_milestone?: boolean
+    }>
+    milestone_week: number | null
+    milestone_hours: number | null
+    target_hours: number | null
+  }
+  won_value_trend: {
+    months: Array<{
+      year: number
+      month: number
+      month_label: string
+      won_value: number
+      is_current: boolean
+    }>
+  }
+  category_performance: {
+    categories: Array<{
+      category_key: string
+      category_label: string
+      category_abbr: string
+      won_value: number
+      quoted_value: number
+      win_rate_pct: number
+      po_count: number
+      bar_width_pct: number
+      win_rate_tier: 'high' | 'medium' | 'low' | 'neutral'
+    }>
+    insight: string | null
+    highlight_token: string | null
+  }
+}
+
+export type PipelineRegisterRow = {
+  row_key: string
+  year: number | null
+  month: number | null
+  month_label: string
+  is_mtd: boolean
+  is_total: boolean
+  enquiry_count: number
+  quote_count: number
+  quoted_value: number
+  po_count: number
+  po_value: number
+  conversion_pct: number
+}
+
+export type PipelineRegisterResponse = {
+  fy_label: string
+  rows: PipelineRegisterRow[]
+  conversion_range: { min: number; max: number }
+}
+
+export type PipelineMonthEnquiriesResponse = {
+  year: number
+  month: number
+  month_label: string
+  count: number
+  items: Array<{
+    enquiry_id: string
+    enquiry_number: string | null
+    subject: string
+    status: string
+    flow_type: string | null
+    created_at: string | null
+    quoted_value: number | null
+    quote_number: string | null
+  }>
+}
+
+export const analyticsApi = {
+  bookingTarget: <T = BookingTargetTrackerResponse>(params?: { user_id?: string; year?: number; month?: number }) =>
+    get<T>('/api/analytics/booking-target', params as Record<string, unknown> | undefined),
+  kpis: <T = DashboardKpisResponse>(params?: { user_id?: string; year?: number; month?: number }) =>
+    get<T>('/api/analytics/kpis', params as Record<string, unknown> | undefined),
+  actionQueues: <T = ActionQueuesResponse>(params?: { user_id?: string }) =>
+    get<T>('/api/analytics/action-queues', params as Record<string, unknown> | undefined),
+  salesFunnel: <T = SalesFunnelResponse>(params?: { user_id?: string; year?: number; month?: number }) =>
+    get<T>('/api/analytics/sales-funnel', params as Record<string, unknown> | undefined),
+  charts: <T = DashboardChartsResponse>(params?: { user_id?: string; year?: number; month?: number }) =>
+    get<T>('/api/analytics/charts', params as Record<string, unknown> | undefined),
+  pipelineRegister: <T = PipelineRegisterResponse>(params?: { user_id?: string }) =>
+    get<T>('/api/analytics/pipeline-register', params as Record<string, unknown> | undefined),
+  pipelineMonthEnquiries: <T = PipelineMonthEnquiriesResponse>(
+    year: number,
+    month: number,
+    params?: { user_id?: string },
+  ) =>
+    get<T>('/api/analytics/pipeline-register/enquiries', {
+      year,
+      month,
+      ...(params ?? {}),
+    } as Record<string, unknown>),
 }
 
 export async function changePasswordApi(
