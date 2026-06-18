@@ -392,8 +392,6 @@ export function assembledToLineItem(
       : p.positioner.type
   }
   if (p.include_bracket && p.bracket) cascade.bracket_coupler = `Included (${p.bracket.size})`
-  if (p.supplier_name) cascade.supplier = p.supplier_name
-  if (p.supplier_id) cascade.supplier_id = p.supplier_id
 
   const category =
     p.is_temporary || isTemporaryCatalogCategory(v?.catalog_category)

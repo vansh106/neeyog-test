@@ -9,6 +9,8 @@ export function sanitizeQuotationDescription(desc: string): string {
     .filter((line) => {
       const i = line.indexOf(sep)
       if (i === -1) return true
+      const label = line.slice(0, i).trim().toLowerCase()
+      if (label === 'supplier' || label === 'supplier id') return false
       const val = line.slice(i + sep.length).trim()
       return Boolean(val) && val !== '----' && val !== '—' && val !== '-'
     })

@@ -93,7 +93,9 @@ def _sanitize_description_for_display(desc: object) -> str:
         if " : " not in line:
             out.append(line)
             continue
-        _label, _sep, val = line.partition(" : ")
+        label, _sep, val = line.partition(" : ")
+        if label.strip().lower() in ("supplier", "supplier id"):
+            continue
         v = val.strip()
         if not v or v in ("----", "—", "-"):
             continue

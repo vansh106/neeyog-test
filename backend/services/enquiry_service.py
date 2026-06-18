@@ -129,6 +129,9 @@ _DESC_FIELDS: list[tuple[str, str]] = [
     ("bracket_coupler", "Bracket/Coupler"),
 ]
 
+# Internal pricing fields — never show on customer-facing quotation PDFs.
+_DESC_EXCLUDED_KEYS = frozenset({"supplier", "supplier_id"})
+
 
 def _cascade_field_label(key: str) -> str:
     for k, label in _DESC_FIELDS:
@@ -149,7 +152,7 @@ def _build_structured_description(name: str, cascade: dict) -> str:
         seen.add(key)
         lines.append(f"{label} : {v}")
     for key in cascade:
-        if key in seen:
+        if key in seen or key in _DESC_EXCLUDED_KEYS:
             continue
         v = str(cascade.get(key) or "").strip()
         if not v:
@@ -1443,6 +1446,7 @@ async def process_manual_dropdown(
         created_by_user_id=cb_uid,
         created_by_name=cb_name,
         created_by_phone=prepared_by_phone,
+        is_archived=False,
     )
     db.add(quotation)
     await db.commit()
