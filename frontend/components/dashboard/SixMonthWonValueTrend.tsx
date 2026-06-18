@@ -77,7 +77,7 @@ export default function SixMonthWonValueTrend({ data, className }: Props) {
                 width={44}
               />
               <Tooltip
-                formatter={(value: number) => [formatCompactINR(value), 'Won value']}
+                formatter={(value) => [formatCompactINR(Number(value ?? 0)), 'Won value']}
                 labelFormatter={(label) => label}
                 contentStyle={{
                   fontSize: 12,

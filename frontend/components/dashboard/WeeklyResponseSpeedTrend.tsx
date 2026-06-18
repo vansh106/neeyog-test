@@ -83,7 +83,7 @@ export default function WeeklyResponseSpeedTrend({ data, className }: Props) {
                 />
               )}
               <Tooltip
-                formatter={(value: number) => [formatResponseHours(value), 'Avg response']}
+                formatter={(value) => [formatResponseHours(Number(value ?? 0)), 'Avg response']}
                 labelFormatter={(label) => label}
                 contentStyle={{
                   fontSize: 12,

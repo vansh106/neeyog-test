@@ -95,7 +95,10 @@ export default function DashboardPage() {
   const error = bookingErr ?? kpiErr ?? actionQueueErr ?? funnelErr ?? chartsErr ?? pipelineErr
 
   const scopeSelector = isAdmin ? (
-    <Select value={scopeUserId} onValueChange={setScopeUserId}>
+    <Select
+      value={scopeUserId}
+      onValueChange={(value) => setScopeUserId(value ?? ORG_SCOPE)}
+    >
       <SelectTrigger className="w-[220px] bg-white">
         <SelectValue placeholder="View analytics for…" />
       </SelectTrigger>
