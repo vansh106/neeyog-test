@@ -13,6 +13,7 @@ from pathlib import Path
 from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+from sqlalchemy.orm.attributes import flag_modified
 
 from core.config import get_settings
 from core.exceptions import ProductNotFoundError, QuotationBuildError
@@ -28,6 +29,105 @@ from services.quotation_audit_diff import (
 )
 
 QUOTATION_CRM_STATUSES: frozenset[str] = frozenset({"po_received", "lost", "hold", "ongoing"})
+LINE_CRM_STATUS_ORDER: tuple[str, ...] = ("ongoing", "po_received", "lost", "hold")
+
+
+def _normalize_line_crm_status(raw: object, *, fallback: str = "ongoing") -> str:
+    st = str(raw or fallback).strip().lower()
+    if st in QUOTATION_CRM_STATUSES:
+        return st
+    fb = str(fallback or "ongoing").strip().lower()
+    return fb if fb in QUOTATION_CRM_STATUSES else "ongoing"
+
+
+def _line_quantity(li: dict) -> int:
+    try:
+        qty = int(float(li.get("quantity") or 1))
+    except (TypeError, ValueError):
+        qty = 1
+    return max(1, qty)
+
+
+def _line_total_amount(li: dict) -> float:
+    if li.get("line_total") is not None:
+        try:
+            return round(float(li["line_total"]), 2)
+        except (TypeError, ValueError):
+            pass
+    unit = float(li.get("unit_price") or 0.0)
+    return round(unit * _line_quantity(li), 2)
+
+
+def derive_quotation_status_from_lines(lines: list) -> str:
+    statuses: list[str] = []
+    for li in lines:
+        if not isinstance(li, dict):
+            continue
+        statuses.append(_normalize_line_crm_status(li.get("crm_status")))
+    if not statuses:
+        return "ongoing"
+    if all(s == "po_received" for s in statuses):
+        return "po_received"
+    if all(s == "lost" for s in statuses):
+        return "lost"
+    if all(s == "hold" for s in statuses):
+        return "hold"
+    if any(s == "ongoing" for s in statuses):
+        return "ongoing"
+    if any(s == "hold" for s in statuses):
+        return "hold"
+    if any(s == "po_received" for s in statuses):
+        return "po_received"
+    return "ongoing"
+
+
+def build_line_status_summaries(
+    lines: list,
+    *,
+    fallback_status: str = "ongoing",
+) -> dict[str, dict]:
+    """Per-CRM-status counts and product labels for quotation list UI."""
+    valid_lines = [li for li in lines if isinstance(li, dict)]
+    total = len(valid_lines)
+    fallback = _normalize_line_crm_status(fallback_status)
+    buckets: dict[str, list[dict]] = {st: [] for st in LINE_CRM_STATUS_ORDER}
+
+    for idx, li in enumerate(valid_lines):
+        st = _normalize_line_crm_status(li.get("crm_status"), fallback=fallback)
+        remarks = li.get("crm_status_remarks")
+        if st in ("lost", "hold"):
+            remarks = str(remarks or "").strip() or None
+        else:
+            remarks = None
+        buckets[st].append(
+            {
+                "line_index": idx,
+                "label": _short_label(li),
+                "quantity": _line_quantity(li),
+                "line_total": _line_total_amount(li),
+                "status_remarks": remarks,
+            }
+        )
+
+    return {
+        st: {
+            "count": len(buckets[st]),
+            "total_lines": total,
+            "products": buckets[st],
+        }
+        for st in LINE_CRM_STATUS_ORDER
+    }
+
+
+def quotation_has_line_status(lines: list, status: str, *, fallback_status: str = "ongoing") -> bool:
+    target = _normalize_line_crm_status(status)
+    fallback = _normalize_line_crm_status(fallback_status)
+    for li in lines:
+        if not isinstance(li, dict):
+            continue
+        if _normalize_line_crm_status(li.get("crm_status"), fallback=fallback) == target:
+            return True
+    return False
 
 
 def _primary_category_from_lines(lines: list[dict]) -> str:
@@ -540,6 +640,11 @@ def _quotation_payload_for_pdf(
             eno = (getattr(enq, "enquiry_number", None) or "").strip()
             if eno:
                 out["enquiry_number"] = eno
+            pd = getattr(enq, "parsed_data", None) or {}
+            if isinstance(pd, dict):
+                src = str(pd.get("enquiry_source") or "").strip()
+                if src:
+                    out["enquiry_reference"] = src.replace("_", " ").title()
     if getattr(q, "created_at", None):
         out["quotation_date"] = q.created_at.strftime("%d/%m/%Y")
     emp = getattr(q, "client_employee", None)
@@ -742,9 +847,6 @@ async def list_quotations(
             )
         )
 
-    if status and str(status).strip():
-        conds.append(Quotation.status == str(status).strip())
-
     if date_from is not None:
         dt0 = datetime.combine(date_from, datetime.min.time(), tzinfo=timezone.utc)
         conds.append(Quotation.created_at >= dt0)
@@ -781,8 +883,23 @@ async def update_quotation_crm_status(
         raise ValueError("Remarks are required for Lost and Hold")
 
     q = await get_quotation(quotation_id, db)
-    q.status = st
-    q.status_remarks = remarks if st in ("lost", "hold") else None
+    lines = copy.deepcopy(q.line_items) if isinstance(q.line_items, list) else []
+    if not lines:
+        q.status = st
+        q.status_remarks = remarks if st in ("lost", "hold") else None
+    else:
+        updated: list[dict] = []
+        for li in lines:
+            if not isinstance(li, dict):
+                continue
+            row = dict(li)
+            row["crm_status"] = st
+            row["crm_status_remarks"] = remarks if st in ("lost", "hold") else None
+            updated.append(row)
+        q.line_items = updated
+        flag_modified(q, "line_items")
+        q.status = derive_quotation_status_from_lines(updated)
+        q.status_remarks = None
 
     db.add(
         AuditLog(
@@ -796,7 +913,61 @@ async def update_quotation_crm_status(
                 "quotation_id": str(q.id),
                 "quote_number": q.quote_number,
                 "status": st,
-                "status_remarks": q.status_remarks,
+                "status_remarks": remarks,
+                "scope": "all_lines",
+            },
+        )
+    )
+
+    await db.commit()
+    await db.refresh(q)
+    return q
+
+
+async def update_line_crm_status(
+    quotation_id: str,
+    line_index: int,
+    status: str,
+    status_remarks: str | None,
+    db: AsyncSession,
+    *,
+    performed_by: str = "user",
+    performed_by_name: str | None = None,
+) -> Quotation:
+    st = _normalize_line_crm_status(status)
+    remarks = (str(status_remarks).strip() if status_remarks is not None else "") or None
+    if st in ("lost", "hold") and not remarks:
+        raise ValueError("Remarks are required for Lost and Hold")
+
+    q = await get_quotation(quotation_id, db)
+    lines = copy.deepcopy(q.line_items) if isinstance(q.line_items, list) else []
+    if line_index < 0 or line_index >= len(lines) or not isinstance(lines[line_index], dict):
+        raise ValueError("Invalid line index")
+
+    row = dict(lines[line_index])
+    row["crm_status"] = st
+    row["crm_status_remarks"] = remarks if st in ("lost", "hold") else None
+    lines[line_index] = row
+    q.line_items = lines
+    flag_modified(q, "line_items")
+    q.status = derive_quotation_status_from_lines(lines)
+    q.status_remarks = None
+
+    db.add(
+        AuditLog(
+            id=uuid.uuid4(),
+            entity_type="quotation",
+            entity_id=q.id,
+            action="quotation_line_crm_status",
+            performed_by=performed_by or "user",
+            details={
+                "performed_by_name": performed_by_name,
+                "quotation_id": str(q.id),
+                "quote_number": q.quote_number,
+                "line_index": line_index,
+                "line_label": _short_label(row),
+                "status": st,
+                "status_remarks": row.get("crm_status_remarks"),
             },
         )
     )
@@ -959,6 +1130,18 @@ async def update_quotation_from_manual_line_items(
     if not quote_line_items:
         raise ValueError("At least one valid line item is required")
 
+    for idx, qli in enumerate(quote_line_items):
+        if idx < len(before_lines) and isinstance(before_lines[idx], dict):
+            old = before_lines[idx]
+            qli["crm_status"] = _normalize_line_crm_status(
+                old.get("crm_status"), fallback=q.status or "ongoing"
+            )
+            old_remarks = old.get("crm_status_remarks")
+            if qli["crm_status"] in ("lost", "hold") and old_remarks:
+                qli["crm_status_remarks"] = str(old_remarks).strip() or None
+        else:
+            qli["crm_status"] = "ongoing"
+
     gst_rate = float(q.gst_rate)
     pf_rate = float(q.pf_rate)
     quote_line_items, subtotal, _, pf_amount, _base_total = enquiry_svc._calc_totals(
@@ -1008,6 +1191,7 @@ async def update_quotation_from_manual_line_items(
         )
 
     q.line_items = quote_line_items
+    q.status = derive_quotation_status_from_lines(quote_line_items)
     q.subtotal = subtotal
     q.gst_amount = gst_amount
     q.pf_amount = pf_amount

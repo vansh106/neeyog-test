@@ -319,6 +319,15 @@ export const quotationsApi = {
     id: string,
     body: { status: string; status_remarks?: string | null },
   ) => patch<T>(`/api/quotations/${encodeURIComponent(id)}/crm-status`, body),
+  updateLineCrmStatus: <T = unknown>(
+    id: string,
+    lineIndex: number,
+    body: { status: string; status_remarks?: string | null },
+  ) =>
+    patch<T>(
+      `/api/quotations/${encodeURIComponent(id)}/line-items/${lineIndex}/crm-status`,
+      body,
+    ),
   updateListingDates: <T = unknown>(
     id: string,
     body: { validity_date?: string | null; next_follow_up_date?: string | null },

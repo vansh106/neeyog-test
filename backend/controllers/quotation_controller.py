@@ -100,6 +100,20 @@ def _quotation_api_dict(q: Quotation) -> dict:
 
 # ── Pydantic response models ────────────────────────────────
 
+class QuotationLineStatusProduct(BaseModel):
+    line_index: int
+    label: str
+    quantity: int
+    line_total: float
+    status_remarks: str | None = None
+
+
+class QuotationLineStatusSummary(BaseModel):
+    count: int
+    total_lines: int
+    products: list[QuotationLineStatusProduct]
+
+
 class QuotationListItem(BaseModel):
     quotation_id: str
     enquiry_id: str
@@ -116,6 +130,7 @@ class QuotationListItem(BaseModel):
     po_total_amount: float | None = None
     status: str
     status_remarks: str | None = None
+    line_status_summaries: dict[str, QuotationLineStatusSummary]
     validity_date: str | None = None
     next_follow_up_date: str | None = None
     created_at: str
@@ -180,6 +195,13 @@ class QuotationTermCreateBody(BaseModel):
 
 class QuotationCrmStatusBody(BaseModel):
     """Listing CRM status: PO received, Ongoing, Lost, Hold (remarks required for Lost/Hold)."""
+
+    status: str = Field(..., description="po_received | ongoing | lost | hold")
+    status_remarks: str | None = None
+
+
+class QuotationLineCrmStatusBody(BaseModel):
+    """CRM status for a single quotation line item."""
 
     status: str = Field(..., description="po_received | ongoing | lost | hold")
     status_remarks: str | None = None
@@ -384,8 +406,24 @@ async def handle_list_quotations(
             db, [q.id for q in quotations]
         )
         items: list[QuotationListItem] = []
+        status_filter = str(status).strip().lower() if status and str(status).strip() else None
         for q in quotations:
             listing = quotation_service.listing_fields_from_quotation(q)
+            lines = q.line_items if isinstance(q.line_items, list) else []
+            summaries_raw = quotation_service.build_line_status_summaries(
+                lines, fallback_status=q.status or "ongoing"
+            )
+            if status_filter and status_filter in quotation_service.QUOTATION_CRM_STATUSES:
+                if summaries_raw.get(status_filter, {}).get("count", 0) <= 0:
+                    continue
+            summaries = {
+                key: QuotationLineStatusSummary(
+                    count=int(block["count"]),
+                    total_lines=int(block["total_lines"]),
+                    products=[QuotationLineStatusProduct(**p) for p in block["products"]],
+                )
+                for key, block in summaries_raw.items()
+            }
             validity = getattr(q, "validity_date", None)
             if validity is None:
                 validity = quotation_service.default_validity_date(q.created_at, q.validity_days)
@@ -410,6 +448,7 @@ async def handle_list_quotations(
                     po_total_amount=po_total if po_total is not None else None,
                     status=q.status,
                     status_remarks=q.status_remarks,
+                    line_status_summaries=summaries,
                     validity_date=validity.isoformat() if validity else None,
                     next_follow_up_date=follow_up.isoformat() if follow_up else None,
                     created_at=q.created_at.isoformat() if q.created_at else "",
@@ -432,6 +471,34 @@ async def handle_patch_quotation_crm_status(
         _ensure_quotation_access(current, user)
         q = await quotation_service.update_quotation_crm_status(
             quotation_id,
+            body.status,
+            body.status_remarks,
+            db,
+            performed_by=user.email,
+            performed_by_name=user.full_name or None,
+        )
+        return _quotation_api_dict(q)
+    except ProductNotFoundError:
+        raise HTTPException(status_code=404, detail="Quotation not found")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+async def handle_patch_line_crm_status(
+    quotation_id: str,
+    line_index: int,
+    body: QuotationLineCrmStatusBody,
+    db: AsyncSession,
+    user: CurrentUser,
+) -> dict:
+    try:
+        current = await quotation_service.get_quotation(quotation_id, db)
+        _ensure_quotation_access(current, user)
+        q = await quotation_service.update_line_crm_status(
+            quotation_id,
+            line_index,
             body.status,
             body.status_remarks,
             db,

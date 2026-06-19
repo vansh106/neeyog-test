@@ -95,12 +95,60 @@ export function buildDefaultHeaderRight(
   ]
 }
 
+export function buildDefaultMetaQuoteColumn(quotation: Quotation): PdfKvRow[] {
+  const quoteDate = formatDateDdMmYyyy(quotation.created_at)
+  const validUntil = validUntilDdMmYyyy(quotation.created_at, quotation.validity_days)
+  return [
+    { label: 'Quotation No', value: quotation.quote_number },
+    { label: 'Date', value: quoteDate },
+    { label: 'Valid Until', value: validUntil },
+  ]
+}
+
+export function buildDefaultMetaEnquiryColumn(
+  quotation: Quotation,
+  linkedEnquiry: EnquiryDetail | null | undefined,
+): PdfKvRow[] {
+  const rows: PdfKvRow[] = []
+  const eno = (quotation.enquiry_number || '').trim()
+  if (eno || quotation.enquiry_id) rows.push({ label: 'Enquiry No', value: eno || quotation.enquiry_id })
+  const enquiryDate = formatDateDdMmYyyy(linkedEnquiry?.created_at ?? null)
+  if (enquiryDate !== '—') rows.push({ label: 'Enquiry Date', value: enquiryDate })
+  const src = String(
+    (linkedEnquiry?.parsed_data as { enquiry_source?: string } | undefined)?.enquiry_source || '',
+  ).trim()
+  if (src) rows.push({ label: 'Enquiry Reference', value: src.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) })
+  return rows
+}
+
+export function buildDefaultMetaOwnerColumn(
+  clientConfig: ClientConfig | undefined,
+  preparer?: QuotationPreparer,
+): PdfKvRow[] {
+  const rows: PdfKvRow[] = []
+  const name = (
+    preparer?.name?.trim() ||
+    ((clientConfig?.prepared_by as string | undefined) || 'Sales Team').trim()
+  )
+  rows.push({ label: 'Quote Owner', value: name })
+  const phone = preparer?.phone?.trim()
+  if (phone) rows.push({ label: 'Contact', value: phone })
+  const email = (
+    preparer?.email?.trim() ||
+    (clientConfig?.sales_email as string | undefined)?.trim() ||
+    (clientConfig?.email || '').trim() ||
+    ''
+  )
+  if (email) rows.push({ label: 'Email', value: email })
+  return rows
+}
+
 export function defaultThankYouBanner(): string {
-  return 'Thank you for Your Enquiry considering us as faithful Supplier'
+  return 'Thank you for your enquiry and for considering us as your supplier. We are pleased to submit our offer:'
 }
 
 export function defaultCompanyRightBlurb(): string {
-  return 'Thank you for your enquiry and for considering us as a supplier.'
+  return ''
 }
 
 export function formatQuotationFreight(quotation: Quotation): string {
@@ -116,22 +164,25 @@ export function formatQuotationFreight(quotation: Quotation): string {
   return quotation.freight_note || 'Extra at actual'
 }
 
-export function buildDefaultTerms(quotation: Quotation): string[] {
+export function buildDefaultTerms(quotation: Quotation, companyName?: string): string[] {
   const gstRate = quotation.gst_rate
+  const pfRate = quotation.pf_rate
+  const company = (companyName || 'Parth Valves and Hoses LLP').trim()
   const freightAmt = Number(quotation.freight_amount ?? 0)
   const freightTerm =
     freightAmt > 0 && quotation.freight_rate != null
       ? `Freight @ ${quotation.freight_rate}% — included in valuation total as shown below.`
       : freightAmt > 0
         ? `Freight — ₹${freightAmt.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} included in valuation total as shown below.`
-        : `Freight — ${quotation.freight_note || 'Extra at actual'}.`
+        : `Freight — to-pay / door delivery, charges in customer's scope.`
   return [
     'Any modification to agreed specifications may attract additional commercial charges.',
-    "Third party inspection, if required — extra at actual and in customer's scope.",
+    `Prices are Ex-works ${company}, Pune.`,
+    `GST @ ${gstRate}% extra · P & F @ ${pfRate}% extra.`,
     freightTerm,
-    `GST @ ${gstRate}% — included in valuation total as shown below.`,
-    `P & F @ ${quotation.pf_rate}% — included in valuation total as shown below.`,
-    `Offer validity — ${quotation.validity_days} days from date of issue.`,
+    'Warranty: 12 months from date of invoice, against manufacturing defects only.',
+    "Third-party inspection, if required — extra at actual and in customer's scope.",
+    `Offer validity: up to ${quotation.validity_days} days from date of issue.`,
     'Subject to Pune jurisdiction only.',
   ]
 }
@@ -159,7 +210,25 @@ export function buildDefaultFooterContact(
 }
 
 export function defaultFooterThanks(): string {
-  return 'Thank You For Your Business !'
+  return 'Thank You For Your Business!'
+}
+
+export type BankDetails = {
+  account_name?: string
+  bank?: string
+  account_no?: string
+  ifsc?: string
+  branch?: string
+  account_type?: string
+  swift?: string
+}
+
+export function resolveBankDetails(clientConfig: ClientConfig | undefined): BankDetails | null {
+  const raw = clientConfig?.bank_details
+  if (!raw || typeof raw !== 'object') return null
+  const bd = raw as BankDetails
+  const hasValue = Object.values(bd).some((v) => String(v || '').trim())
+  return hasValue ? bd : null
 }
 
 export function defaultFooterDisclaimer(): string {

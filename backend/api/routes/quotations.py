@@ -14,6 +14,7 @@ from controllers.quotation_controller import (
     QuotationFinancialSummaryBody,
     QuotationHistoryResponse,
     QuotationListingDatesBody,
+    QuotationLineCrmStatusBody,
     QuotationListItem,
     QuotationPdfDisplayBody,
     QuotationTermCreateBody,
@@ -121,8 +122,22 @@ async def patch_quotation_crm_status_route(
     user: CurrentUser = Depends(require_permission(Permission.APPROVE_QUOTATIONS)),
     db: AsyncSession = Depends(get_db),
 ):
-    """CRM status on the quotation list (PO received, Ongoing, Lost, Hold + remarks)."""
+    """CRM status on all line items (legacy bulk update)."""
     return await quotation_controller.handle_patch_quotation_crm_status(quotation_id, body, db, user)
+
+
+@router.patch("/{quotation_id}/line-items/{line_index}/crm-status")
+async def patch_quotation_line_crm_status_route(
+    quotation_id: str,
+    line_index: int,
+    body: QuotationLineCrmStatusBody,
+    user: CurrentUser = Depends(require_permission(Permission.APPROVE_QUOTATIONS)),
+    db: AsyncSession = Depends(get_db),
+):
+    """CRM status for a single quotation line item."""
+    return await quotation_controller.handle_patch_line_crm_status(
+        quotation_id, line_index, body, db, user
+    )
 
 
 @router.patch("/{quotation_id}/listing-dates")

@@ -257,6 +257,7 @@ def expand_manual_line_items_to_quote_parts(
                 "component_pricing": li.get("component_pricing")
                 if isinstance(li.get("component_pricing"), dict)
                 else None,
+                "crm_status": "ongoing",
             }
         )
         history_rows.append(

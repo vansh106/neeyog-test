@@ -8,7 +8,7 @@ import EmptyState from '@/components/ui/EmptyState'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import QuotationListStatusEditor from '@/components/quotations/QuotationListStatusEditor'
+import QuotationLineStatusCell from '@/components/quotations/QuotationLineStatusCell'
 import QuotationListDateEditor, {
   formatQuotationListDate,
 } from '@/components/quotations/QuotationListDateEditor'
@@ -22,7 +22,7 @@ import {
 import { formatCurrency } from '@/lib/utils'
 import type { QuotationListItem } from '@/types'
 
-const COL_COUNT = 11
+const COL_COUNT = 14
 
 function TableSkeletonRows() {
   return (
@@ -158,7 +158,7 @@ export default function QuotationsPage() {
 
       <div className="overflow-hidden rounded-xl border border-surface-border bg-white shadow-sm">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[1400px] border-collapse text-left">
+          <table className="w-full min-w-[1680px] border-collapse text-left">
             <thead>
               <tr className="bg-[#F4F5F0] text-[11px] font-medium uppercase tracking-wide text-[#8A9488]">
                 <th className="min-w-[120px] whitespace-nowrap px-3 py-3">Quote / Enq</th>
@@ -168,7 +168,10 @@ export default function QuotationsPage() {
                 <th className="min-w-[160px] whitespace-nowrap px-3 py-3">Item Description</th>
                 <th className="min-w-[88px] whitespace-nowrap px-3 py-3 text-right">Quote ₹</th>
                 <th className="min-w-[72px] whitespace-nowrap px-3 py-3 text-right">PO ₹</th>
-                <th className="min-w-[180px] whitespace-nowrap px-3 py-3">Status</th>
+                <th className="min-w-[120px] whitespace-nowrap px-3 py-3">Ongoing</th>
+                <th className="min-w-[120px] whitespace-nowrap px-3 py-3">PO received</th>
+                <th className="min-w-[100px] whitespace-nowrap px-3 py-3">Lost</th>
+                <th className="min-w-[100px] whitespace-nowrap px-3 py-3">Hold</th>
                 <th className="min-w-[96px] whitespace-nowrap px-3 py-3">Validity</th>
                 <th className="min-w-[110px] whitespace-nowrap px-3 py-3">Next follow-up</th>
                 <th className="min-w-[88px] whitespace-nowrap px-3 py-3">User</th>
@@ -245,7 +248,16 @@ export default function QuotationsPage() {
                         : '—'}
                     </td>
                     <td className="px-3 py-3 align-top">
-                      <QuotationListStatusEditor q={q} />
+                      <QuotationLineStatusCell q={q} status="ongoing" />
+                    </td>
+                    <td className="px-3 py-3 align-top">
+                      <QuotationLineStatusCell q={q} status="po_received" />
+                    </td>
+                    <td className="px-3 py-3 align-top">
+                      <QuotationLineStatusCell q={q} status="lost" />
+                    </td>
+                    <td className="px-3 py-3 align-top">
+                      <QuotationLineStatusCell q={q} status="hold" />
                     </td>
                     <td className="px-3 py-3 align-top">
                       <QuotationListDateEditor

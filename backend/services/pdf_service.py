@@ -16,7 +16,7 @@ from pathlib import Path
 from xml.sax.saxutils import escape
 
 from reportlab.lib import colors
-from reportlab.lib.enums import TA_LEFT
+from reportlab.lib.enums import TA_LEFT, TA_RIGHT
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
@@ -44,12 +44,16 @@ def _resolve_quotation_logo_path() -> Path | None:
             return p
     return None
 
-_DARK_NAVY = colors.HexColor("#1a2744")
-_DARK_GREEN = colors.HexColor("#1f4d2e")
-_LIGHT_GRAY = colors.HexColor("#f0f2ee")
-_MID_GRAY = colors.HexColor("#6b7280")
-_GRID = colors.HexColor("#c5cbc0")
-_BORDER = colors.HexColor("#2f2f2f")
+_PRIMARY = colors.HexColor("#0F6E56")
+_TEXT = colors.HexColor("#1f2733")
+_MUTED = colors.HexColor("#6b7280")
+_MUTED_TEXT = colors.HexColor("#4b5563")
+_BORDER = colors.HexColor("#d7dbe0")
+_LIGHT_TEAL = colors.HexColor("#f0f6f3")
+_LIGHT_TEAL_BORDER = colors.HexColor("#cfe3da")
+_PRE_GST_BG = colors.HexColor("#eef3f1")
+_ROW_ALT = colors.HexColor("#fcfdfc")
+_MID_GRAY = _MUTED
 
 
 def _line_pdf_override(pdf_display_overrides: object, idx_zero_based: int) -> dict:
@@ -126,6 +130,135 @@ def _money_text(amount: float | int) -> str:
     return f"Rs. {float(amount):,.2f}"
 
 
+def _format_display_date(raw: object) -> str:
+    s = str(raw or "").strip()
+    if not s:
+        return "—"
+    for fmt in ("%d/%m/%Y", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(s, fmt).strftime("%d %b %Y")
+        except (ValueError, TypeError):
+            continue
+    return s
+
+
+_ONES = (
+    "Zero",
+    "One",
+    "Two",
+    "Three",
+    "Four",
+    "Five",
+    "Six",
+    "Seven",
+    "Eight",
+    "Nine",
+    "Ten",
+    "Eleven",
+    "Twelve",
+    "Thirteen",
+    "Fourteen",
+    "Fifteen",
+    "Sixteen",
+    "Seventeen",
+    "Eighteen",
+    "Nineteen",
+)
+_TENS = ("", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety")
+
+
+def _two_digit_words(n: int) -> str:
+    if n < 20:
+        return _ONES[n]
+    tens, ones = divmod(n, 10)
+    return f"{_TENS[tens]}{' ' + _ONES[ones] if ones else ''}".strip()
+
+
+def _indian_int_words(n: int) -> str:
+    if n == 0:
+        return "Zero"
+    if n < 0:
+        return f"Minus {_indian_int_words(-n)}"
+    parts: list[str] = []
+    crore, n = divmod(n, 10_000_000)
+    lakh, n = divmod(n, 100_000)
+    thousand, n = divmod(n, 1000)
+    hundred, rem = divmod(n, 100)
+    if crore:
+        parts.append(f"{_indian_int_words(crore)} Crore")
+    if lakh:
+        parts.append(f"{_two_digit_words(lakh)} Lakh")
+    if thousand:
+        parts.append(f"{_two_digit_words(thousand)} Thousand")
+    if hundred:
+        parts.append(f"{_ONES[hundred]} Hundred")
+    if rem:
+        parts.append(_two_digit_words(rem))
+    return " ".join(parts)
+
+
+def _amount_in_words_inr(amount: float) -> str:
+    rupees = int(amount)
+    paise = int(round((float(amount) - rupees) * 100))
+    rupee_words = _indian_int_words(rupees)
+    if paise:
+        paise_words = _indian_int_words(paise)
+        return f"Rupees {rupee_words} and {paise_words} Paise Only"
+    return f"Rupees {rupee_words} Only"
+
+
+def _bank_details_rows(client_config: dict) -> list[tuple[str, str]]:
+    bd = client_config.get("bank_details")
+    if not isinstance(bd, dict):
+        return []
+    field_map = (
+        ("account_name", "Account Name"),
+        ("bank", "Bank"),
+        ("account_no", "Account No."),
+        ("ifsc", "IFSC"),
+        ("branch", "Branch"),
+        ("account_type", "A/C Type"),
+        ("swift", "SWIFT"),
+    )
+    rows: list[tuple[str, str]] = []
+    for key, label in field_map:
+        val = str(bd.get(key) or "").strip()
+        if val:
+            rows.append((label, val))
+    return rows
+
+
+def _build_meta_col_table(
+    items: list[tuple[str, str]],
+    col_width: float,
+    label_style: ParagraphStyle,
+    value_style: ParagraphStyle,
+) -> Table:
+    label_w = col_width * 0.46
+    value_w = col_width * 0.54
+    rows = [
+        [Paragraph(f'<font color="#6b7280">{escape(label)}</font>', label_style), Paragraph(f"<b>{escape(value)}</b>", value_style)]
+        for label, value in items
+        if label or value
+    ]
+    if not rows:
+        rows = [[Paragraph("—", label_style), Paragraph("—", value_style)]]
+    tbl = Table(rows, colWidths=[label_w, value_w])
+    tbl.setStyle(
+        TableStyle(
+            [
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("ALIGN", (1, 0), (1, -1), "RIGHT"),
+                ("TOPPADDING", (0, 0), (-1, -1), 1.5),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5),
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+            ]
+        )
+    )
+    return tbl
+
+
 def _table_col_widths(total_width: float, fractions: list[float]) -> list[float]:
     """Scale column fractions to fit exactly within ``total_width``."""
     scale = total_width / sum(fractions)
@@ -164,10 +297,6 @@ def _logo_flowable(max_w: float, max_h: float) -> RLImage | None:
 def _make_footer_canvas_fn(footer_text: str):
     def _draw(canvas, doc) -> None:
         canvas.saveState()
-        # Page border around the printable area
-        canvas.setStrokeColor(_BORDER)
-        canvas.setLineWidth(1.0)
-        canvas.rect(doc.leftMargin, doc.bottomMargin, doc.width, doc.height, stroke=1, fill=0)
         canvas.setFillColor(_MID_GRAY)
         canvas.setFont("Helvetica", 7)
         w, _h = A4
@@ -213,40 +342,40 @@ async def generate_quotation_pdf(
             "Addr",
             parent=s_normal,
             fontSize=8,
-            leading=10,
-            textColor=colors.black,
+            leading=11,
+            textColor=_MUTED_TEXT,
             alignment=TA_LEFT,
         )
         s_letter_co = ParagraphStyle(
             "LetterCo",
             parent=s_normal,
             fontName="Helvetica-Bold",
-            fontSize=11,
-            leading=13,
-            textColor=_DARK_GREEN,
-            spaceAfter=1,
+            fontSize=14,
+            leading=16,
+            textColor=_PRIMARY,
+            spaceAfter=2,
             alignment=TA_LEFT,
         )
         s_quotation_title = ParagraphStyle(
             "QuotTitle",
             parent=s_normal,
             fontName="Helvetica-Bold",
-            fontSize=14,
-            leading=16,
-            textColor=_DARK_NAVY,
-            spaceBefore=2,
-            spaceAfter=3,
+            fontSize=26,
+            leading=28,
+            textColor=_TEXT,
+            spaceBefore=0,
+            spaceAfter=0,
             alignment=TA_LEFT,
         )
         s_section = ParagraphStyle(
             "Section",
             parent=s_normal,
             fontName="Helvetica-Bold",
-            fontSize=10,
-            leading=12,
-            textColor=_DARK_NAVY,
-            spaceBefore=8,
-            spaceAfter=4,
+            fontSize=8,
+            leading=10,
+            textColor=_PRIMARY,
+            spaceBefore=0,
+            spaceAfter=3,
         )
         s_cust_co = ParagraphStyle(
             "CustCo",
@@ -254,21 +383,29 @@ async def generate_quotation_pdf(
             fontName="Helvetica-Bold",
             fontSize=10,
             leading=12,
-            textColor=colors.black,
+            textColor=_TEXT,
         )
-        s_meta_val = ParagraphStyle("MetaV", parent=s_normal, fontSize=8, textColor=colors.black, alignment=TA_LEFT)
-        s_cell = ParagraphStyle("Cell", parent=s_normal, fontSize=7.5, leading=10)
-        s_cell_head = ParagraphStyle("CellH", parent=s_normal, fontName="Helvetica-Bold", fontSize=7.5, leading=10)
+        s_meta_l = ParagraphStyle("MetaL", parent=s_normal, fontSize=7.9, textColor=_MUTED, alignment=TA_LEFT)
+        s_meta_v = ParagraphStyle("MetaV", parent=s_normal, fontSize=7.9, textColor=_TEXT, alignment=TA_LEFT)
+        s_cell = ParagraphStyle("Cell", parent=s_normal, fontSize=8, leading=11, textColor=_TEXT)
+        s_cell_head = ParagraphStyle(
+            "CellH",
+            parent=s_normal,
+            fontName="Helvetica-Bold",
+            fontSize=7.4,
+            leading=9,
+            textColor=colors.white,
+        )
         s_desc = ParagraphStyle(
             "DescCell",
             parent=s_cell,
-            fontSize=7.5,
-            leading=10,
+            fontSize=8,
+            leading=11,
             spaceBefore=0,
             spaceAfter=0,
         )
-        s_terms = ParagraphStyle("Terms", parent=s_normal, fontSize=8, leading=11)
-        s_thanks = ParagraphStyle("Thanks", parent=s_normal, fontSize=9, alignment=1, textColor=_DARK_GREEN)
+        s_terms = ParagraphStyle("Terms", parent=s_normal, fontSize=7.3, leading=10, textColor=_MUTED_TEXT)
+        s_thanks = ParagraphStyle("Thanks", parent=s_normal, fontSize=9, alignment=1, textColor=_PRIMARY, fontName="Helvetica-Bold")
 
         company = client_config.get("company_name", "PARTH VALVES AND HOSES LLP")
         address = client_config.get("address", "")
@@ -284,38 +421,61 @@ async def generate_quotation_pdf(
 
         el: list = []
 
-        box_h_pad = 8
-        header_h_pad = 6
         cell_h_pad = 5
         page_content_w = doc.width
 
-        # ── Header box ──────────────────────────────────────────────
-        logo = _logo_flowable(52 * mm, 30 * mm)
-        title_cell = [
-            Paragraph(f"<b>{escape(str(company).upper())}</b>", s_letter_co),
-            Paragraph("<b>QUOTATION</b>", s_quotation_title),
-        ]
-        logo_w = 52 * mm
+        # ── Header: brand + QUOTATION title ───────────────────────────
+        logo = _logo_flowable(26 * mm, 18 * mm)
+        company_lines: list = [Paragraph(f"<b>{escape(str(company).upper())}</b>", s_letter_co)]
+        if address:
+            company_lines.append(Paragraph(escape(str(address)), s_addr))
+        if gst or website:
+            gst_web = []
+            if gst:
+                gst_web.append(f'<font color="#6b7280">GSTIN:</font> {escape(str(gst))}')
+            if website:
+                if gst_web:
+                    gst_web.append(" · ")
+                gst_web.append(f'<font color="#6b7280">Web:</font> {escape(str(website))}')
+            company_lines.append(Paragraph("".join(gst_web), s_addr))
+
+        brand_w = page_content_w * 0.72
+        title_w = page_content_w * 0.28
         if logo:
-            title_w = page_content_w - logo_w - (2 * header_h_pad)
-            header_top = Table([[logo, title_cell]], colWidths=[logo_w, title_w])
-        else:
-            header_top = Table(
-                [[title_cell]],
-                colWidths=[_edge_padded_col_sum(page_content_w, header_h_pad)],
+            brand_cell = Table([[logo, company_lines]], colWidths=[28 * mm, brand_w - 28 * mm])
+            brand_cell.setStyle(
+                TableStyle(
+                    [
+                        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+                        ("TOPPADDING", (0, 0), (-1, -1), 0),
+                        ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+                    ]
+                )
             )
+        else:
+            brand_cell = company_lines
+
+        header_top = Table(
+            [[brand_cell, Paragraph("<b>QUOTATION</b>", s_quotation_title)]],
+            colWidths=[brand_w, title_w],
+        )
         header_top.setStyle(
             TableStyle(
                 [
                     ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                    ("ALIGN", (1, 0), (1, 0), "CENTER"),
-                    ("LEFTPADDING", (0, 0), (-1, -1), header_h_pad),
-                    ("RIGHTPADDING", (0, 0), (-1, -1), header_h_pad),
-                    ("TOPPADDING", (0, 0), (-1, -1), 6),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+                    ("ALIGN", (1, 0), (1, 0), "RIGHT"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                    ("TOPPADDING", (0, 0), (-1, -1), 0),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+                    ("LINEBELOW", (0, 0), (-1, 0), 2.5, _PRIMARY),
                 ]
             )
         )
+        el.append(header_top)
+        el.append(Spacer(1, 3 * mm))
 
         pdf_ov = quotation_data.get("pdf_display_overrides")
 
@@ -329,83 +489,71 @@ async def generate_quotation_pdf(
         enq_id = quotation_data.get("enquiry_id")
         enq_num = quotation_data.get("enquiry_number")
         enq_date = quotation_data.get("enquiry_date")
+        enq_ref = str(quotation_data.get("enquiry_reference") or "").strip()
 
+        meta_col_w = page_content_w / 3.0
         hl = _pdf_ov_list(pdf_ov, "header_left")
         hr = _pdf_ov_list(pdf_ov, "header_right")
-        if hl is not None:
-            left_info = _flow_from_kv_rows(hl, s_addr)
+        if hl is not None and hr is not None:
+            # Legacy two-column overrides: split across quote + enquiry columns.
+            col1_items = [(str(r.get("label") or ""), str(r.get("value") or "")) for r in hr[:3] if isinstance(r, dict)]
+            col2_items = [(str(r.get("label") or ""), str(r.get("value") or "")) for r in hr[3:] if isinstance(r, dict)]
+            col3_items = [(str(r.get("label") or ""), str(r.get("value") or "")) for r in hl if isinstance(r, dict)]
         else:
-            left_info = []
-            if address:
-                left_info.append(Paragraph(f"<b>Address</b> : {escape(str(address))}", s_addr))
-            if website:
-                left_info.append(Paragraph(f"<b>Website</b> : {escape(str(website))}", s_addr))
-            if prep_phone:
-                left_info.append(Paragraph(f"<b>Phone</b> : {escape(str(prep_phone))}", s_addr))
-            if prep_email:
-                left_info.append(Paragraph(f"<b>E-Mail</b> : {escape(str(prep_email))}", s_addr))
-            left_info.append(Paragraph(f"<b>Prepared By</b> : {escape(str(prep_name))}", s_addr))
-
-        if hr is not None:
-            right_info = _flow_from_kv_rows(hr, s_meta_val)
-        else:
-            right_info = [
-                Paragraph(f"<b>Date</b> : {escape(str(q_date_str))}", s_meta_val),
-                Paragraph(f"<b>Quotation No</b> : {escape(str(quote_number))}", s_meta_val),
-                Paragraph(f"<b>Valid Until</b> : {escape(valid_until.strftime('%d/%m/%Y'))}", s_meta_val),
+            col1_items = [
+                ("Quotation No", str(quote_number)),
+                ("Date", _format_display_date(q_date_str)),
+                ("Valid Until", _format_display_date(valid_until.strftime("%d/%m/%Y"))),
             ]
-            if enq_id or enq_num:
-                ref = enq_num or enq_id
-                line = f"<b>Enquiry No / Date</b> : {escape(str(ref))}"
-                if enq_date:
-                    line += f" / {escape(str(enq_date))}"
-                right_info.append(Paragraph(line, s_meta_val))
+            col2_items = []
+            if enq_num or enq_id:
+                col2_items.append(("Enquiry No", str(enq_num or enq_id)))
+            if enq_date:
+                col2_items.append(("Enquiry Date", _format_display_date(enq_date)))
+            if enq_ref:
+                col2_items.append(("Enquiry Reference", enq_ref))
+            col3_items = [
+                ("Quote Owner", str(prep_name)),
+            ]
+            if prep_phone:
+                col3_items.append(("Contact", prep_phone))
+            if prep_email:
+                col3_items.append(("Email", prep_email))
 
-        header_info_inner = _edge_padded_col_sum(page_content_w, header_h_pad)
-        header_info = Table(
-            [[left_info, right_info]],
-            colWidths=_table_col_widths(header_info_inner, [0.52, 0.48]),
+        meta_strip = Table(
+            [
+                [
+                    _build_meta_col_table(col1_items, meta_col_w, s_meta_l, s_meta_v),
+                    _build_meta_col_table(col2_items, meta_col_w, s_meta_l, s_meta_v),
+                    _build_meta_col_table(col3_items, meta_col_w, s_meta_l, s_meta_v),
+                ]
+            ],
+            colWidths=[meta_col_w, meta_col_w, meta_col_w],
         )
-        header_info.setStyle(
+        meta_strip.setStyle(
             TableStyle(
                 [
+                    ("BOX", (0, 0), (-1, -1), 0.8, _BORDER),
+                    ("INNERGRID", (0, 0), (-1, -1), 0.8, _BORDER),
+                    ("BACKGROUND", (0, 0), (-1, -1), _ROW_ALT),
                     ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                    ("LINEABOVE", (0, 0), (-1, 0), 1, _BORDER),
-                    ("LEFTPADDING", (0, 0), (-1, -1), header_h_pad),
-                    ("RIGHTPADDING", (0, 0), (-1, -1), header_h_pad),
-                    ("TOPPADDING", (0, 0), (-1, -1), 6),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 10),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 10),
+                    ("TOPPADDING", (0, 0), (-1, -1), 8),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
                 ]
             )
         )
+        el.append(meta_strip)
+        el.append(Spacer(1, 3 * mm))
 
-        header_box = Table([[header_top], [header_info]], colWidths=[page_content_w])
-        header_box.setStyle(
-            TableStyle(
-                [
-                    ("BOX", (0, 0), (-1, -1), 1, _BORDER),
-                    ("LEFTPADDING", (0, 0), (-1, -1), 0),
-                    ("RIGHTPADDING", (0, 0), (-1, -1), 0),
-                    ("TOPPADDING", (0, 0), (-1, -1), 0),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
-                ]
-            )
-        )
-        el.append(header_box)
-        el.append(Spacer(1, 4 * mm))
-
-        # ── COMPANY box ─────────────────────────────────────────────
+        # ── Customer: QUOTATION FOR ───────────────────────────────────
         client_name = quotation_data.get("client_name", "")
         client_company = quotation_data.get("client_company", "")
         client_email = quotation_data.get("client_email", "")
         client_phone = quotation_data.get("client_phone", "")
 
-        cust_left: list = [Paragraph("<b>COMPANY</b>", s_section)]
         co_display = (client_company or client_name or "Customer").strip()
-        cust_left.append(Paragraph(escape(co_display), s_cust_co))
-        extra_co = _pdf_ov_list(pdf_ov, "company_left_extra")
-        if extra_co is not None:
-            cust_left.extend(_flow_from_kv_rows(extra_co, s_addr))
         concern_text = ""
         emp_pdf = quotation_data.get("quotation_client_employee")
         if isinstance(emp_pdf, dict):
@@ -416,62 +564,100 @@ async def generate_quotation_pdf(
         if not concern_text and client_name and client_name.strip() and client_name.strip() != co_display:
             concern_text = escape(client_name.strip())
 
-        cust_right: list = []
-        cr_blurb = ""
-        if isinstance(pdf_ov, dict) and pdf_ov.get("company_right_text"):
-            cr_blurb = str(pdf_ov.get("company_right_text") or "").strip()
-        if cr_blurb:
-            cust_right.append(Paragraph(escape(cr_blurb), s_addr))
+        cust_left_lines: list = [Paragraph(f"<b>{escape(co_display)}</b>", s_cust_co)]
+        extra_co = _pdf_ov_list(pdf_ov, "company_left_extra")
+        if extra_co is not None:
+            for row in extra_co:
+                if isinstance(row, dict):
+                    lab = str(row.get("label") or "").strip()
+                    val = str(row.get("value") or "").strip()
+                    if lab or val:
+                        cust_left_lines.append(
+                            Paragraph(
+                                f'<font color="#6b7280">{escape(lab)}</font> {escape(val)}',
+                                s_addr,
+                            )
+                        )
+
+        cust_right_lines: list = []
         if concern_text:
-            cust_right.append(Paragraph(f"<b>Concern Person</b> : {concern_text}", s_addr))
+            cust_right_lines.append(
+                Paragraph(f'<font color="#6b7280">Kind Attn.</font> {concern_text}', s_addr)
+            )
         if client_phone:
-            cust_right.append(Paragraph(f"<b>Contact No.</b> : {escape(str(client_phone))}", s_addr))
+            cust_right_lines.append(
+                Paragraph(f'<font color="#6b7280">Contact</font> {escape(str(client_phone))}', s_addr)
+            )
         if client_email:
-            cust_right.append(Paragraph(f"<b>E-Mail</b> : {escape(str(client_email))}", s_addr))
-        company_inner = _edge_padded_col_sum(page_content_w, box_h_pad)
-        company_tbl = Table(
-            [[cust_left, cust_right]],
-            colWidths=_table_col_widths(company_inner, [0.52, 0.48]),
+            cust_right_lines.append(
+                Paragraph(f'<font color="#6b7280">Email</font> {escape(str(client_email))}', s_addr)
+            )
+
+        cust_body = Table(
+            [[cust_left_lines, cust_right_lines]],
+            colWidths=_table_col_widths(page_content_w, [0.55, 0.45]),
         )
-        company_tbl.setStyle(
+        cust_body.setStyle(
             TableStyle(
                 [
                     ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                    ("BOX", (0, 0), (-1, -1), 1, _BORDER),
-                    ("LINEBEFORE", (1, 0), (1, 0), 1, _BORDER),
-                    ("TOPPADDING", (0, 0), (-1, -1), 4),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 10),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 10),
+                    ("TOPPADDING", (0, 0), (-1, -1), 8),
                     ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
-                    ("LEFTPADDING", (0, 0), (-1, -1), box_h_pad),
-                    ("RIGHTPADDING", (0, 0), (-1, -1), box_h_pad),
                 ]
             )
         )
-        el.append(company_tbl)
-        el.append(Spacer(1, 3 * mm))
-
-        # Centered thanks row
-        thank_txt = "Thank you for Your Enquiry considering us as faithful Supplier"
-        if isinstance(pdf_ov, dict) and str(pdf_ov.get("thank_you_row") or "").strip():
-            thank_txt = str(pdf_ov.get("thank_you_row") or "").strip()
-        thank_row = Table(
-            [[Paragraph(escape(thank_txt), ParagraphStyle("CenterThanks", parent=s_normal, alignment=1, fontSize=10))]],
-            colWidths=[doc.width],
+        customer_box = Table(
+            [
+                [Paragraph("<b>QUOTATION FOR</b>", ParagraphStyle("CustHead", parent=s_section, fontSize=7.5))],
+                [cust_body],
+            ],
+            colWidths=[page_content_w],
         )
-        thank_row.setStyle(
+        customer_box.setStyle(
             TableStyle(
                 [
-                    ("BOX", (0, 0), (-1, -1), 1, _BORDER),
-                    ("TOPPADDING", (0, 0), (-1, -1), 7),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
+                    ("BOX", (0, 0), (-1, -1), 0.8, _BORDER),
+                    ("BACKGROUND", (0, 0), (-1, 0), _LIGHT_TEAL),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), _PRIMARY),
+                    ("LEFTPADDING", (0, 0), (-1, 0), 8),
+                    ("RIGHTPADDING", (0, 0), (-1, 0), 8),
+                    ("TOPPADDING", (0, 0), (-1, 0), 4),
+                    ("BOTTOMPADDING", (0, 0), (-1, 0), 4),
+                    ("LINEBELOW", (0, 0), (-1, 0), 0.8, _BORDER),
+                    ("LEFTPADDING", (0, 1), (-1, 1), 0),
+                    ("RIGHTPADDING", (0, 1), (-1, 1), 0),
+                    ("TOPPADDING", (0, 1), (-1, 1), 0),
+                    ("BOTTOMPADDING", (0, 1), (-1, 1), 0),
                 ]
             )
         )
-        el.append(thank_row)
-        el.append(Spacer(1, 4 * mm))
+        el.append(customer_box)
+        el.append(Spacer(1, 3 * mm))
 
-        # ── VALUATION (title + grid in one bordered block) ───────────
-        block_col_w = _edge_padded_col_sum(page_content_w, box_h_pad)
-        items_col_sum = block_col_w - (2 * box_h_pad) - (2 * cell_h_pad)
+        thank_txt = (
+            f"Thank you for your enquiry and for considering {company} as your supplier. "
+            "We are pleased to submit our offer:"
+        )
+        if isinstance(pdf_ov, dict) and str(pdf_ov.get("thank_you_row") or "").strip():
+            thank_txt = str(pdf_ov.get("thank_you_row") or "").strip()
+        el.append(
+            Paragraph(
+                f"<i>{escape(thank_txt)}</i>",
+                ParagraphStyle(
+                    "CenterThanks",
+                    parent=s_normal,
+                    alignment=1,
+                    fontSize=8.2,
+                    textColor=_MUTED_TEXT,
+                ),
+            )
+        )
+        el.append(Spacer(1, 3 * mm))
+
+        # ── Line items table ──────────────────────────────────────────
+        items_col_sum = page_content_w - (2 * cell_h_pad)
         val_col_w = _table_col_widths(items_col_sum, [0.08, 0.42, 0.10, 0.10, 0.11, 0.08, 0.11])
 
         header = [
@@ -560,12 +746,13 @@ async def generate_quotation_pdf(
                 TableStyle(
                     [
                         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                        ("FONTSIZE", (0, 0), (-1, -1), 7.5),
+                        ("FONTSIZE", (0, 0), (-1, -1), 8),
+                        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                        ("BACKGROUND", (0, 0), (-1, 0), _PRIMARY),
                         ("ALIGN", (0, 0), (0, -1), "CENTER"),
                         ("ALIGN", (3, 0), (-1, -1), "RIGHT"),
                         ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                        ("GRID", (0, 0), (-1, -1), 0.6, _BORDER),
-                        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, _LIGHT_GRAY]),
+                        ("LINEBELOW", (0, 1), (-1, -1), 0.6, _BORDER),
                         ("LEFTPADDING", (0, 0), (-1, -1), cell_h_pad),
                         ("RIGHTPADDING", (0, 0), (-1, -1), cell_h_pad),
                         ("TOPPADDING", (0, 0), (-1, -1), 6),
@@ -573,27 +760,7 @@ async def generate_quotation_pdf(
                     ]
                 )
             )
-            valuation_block = Table(
-                [
-                    [Paragraph("<b>VALUATION</b>", s_section)],
-                    [items_table],
-                ],
-                colWidths=[block_col_w],
-            )
-            valuation_block.setStyle(
-                TableStyle(
-                    [
-                        ("BOX", (0, 0), (-1, -1), 1, _BORDER),
-                        ("LEFTPADDING", (0, 0), (-1, -1), box_h_pad),
-                        ("RIGHTPADDING", (0, 0), (-1, -1), box_h_pad),
-                        ("TOPPADDING", (0, 0), (0, 0), 6),
-                        ("BOTTOMPADDING", (0, 0), (0, 0), 4),
-                        ("TOPPADDING", (0, 1), (0, 1), 3),
-                        ("BOTTOMPADDING", (0, 1), (0, 1), 6),
-                    ]
-                )
-            )
-            el.append(valuation_block)
+            el.append(items_table)
 
         el.append(Spacer(1, 6 * mm))
 
@@ -660,141 +827,244 @@ async def generate_quotation_pdf(
         else:
             terms_body = [
                 "Any modification to agreed specifications may attract additional commercial charges.",
-                "Third party inspection, if required — extra at actual and in customer's scope.",
+                f"Prices are <b>Ex-works {escape(str(company))}, Pune</b>.",
+                f"<b>GST</b> @ {gst_pct:g}% extra · <b>P&amp;F</b> @ {pf_pct:g}% extra.",
                 (
-                    f"Freight @ {float(freight_rate):g}% — included in valuation total as shown below."
+                    f"<b>Freight</b> @ {float(freight_rate):g}% — included in valuation total as shown below."
                     if freight_amount > 0 and freight_rate is not None
                     else (
-                        f"Freight — {_money_text(freight_amount)} included in valuation total as shown below."
-                        if freight_amount > 0
-                        else f"Freight — {str(freight or 'Extra at actual')}."
+                        f"<b>Freight</b> — to-pay / door delivery, charges in customer's scope."
+                        if freight_amount <= 0
+                        else f"<b>Freight</b> — {_money_text(freight_amount)} included in valuation total as shown below."
                     )
                 ),
-                f"GST @ {gst_pct:g}% — included in valuation total as shown below.",
-                f"P & F @ {pf_pct:g}% — included in valuation total as shown below.",
-                f"Offer validity — {validity_days} days from date of issue.",
-                "Subject to Pune jurisdiction only.",
+                "<b>Warranty:</b> 12 months from date of invoice, against manufacturing defects only.",
+                "Third-party inspection, if required — extra at actual and in customer's scope.",
+                f"<b>Offer validity:</b> up to {validity_days} days from date of issue.",
+                "Subject to <b>Pune jurisdiction</b> only.",
             ]
-        terms_flow: list = [Paragraph("<b>TERMS AND CONDITIONS</b>", s_section)]
+        terms_flow: list = [Paragraph("<b>TERMS &amp; CONDITIONS</b>", s_section)]
         for i, tb in enumerate(terms_body, 1):
-            terms_flow.append(Paragraph(f"{i}. {escape(tb)}", s_terms))
+            terms_flow.append(Paragraph(f"{i}. {tb}", s_terms))
 
-        terms_inner = _edge_padded_col_sum(page_content_w, box_h_pad)
-        terms_left_w, terms_right_w = _table_col_widths(terms_inner, [0.62, 0.38])
+        terms_left_w, terms_right_w = _table_col_widths(page_content_w, [0.60, 0.40])
         fin_edge_pad = 4
-        fin_col_sum = terms_right_w - (2 * box_h_pad) - (2 * fin_edge_pad)
+        fin_col_sum = terms_right_w - (2 * fin_edge_pad)
         fin_col_w = _table_col_widths(fin_col_sum, [0.62, 0.38])
 
         fin_rows: list[list] = [
-            [Paragraph("<b>ITEM TOTAL</b>", s_cell_head), Paragraph(_money_text(item_total), s_cell)],
+            [Paragraph("Sub Total", s_cell), Paragraph(_money_text(item_total), s_cell)],
             [
-                Paragraph(f"<b>P &amp; F CHARGES</b> ({pf_pct:g} %)", s_cell_head),
+                Paragraph(f"P &amp; F Charges ({pf_pct:g}%)", s_cell),
                 Paragraph(_money_text(pf_amount), s_cell),
             ],
         ]
         if freight_amount > 0:
             if freight_rate is not None:
-                freight_label = f"<b>FREIGHT</b> ({float(freight_rate):g} %)"
+                freight_label = f"Freight Charges ({float(freight_rate):g} %)"
                 freight_value = _money_text(freight_amount)
             else:
-                freight_label = "<b>FREIGHT</b>"
+                freight_label = "Freight Charges"
                 freight_value = _money_text(freight_amount)
         else:
-            freight_label = "<b>FREIGHT</b>"
-            freight_value = escape(str(freight or "Extra at actual"))
+            freight_label = "Freight Charges"
+            freight_value = escape(str(freight or "To-pay"))
+        fin_rows.append([Paragraph(freight_label, s_cell), Paragraph(freight_value, s_cell)])
+        fin_rows.append([Paragraph("Other Charges", s_cell), Paragraph(_money_text(0), s_cell)])
+        pre_gst_idx = len(fin_rows)
         fin_rows.append(
             [
-                Paragraph(freight_label, s_cell_head),
-                Paragraph(freight_value, s_cell),
-            ]
-        )
-        fin_rows.append(
-            [
-                Paragraph("<b>SUB TOTAL</b>", s_cell_head),
-                Paragraph(_money_text(taxable_subtotal), s_cell),
+                Paragraph("<b>Total before GST</b>", s_cell),
+                Paragraph(f"<b>{_money_text(taxable_subtotal)}</b>", s_cell),
             ]
         )
         if isinstance(fin_cfg, dict) and fin_cfg.get("igst_applicable") and (igst_amount or 0) > 0:
             igst_rate = fin_cfg.get("igst_rate")
-            igst_label = (
-                f"<b>IGST</b> ({float(igst_rate):g} %)"
-                if igst_rate is not None
-                else "<b>IGST</b>"
-            )
-            fin_rows.append(
-                [Paragraph(igst_label, s_cell_head), Paragraph(_money_text(igst_amount or 0), s_cell)]
-            )
+            igst_label = f"IGST @ {float(igst_rate):g}%" if igst_rate is not None else "IGST"
+            fin_rows.append([Paragraph(igst_label, s_cell), Paragraph(_money_text(igst_amount or 0), s_cell)])
+            fin_rows.append([Paragraph("CGST @ 0%", s_cell), Paragraph(_money_text(0), s_cell)])
+            fin_rows.append([Paragraph("SGST @ 0%", s_cell), Paragraph(_money_text(0), s_cell)])
         elif isinstance(fin_cfg, dict) and (
             fin_cfg.get("cgst_applicable") or fin_cfg.get("sgst_applicable")
         ):
             if fin_cfg.get("cgst_applicable") and (cgst_amount or 0) > 0:
-                fin_rows.append(
-                    [
-                        Paragraph("<b>CGST</b> (9 %)", s_cell_head),
-                        Paragraph(_money_text(cgst_amount or 0), s_cell),
-                    ]
-                )
+                fin_rows.append([Paragraph("CGST @ 9%", s_cell), Paragraph(_money_text(cgst_amount or 0), s_cell)])
             if fin_cfg.get("sgst_applicable") and (sgst_amount or 0) > 0:
-                fin_rows.append(
-                    [
-                        Paragraph("<b>SGST</b> (9 %)", s_cell_head),
-                        Paragraph(_money_text(sgst_amount or 0), s_cell),
-                    ]
-                )
+                fin_rows.append([Paragraph("SGST @ 9%", s_cell), Paragraph(_money_text(sgst_amount or 0), s_cell)])
+            fin_rows.append([Paragraph("IGST @ 0%", s_cell), Paragraph(_money_text(0), s_cell)])
         elif abs(gst_pct - 18.0) < 0.01 and gst_amount > 0:
             half = round(gst_amount / 2.0, 2)
             other = round(gst_amount - half, 2)
-            fin_rows.append(
-                [Paragraph("<b>CGST</b> (9 %)", s_cell_head), Paragraph(_money_text(half), s_cell)]
-            )
-            fin_rows.append(
-                [Paragraph("<b>SGST</b> (9 %)", s_cell_head), Paragraph(_money_text(other), s_cell)]
-            )
+            fin_rows.append([Paragraph("CGST @ 9%", s_cell), Paragraph(_money_text(half), s_cell)])
+            fin_rows.append([Paragraph("SGST @ 9%", s_cell), Paragraph(_money_text(other), s_cell)])
+            fin_rows.append([Paragraph("IGST @ 0%", s_cell), Paragraph(_money_text(0), s_cell)])
         else:
             fin_rows.append(
-                [
-                    Paragraph(f"<b>GST</b> ({gst_pct:g} %)", s_cell_head),
-                    Paragraph(_money_text(gst_amount), s_cell),
-                ]
+                [Paragraph(f"GST ({gst_pct:g} %)", s_cell), Paragraph(_money_text(gst_amount), s_cell)]
             )
+        grand_idx = len(fin_rows)
         fin_rows.append(
             [
-                Paragraph("<b>GRAND TOTAL INR</b>", s_cell_head),
+                Paragraph("<b>GRAND TOTAL (INR)</b>", ParagraphStyle("GrandL", parent=s_cell, fontName="Helvetica-Bold", textColor=colors.white)),
                 Paragraph(
                     f"<b>{escape(_money_text(total_amount))}</b>",
-                    ParagraphStyle("Grand", parent=s_cell, fontName="Helvetica-Bold"),
+                    ParagraphStyle("GrandV", parent=s_cell, fontName="Helvetica-Bold", textColor=colors.white, alignment=TA_RIGHT),
                 ),
             ]
         )
+        fin_header = Paragraph("<b>VALUATION SUMMARY</b>", s_section)
         fin_tbl = Table(fin_rows, colWidths=fin_col_w, hAlign="LEFT")
         fin_tbl.setStyle(
             TableStyle(
                 [
                     ("ALIGN", (1, 0), (1, -1), "RIGHT"),
                     ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                    ("TOPPADDING", (0, 0), (-1, -1), 5),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+                    ("TOPPADDING", (0, 0), (-1, -1), 4),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
                     ("LEFTPADDING", (0, 0), (-1, -1), fin_edge_pad),
                     ("RIGHTPADDING", (0, 0), (-1, -1), fin_edge_pad),
-                    ("GRID", (0, 0), (-1, -1), 0.6, _BORDER),
+                    ("LINEABOVE", (0, pre_gst_idx), (-1, pre_gst_idx), 0.8, _BORDER),
+                    ("BACKGROUND", (0, pre_gst_idx), (-1, pre_gst_idx), _PRE_GST_BG),
+                    ("BACKGROUND", (0, grand_idx), (-1, grand_idx), _PRIMARY),
+                    ("TEXTCOLOR", (0, grand_idx), (-1, grand_idx), colors.white),
                 ]
             )
         )
-        terms_summary = Table([[terms_flow, fin_tbl]], colWidths=[terms_left_w, terms_right_w])
+        totals_flow = [fin_header, fin_tbl]
+        terms_summary = Table([[terms_flow, totals_flow]], colWidths=[terms_left_w, terms_right_w])
         terms_summary.setStyle(
             TableStyle(
                 [
-                    ("BOX", (0, 0), (-1, -1), 1, _BORDER),
-                    ("LINEBEFORE", (1, 0), (1, 0), 1, _BORDER),
                     ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                    ("LEFTPADDING", (0, 0), (-1, -1), box_h_pad),
-                    ("RIGHTPADDING", (0, 0), (-1, -1), box_h_pad),
-                    ("TOPPADDING", (0, 0), (-1, -1), 6),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                    ("TOPPADDING", (0, 0), (-1, -1), 0),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
                 ]
             )
         )
         el.append(terms_summary)
+
+        el.append(Spacer(1, 3 * mm))
+        payment_terms = str(client_config.get("payment_terms") or "").strip()
+        delivery_period = str(client_config.get("delivery_period") or "").strip()
+        if isinstance(pdf_ov, dict):
+            if str(pdf_ov.get("payment_terms") or "").strip():
+                payment_terms = str(pdf_ov.get("payment_terms") or "").strip()
+            if str(pdf_ov.get("delivery_period") or "").strip():
+                delivery_period = str(pdf_ov.get("delivery_period") or "").strip()
+        paydel_cells: list = []
+        paydel_style = ParagraphStyle("PayDel", parent=s_terms, fontSize=7.7, leading=10)
+        if payment_terms:
+            paydel_cells.append(
+                Paragraph(
+                    f'<b><font color="#0F6E56">PAYMENT TERMS</font></b><br/>{escape(payment_terms)}',
+                    paydel_style,
+                )
+            )
+        if delivery_period:
+            paydel_cells.append(
+                Paragraph(
+                    f'<b><font color="#0F6E56">DELIVERY PERIOD</font></b><br/>{escape(delivery_period)}',
+                    paydel_style,
+                )
+            )
+        if paydel_cells:
+            while len(paydel_cells) < 2:
+                paydel_cells.append(Paragraph("", paydel_style))
+            paydel_w = page_content_w / 2.0 - 3
+            paydel_tbl = Table([[paydel_cells[0], paydel_cells[1]]], colWidths=[paydel_w, paydel_w])
+            paydel_tbl.setStyle(
+                TableStyle(
+                    [
+                        ("BACKGROUND", (0, 0), (-1, -1), _LIGHT_TEAL),
+                        ("BOX", (0, 0), (-1, -1), 0.8, _LIGHT_TEAL_BORDER),
+                        ("INNERGRID", (0, 0), (-1, -1), 0.8, _LIGHT_TEAL_BORDER),
+                        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                        ("LEFTPADDING", (0, 0), (-1, -1), 10),
+                        ("RIGHTPADDING", (0, 0), (-1, -1), 10),
+                        ("TOPPADDING", (0, 0), (-1, -1), 6),
+                        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+                    ]
+                )
+            )
+            el.append(paydel_tbl)
+
+        el.append(Spacer(1, 3 * mm))
+        words_para = Paragraph(
+            (
+                f'<font color="#6b7280"><b>AMOUNT IN WORDS:</b></font> '
+                f'<b>{escape(_amount_in_words_inr(total_amount))}</b>'
+            ),
+            ParagraphStyle("Words", parent=s_terms, fontSize=8, leading=11, leftIndent=0),
+        )
+        words_tbl = Table([[words_para]], colWidths=[page_content_w])
+        words_tbl.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#fafbf9")),
+                    ("LINEBEFORE", (0, 0), (0, -1), 3, _PRIMARY),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 10),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 10),
+                    ("TOPPADDING", (0, 0), (-1, -1), 6),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+                ]
+            )
+        )
+        el.append(words_tbl)
+
+        bank_rows = _bank_details_rows(client_config)
+        if bank_rows:
+            el.append(Spacer(1, 3 * mm))
+            bank_cells: list[list] = []
+            row_buf: list = []
+            col_w = page_content_w / 3.0
+            for label, value in bank_rows:
+                cell = Paragraph(
+                    f'<font color="#6b7280">{escape(label)}</font> <b>{escape(value)}</b>',
+                    ParagraphStyle("BankCell", parent=s_terms, fontSize=7.6, leading=11),
+                )
+                row_buf.append(cell)
+                if len(row_buf) == 3:
+                    bank_cells.append(row_buf)
+                    row_buf = []
+            if row_buf:
+                while len(row_buf) < 3:
+                    row_buf.append(Paragraph("", s_terms))
+                bank_cells.append(row_buf)
+            bank_grid = Table(bank_cells, colWidths=[col_w, col_w, col_w])
+            bank_grid.setStyle(
+                TableStyle(
+                    [
+                        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                        ("TOPPADDING", (0, 0), (-1, -1), 2),
+                        ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+                    ]
+                )
+            )
+            bank_box = Table(
+                [
+                    [Paragraph("<b>BANK DETAILS</b>", s_section)],
+                    [bank_grid],
+                ],
+                colWidths=[page_content_w],
+            )
+            bank_box.setStyle(
+                TableStyle(
+                    [
+                        ("BOX", (0, 0), (-1, -1), 0.8, _BORDER),
+                        ("LEFTPADDING", (0, 0), (-1, -1), 10),
+                        ("RIGHTPADDING", (0, 0), (-1, -1), 10),
+                        ("TOPPADDING", (0, 0), (0, 0), 6),
+                        ("BOTTOMPADDING", (0, 0), (0, 0), 4),
+                        ("TOPPADDING", (0, 1), (0, 1), 0),
+                        ("BOTTOMPADDING", (0, 1), (0, 1), 8),
+                    ]
+                )
+            )
+            el.append(bank_box)
 
         # ── Notes ──
         notes = quotation_data.get("professional_notes") or quotation_data.get("notes", "")
@@ -831,7 +1101,7 @@ async def generate_quotation_pdf(
             contact_line = escape(str(pdf_ov.get("footer_contact") or "").strip())
         el.append(Paragraph(contact_line, ParagraphStyle("Contact", parent=s_normal, fontSize=8.5)))
         el.append(Spacer(1, 4 * mm))
-        thanks_line = "Thank You For Your Business !"
+        thanks_line = "Thank You For Your Business!"
         if isinstance(pdf_ov, dict) and str(pdf_ov.get("footer_thanks") or "").strip():
             thanks_line = str(pdf_ov.get("footer_thanks") or "").strip()
         el.append(Paragraph(f"<b>{escape(thanks_line)}</b>", s_thanks))

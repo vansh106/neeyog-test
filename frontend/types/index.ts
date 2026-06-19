@@ -155,6 +155,8 @@ export interface QuotationPdfDisplayOverrides {
   footer_contact?: string
   footer_thanks?: string
   footer_disclaimer?: string
+  payment_terms?: string
+  delivery_period?: string
   valuation_supplement_rows?: QuotationPdfValuationSupplementRow[]
 }
 
@@ -273,6 +275,20 @@ export interface QuotationAuditResponse {
   items: QuotationAuditItem[]
 }
 
+export interface QuotationLineStatusProduct {
+  line_index: number
+  label: string
+  quantity: number
+  line_total: number
+  status_remarks?: string | null
+}
+
+export interface QuotationLineStatusSummary {
+  count: number
+  total_lines: number
+  products: QuotationLineStatusProduct[]
+}
+
 export interface QuotationListItem {
   quotation_id: string
   enquiry_id: string
@@ -289,6 +305,10 @@ export interface QuotationListItem {
   po_total_amount?: number | null
   status: string
   status_remarks?: string | null
+  line_status_summaries: Record<
+    'ongoing' | 'po_received' | 'lost' | 'hold',
+    QuotationLineStatusSummary
+  >
   validity_date?: string | null
   next_follow_up_date?: string | null
   created_at: string

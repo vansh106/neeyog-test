@@ -57,6 +57,7 @@ import {
 } from '@/lib/configuratorProductFlow'
 import {
   formatHoseLength,
+  hoseLengthUnitLabel,
   hosePriceForLength,
   parseHoseLengthInput,
   type HoseLengthUnit,
@@ -1773,10 +1774,10 @@ export function ValveConfigurator({
                   onValueChange={(v) => setHoseLengthUnit(v as HoseLengthUnit)}
                 >
                   <SelectTrigger className="w-[140px] shrink-0">
-                    <SelectValue />
+                    <SelectValue>{hoseLengthUnitLabel(hoseLengthUnit)}</SelectValue>
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="m">meters (m)</SelectItem>
+                    <SelectItem value="m">mtr</SelectItem>
                     <SelectItem value="cm">cm</SelectItem>
                   </SelectContent>
                 </Select>

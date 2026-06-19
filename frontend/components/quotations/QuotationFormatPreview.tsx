@@ -2,17 +2,19 @@
 
 import { Info } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { formatAmountInWordsInr } from '@/lib/formatAmountInWords'
 import { effectiveLinePdfDisplay } from '@/lib/quotationLineDisplay'
 import {
   buildDefaultFooterContact,
-  buildDefaultHeaderLeft,
-  buildDefaultHeaderRight,
+  buildDefaultMetaEnquiryColumn,
+  buildDefaultMetaOwnerColumn,
+  buildDefaultMetaQuoteColumn,
   buildDefaultTerms,
-  defaultCompanyRightBlurb,
   defaultFooterDisclaimer,
   defaultFooterThanks,
   defaultThankYouBanner,
   formatQuotationFreight,
+  resolveBankDetails,
   resolveQuotationPreparer,
 } from '@/lib/quotationPdfDefaults'
 import { cn, formatCurrency, PRICE_TBD_LABEL } from '@/lib/utils'
@@ -21,9 +23,8 @@ import { computeFinancialPreview, hydrateFinancialDraft } from '@/lib/quotationF
 import { quotationFinancialsFromStored } from '@/lib/quotationTotals'
 import type { ClientConfig, EnquiryDetail, Quotation, QuotationLineItem, QuotationPdfDisplayOverrides } from '@/types'
 
-const NAVY = '#1a2744'
-const MAROON = '#7b1f2a'
-const GREEN = '#1f4d2e'
+const TEAL = '#0F6E56'
+const BORDER = '#d7dbe0'
 
 type EnquiryLite = EnquiryDetail | { created_at?: string | null } | null | undefined
 
@@ -36,6 +37,20 @@ type Props = {
   onOpenHistory: (line: QuotationLineItem) => void
 }
 
+function MetaColumn({ rows }: { rows: { label: string; value: string }[] }) {
+  if (rows.length === 0) return <div className="min-h-[48px]" />
+  return (
+    <div className="space-y-1">
+      {rows.map((row, i) => (
+        <div key={i} className="flex justify-between gap-2 text-[11px]">
+          <span className="text-[#6b7280]">{row.label}</span>
+          <span className="font-semibold text-right text-gray-900">{row.value}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 export default function QuotationFormatPreview({
   quotation,
   clientConfig,
@@ -44,7 +59,11 @@ export default function QuotationFormatPreview({
   notesPreviewText,
   onOpenHistory,
 }: Props) {
-  const company = (clientConfig?.company_name || 'PARTH VALVES AND HOSES LLP').toUpperCase()
+  const companyName = clientConfig?.company_name || 'Parth Valves and Hoses LLP'
+  const company = companyName.toUpperCase()
+  const address = (clientConfig?.address || '').trim()
+  const gst = (clientConfig?.gst_number || '').trim()
+  const website = String(clientConfig?.website || '').trim()
 
   const lineItems = quotation.line_items ?? []
   const custCompany = (quotation.client_company || quotation.client_name || 'Customer').trim()
@@ -62,24 +81,22 @@ export default function QuotationFormatPreview({
   const ov = pdfOverrides
   const sessionUser = useAuthStore((s) => s.user)
   const preparer = resolveQuotationPreparer(quotation, sessionUser)
-  const headerLeft =
-    ov?.header_left && ov.header_left.length > 0
-      ? ov.header_left
-      : buildDefaultHeaderLeft(clientConfig, preparer)
-  const headerRight =
-    ov?.header_right && ov.header_right.length > 0
-      ? ov.header_right
-      : buildDefaultHeaderRight(quotation, linkedEnquiry as EnquiryDetail | null | undefined)
+
+  const metaQuote = buildDefaultMetaQuoteColumn(quotation)
+  const metaEnquiry = buildDefaultMetaEnquiryColumn(quotation, linkedEnquiry as EnquiryDetail | null | undefined)
+  const metaOwner = buildDefaultMetaOwnerColumn(clientConfig, preparer)
 
   const thankYouText = (ov?.thank_you_row || '').trim() || defaultThankYouBanner()
-  const companyRightBlurb = (ov?.company_right_text || '').trim() || defaultCompanyRightBlurb()
   const termsList =
-    ov?.terms_items && ov.terms_items.length > 0 ? ov.terms_items : buildDefaultTerms(quotation)
+    ov?.terms_items && ov.terms_items.length > 0 ? ov.terms_items : buildDefaultTerms(quotation, companyName)
   const footerContact =
     (ov?.footer_contact || '').trim() || buildDefaultFooterContact(clientConfig, preparer)
   const footerThanks = (ov?.footer_thanks || '').trim() || defaultFooterThanks()
   const footerDisclaimer = (ov?.footer_disclaimer || '').trim() || defaultFooterDisclaimer()
   const supplementRows = ov?.valuation_supplement_rows?.length ? ov.valuation_supplement_rows : []
+  const paymentTerms = String(ov?.payment_terms || clientConfig?.payment_terms || '').trim()
+  const deliveryPeriod = String(ov?.delivery_period || clientConfig?.delivery_period || '').trim()
+  const bankDetails = resolveBankDetails(clientConfig)
 
   const gstRate = quotation.gst_rate
   const freightAmount = Number(quotation.freight_amount ?? 0)
@@ -124,332 +141,369 @@ export default function QuotationFormatPreview({
   const showFreight =
     configuredPreview == null ||
     (financialDraft!.freightApplicable && configuredPreview.freightAmount > 0)
-  const pfLabel =
-    financialDraft?.pfMode === 'percent' && financialDraft.pfDraft.trim()
-      ? `P & F CHARGES (${financialDraft.pfDraft} %)`
-      : `P & F CHARGES (${quotation.pf_rate} %)`
-  const freightLabel =
-    financialDraft?.freightMode === 'percent' && financialDraft.freightDraft.trim()
-      ? `FREIGHT (${financialDraft.freightDraft} %)`
-      : quotation.freight_rate != null
-        ? `FREIGHT (${quotation.freight_rate} %)`
-        : 'FREIGHT'
 
   const notesBody =
     notesPreviewText !== null ? notesPreviewText : quotation.notes ? String(quotation.notes) : ''
 
+  const bankFields: { label: string; value: string }[] = bankDetails
+    ? [
+        { label: 'Account Name', value: bankDetails.account_name || '' },
+        { label: 'Bank', value: bankDetails.bank || '' },
+        { label: 'Account No.', value: bankDetails.account_no || '' },
+        { label: 'IFSC', value: bankDetails.ifsc || '' },
+        { label: 'Branch', value: bankDetails.branch || '' },
+        { label: 'A/C Type', value: bankDetails.account_type || '' },
+        { label: 'SWIFT', value: bankDetails.swift || '' },
+      ].filter((f) => f.value.trim())
+    : []
+
   return (
     <>
-      <section className="border-b border-[#333] p-3 sm:p-4">
-        <div className="grid grid-cols-1 gap-3 border border-[#333] sm:grid-cols-[96px_1fr]">
-          <div className="flex items-center justify-center border-b border-[#333] p-2 sm:border-b-0 sm:border-r">
+      <section className="border-b p-3 sm:p-4" style={{ borderColor: BORDER }}>
+        <div className="flex items-center justify-between gap-3 border-b-2 pb-3" style={{ borderColor: TEAL }}>
+          <div className="flex min-w-0 items-center gap-3">
             <img
               src="/branding/parth-valve-logo.jpeg"
               alt=""
               width={180}
               height={90}
-              className="h-[58px] w-auto max-w-[170px] object-contain"
+              className="h-[52px] w-auto max-w-[72px] shrink-0 object-contain"
             />
+            <div className="min-w-0">
+              <p className="text-[15px] font-extrabold leading-tight" style={{ color: TEAL }}>
+                {company}
+              </p>
+              {address ? <p className="mt-1 text-[11px] leading-snug text-[#4b5563]">{address}</p> : null}
+              {gst || website ? (
+                <p className="mt-1 text-[10px] text-[#4b5563]">
+                  {gst ? (
+                    <>
+                      <span className="text-[#6b7280]">GSTIN:</span> {gst}
+                    </>
+                  ) : null}
+                  {gst && website ? ' · ' : null}
+                  {website ? (
+                    <>
+                      <span className="text-[#6b7280]">Web:</span> {website}
+                    </>
+                  ) : null}
+                </p>
+              ) : null}
+            </div>
           </div>
-          <div className="p-2 text-center sm:p-3">
-            <p className="text-[17px] font-bold" style={{ color: GREEN }}>
-              {company}
-            </p>
-            <p className="text-[16px] font-bold tracking-wide" style={{ color: NAVY }}>
-              QUOTATION
-            </p>
-          </div>
+          <p className="shrink-0 text-[22px] font-extrabold tracking-wide text-[#1f2733] sm:text-[26px]">
+            QUOTATION
+          </p>
         </div>
 
-        <div className="mt-2 grid grid-cols-1 gap-3 border border-[#333] p-2 text-[11px] sm:grid-cols-2 sm:p-3">
-          <div className="space-y-0.5">
-            {headerLeft.map((row, i) => (
-              <p key={`hl-${i}`}>
-                <span className="inline-block min-w-[68px] font-semibold">{row.label}</span>: {row.value}
-              </p>
-            ))}
+        <div
+          className="mt-3 grid grid-cols-1 divide-y rounded-md border bg-[#fcfdfc] sm:grid-cols-3 sm:divide-x sm:divide-y-0"
+          style={{ borderColor: BORDER }}
+        >
+          <div className="p-3">
+            <MetaColumn rows={metaQuote} />
           </div>
-          <div className="space-y-0.5">
-            {headerRight.map((row, i) => (
-              <p key={`hr-${i}`} className={row.label.includes('Enquiry') ? 'break-all' : ''}>
-                <span className="inline-block min-w-[92px] font-semibold">{row.label}</span>
-                {row.label === 'Quotation No' ? (
-                  <>
-                    : <span className="font-mono">{row.value}</span>
-                  </>
-                ) : (
-                  <> : {row.value}</>
-                )}
-              </p>
-            ))}
+          <div className="p-3">
+            <MetaColumn rows={metaEnquiry} />
           </div>
-        </div>
-      </section>
-
-      <section className="border-b border-[#333]">
-        <div className="grid grid-cols-1 gap-0 border-b border-[#333] text-[11px] sm:grid-cols-2">
-          <div className="border-b border-[#333] p-2 sm:border-b-0 sm:border-r">
-            <p className="font-bold uppercase tracking-wide" style={{ color: NAVY }}>
-              COMPANY
-            </p>
-            <p className="mt-1 text-[12px] font-bold text-gray-900">{custCompany}</p>
-            {concernDisplay && (
-              <p className="mt-1">
-                <span className="font-semibold">Concern Person</span>: {concernDisplay}
-              </p>
-            )}
-            {quotation.client_phone && (
-              <p className="mt-1">
-                <span className="font-semibold">Contact No.</span>: {quotation.client_phone}
-              </p>
-            )}
-            {quotation.client_email && (
-              <p className="mt-1">
-                <span className="font-semibold">E-Mail</span>: {quotation.client_email}
-              </p>
-            )}
-            {(ov?.company_left_extra || []).map((row, i) => (
-              <p key={`cex-${i}`} className="mt-1 whitespace-pre-line">
-                <span className="font-semibold">{row.label}</span>: {row.value}
-              </p>
-            ))}
-          </div>
-          <div className="p-2">
-            <p className="whitespace-pre-line text-[11px] text-[#6b7280] sm:mt-5">{companyRightBlurb}</p>
+          <div className="p-3">
+            <MetaColumn rows={metaOwner} />
           </div>
         </div>
       </section>
 
-      <section className="border-b border-[#333] px-2 py-2 text-center text-[11px] text-gray-800">
-        <p className="border border-[#333] bg-white px-2 py-2">{thankYouText}</p>
+      <section className="border-b p-3 sm:p-4" style={{ borderColor: BORDER }}>
+        <div className="overflow-hidden rounded-md border" style={{ borderColor: BORDER }}>
+          <div className="px-3 py-1.5 text-[11px] font-extrabold tracking-wide" style={{ backgroundColor: '#f0f6f3', color: TEAL }}>
+            QUOTATION FOR
+          </div>
+          <div className="grid grid-cols-1 gap-3 p-3 text-[11px] sm:grid-cols-2">
+            <div>
+              <p className="text-[13px] font-extrabold text-[#1f2733]">{custCompany}</p>
+              {(ov?.company_left_extra || []).map((row, i) => (
+                <p key={`cex-${i}`} className="mt-1 whitespace-pre-line text-[#4b5563]">
+                  <span className="text-[#6b7280]">{row.label}</span> {row.value}
+                </p>
+              ))}
+            </div>
+            <div className="space-y-1">
+              {concernDisplay ? (
+                <p>
+                  <span className="text-[#6b7280]">Kind Attn.</span> {concernDisplay}
+                </p>
+              ) : null}
+              {quotation.client_phone ? (
+                <p>
+                  <span className="text-[#6b7280]">Contact</span> {quotation.client_phone}
+                </p>
+              ) : null}
+              {quotation.client_email ? (
+                <p>
+                  <span className="text-[#6b7280]">Email</span> {quotation.client_email}
+                </p>
+              ) : null}
+            </div>
+          </div>
+        </div>
+
+        <p className="mt-3 text-center text-[11px] italic text-[#4b5563]">{thankYouText}</p>
       </section>
 
-      <section className="border-b border-[#333] p-2">
-        <p className="mb-2 text-[11px] font-bold uppercase tracking-wide" style={{ color: NAVY }}>
-          VALUATION
-        </p>
-        <div className="overflow-x-auto border border-[#333]">
-        <table className="w-full min-w-[640px] border-collapse text-left text-[11px]">
-          <thead>
-            <tr style={{ backgroundColor: NAVY }} className="text-white">
-              <th className="px-2 py-2 font-bold">Sr.No</th>
-              <th className="px-2 py-2 font-bold">Description</th>
-              <th className="px-2 py-2 font-bold">Size</th>
-              <th className="px-2 py-2 text-right font-bold">Qty</th>
-              <th className="px-2 py-2 text-right font-bold">Rate</th>
-              <th className="px-2 py-2 text-right font-bold">Disc.%</th>
-              <th className="px-2 py-2 text-right font-bold">Total</th>
-            </tr>
-          </thead>
-          <tbody>
-            {lineItems.map((line: QuotationLineItem, idx: number) => {
-              const pdfDisp = effectiveLinePdfDisplay(line, idx, pdfOverrides)
-              const disc =
-                typeof line.customer_discount_pct === 'number' && Number.isFinite(line.customer_discount_pct)
-                  ? line.customer_discount_pct
-                  : 0
-              const qtyCell = `${line.quantity} ${line.unit || 'Nos'}`.trim()
-              return (
-                <tr
-                  key={idx}
-                  className={cn(
-                    'border-b border-[#333] align-top',
-                    idx % 2 === 1 ? 'bg-[#f0f2ee]' : 'bg-white',
-                  )}
-                >
-                  <td className="px-2 py-2 align-top">
-                    <div className="flex items-start gap-1">
-                      <span className="tabular-nums">{idx + 1}</span>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        className="h-7 w-7 shrink-0 p-0 text-[#6b7280] hover:text-gray-900"
-                        onClick={() => onOpenHistory(line)}
-                        title="View quote history"
-                      >
-                        <Info className="size-4" />
-                        <span className="sr-only">View quote history</span>
-                      </Button>
-                    </div>
-                  </td>
-                  <td className="max-w-[280px] whitespace-pre-line px-2 py-2 align-top text-gray-900">
-                    {pdfDisp.description}
-                  </td>
-                  <td className="whitespace-pre-line px-2 py-2 align-top text-gray-700">{pdfDisp.size}</td>
-                  <td className="px-2 py-2 text-right font-mono align-top">{qtyCell}</td>
-                  <td className="px-2 py-2 text-right font-mono align-top">
-                    {line.price_tbd || line.unit_price <= 0 ? PRICE_TBD_LABEL : line.unit_price.toFixed(2)}
-                  </td>
-                  <td className="px-2 py-2 text-right font-mono align-top">{disc ? String(disc) : '0'}</td>
-                  <td className="px-2 py-2 text-right font-mono font-medium align-top">
-                    {line.price_tbd || line.unit_price <= 0
-                      ? PRICE_TBD_LABEL
-                      : (line.line_total ?? line.total ?? 0).toLocaleString('en-IN', {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        })}
-                  </td>
-                </tr>
-              )
-            })}
-            {supplementRows.map((srow, j) => {
-              const idx = lineItems.length + j
-              const sr = (srow.sr || '').trim() || '—'
-              const c = (v: string | undefined) => (v && v.trim() ? v.trim() : '—')
-              return (
-                <tr
-                  key={`sup-${j}`}
-                  className={cn(
-                    'border-b border-[#333] align-top',
-                    idx % 2 === 1 ? 'bg-[#f0f2ee]' : 'bg-white',
-                  )}
-                >
-                  <td className="px-2 py-2 align-top font-mono tabular-nums">{sr}</td>
-                  <td className="max-w-[280px] whitespace-pre-line px-2 py-2 align-top text-gray-900">
-                    {c(srow.description)}
-                  </td>
-                  <td className="whitespace-pre-line px-2 py-2 align-top text-gray-700">{c(srow.size)}</td>
-                  <td className="px-2 py-2 text-right font-mono align-top">{c(srow.qty)}</td>
-                  <td className="px-2 py-2 text-right font-mono align-top">{c(srow.rate)}</td>
-                  <td className="px-2 py-2 text-right font-mono align-top">{c(srow.disc)}</td>
-                  <td className="px-2 py-2 text-right font-mono align-top">{c(srow.total)}</td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      </div>
+      <section className="border-b p-2 sm:p-3" style={{ borderColor: BORDER }}>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[640px] border-collapse text-left text-[11px]">
+            <thead>
+              <tr style={{ backgroundColor: TEAL }} className="text-white">
+                <th className="px-2 py-2 font-bold">Sr.No</th>
+                <th className="px-2 py-2 font-bold">Description</th>
+                <th className="px-2 py-2 font-bold">Size</th>
+                <th className="px-2 py-2 text-right font-bold">Qty</th>
+                <th className="px-2 py-2 text-right font-bold">Rate</th>
+                <th className="px-2 py-2 text-right font-bold">Disc.%</th>
+                <th className="px-2 py-2 text-right font-bold">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {lineItems.map((line: QuotationLineItem, idx: number) => {
+                const pdfDisp = effectiveLinePdfDisplay(line, idx, pdfOverrides)
+                const disc =
+                  typeof line.customer_discount_pct === 'number' && Number.isFinite(line.customer_discount_pct)
+                    ? line.customer_discount_pct
+                    : 0
+                const qtyCell = `${line.quantity} ${line.unit || 'Nos'}`.trim()
+                return (
+                  <tr key={idx} className="border-b align-top" style={{ borderColor: BORDER }}>
+                    <td className="px-2 py-2 align-top">
+                      <div className="flex items-start gap-1">
+                        <span className="tabular-nums">{idx + 1}</span>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          className="h-7 w-7 shrink-0 p-0 text-[#6b7280] hover:text-gray-900"
+                          onClick={() => onOpenHistory(line)}
+                          title="View quote history"
+                        >
+                          <Info className="size-4" />
+                          <span className="sr-only">View quote history</span>
+                        </Button>
+                      </div>
+                    </td>
+                    <td className="max-w-[280px] whitespace-pre-line px-2 py-2 align-top text-gray-900">
+                      {pdfDisp.description}
+                    </td>
+                    <td className="whitespace-pre-line px-2 py-2 align-top text-gray-700">{pdfDisp.size}</td>
+                    <td className="px-2 py-2 text-right font-mono align-top">{qtyCell}</td>
+                    <td className="px-2 py-2 text-right font-mono align-top">
+                      {line.price_tbd || line.unit_price <= 0 ? PRICE_TBD_LABEL : line.unit_price.toFixed(2)}
+                    </td>
+                    <td className="px-2 py-2 text-right font-mono align-top">{disc ? String(disc) : '0'}</td>
+                    <td className="px-2 py-2 text-right font-mono font-medium align-top">
+                      {line.price_tbd || line.unit_price <= 0
+                        ? PRICE_TBD_LABEL
+                        : (line.line_total ?? line.total ?? 0).toLocaleString('en-IN', {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })}
+                    </td>
+                  </tr>
+                )
+              })}
+              {supplementRows.map((srow, j) => {
+                const idx = lineItems.length + j
+                const sr = (srow.sr || '').trim() || '—'
+                const c = (v: string | undefined) => (v && v.trim() ? v.trim() : '—')
+                return (
+                  <tr key={`sup-${j}`} className="border-b align-top" style={{ borderColor: BORDER }}>
+                    <td className="px-2 py-2 align-top font-mono tabular-nums">{sr}</td>
+                    <td className="max-w-[280px] whitespace-pre-line px-2 py-2 align-top text-gray-900">
+                      {c(srow.description)}
+                    </td>
+                    <td className="whitespace-pre-line px-2 py-2 align-top text-gray-700">{c(srow.size)}</td>
+                    <td className="px-2 py-2 text-right font-mono align-top">{c(srow.qty)}</td>
+                    <td className="px-2 py-2 text-right font-mono align-top">{c(srow.rate)}</td>
+                    <td className="px-2 py-2 text-right font-mono align-top">{c(srow.disc)}</td>
+                    <td className="px-2 py-2 text-right font-mono align-top">{c(srow.total)}</td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
       </section>
 
-      <section className="border-b border-[#333]">
-        <div className="grid grid-cols-1 sm:grid-cols-[1.45fr_1fr]">
-          <div className="border-b border-[#333] p-2 sm:border-b-0 sm:border-r">
-            <p className="mb-2 text-[11px] font-bold uppercase tracking-wide" style={{ color: NAVY }}>
-              TERMS AND CONDITIONS
+      <section className="border-b p-3 sm:p-4" style={{ borderColor: BORDER }}>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-[1.5fr_1fr]">
+          <div>
+            <p className="mb-2 border-b pb-1 text-[11px] font-extrabold tracking-wide" style={{ color: TEAL, borderColor: BORDER }}>
+              TERMS &amp; CONDITIONS
             </p>
-            <ol className="list-decimal space-y-1 pl-5 text-[11px] leading-relaxed text-gray-800">
+            <ol className="list-decimal space-y-1 pl-5 text-[11px] leading-relaxed text-[#4b5563]">
               {termsList.map((t, i) => (
                 <li key={i}>{t}</li>
               ))}
             </ol>
           </div>
-          <div className="p-2">
+          <div>
+            <p className="mb-2 border-b pb-1 text-[11px] font-extrabold tracking-wide" style={{ color: TEAL, borderColor: BORDER }}>
+              VALUATION SUMMARY
+            </p>
             <table className="w-full border-collapse text-[11px]">
-          <tbody>
-                <tr className="border border-[#333] border-t-0 bg-white">
-              <td className="px-2 py-1.5 font-bold" style={{ width: '62%' }}>
-                ITEM TOTAL
-              </td>
-              <td className="px-2 py-1.5 text-right font-mono">
-                ₹{financials.itemTotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-              </td>
-            </tr>
-            {showPf && (
-                <tr className="border border-[#333] border-t-0 bg-white">
-              <td className="px-2 py-1.5 font-bold">{pfLabel}</td>
-              <td className="px-2 py-1.5 text-right font-mono">
-                ₹{financials.pfAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-              </td>
-            </tr>
-            )}
-            {showFreight && (
-                <tr className="border border-[#333] border-t-0 bg-white">
-              <td className="px-2 py-1.5 font-bold">{freightLabel}</td>
-              <td className="px-2 py-1.5 text-right text-gray-800">
-                {configuredPreview != null
-                  ? formatCurrency(configuredPreview.freightAmount)
-                  : quotation.freight_amount != null && quotation.freight_amount > 0
-                    ? formatCurrency(quotation.freight_amount)
-                    : formatQuotationFreight(quotation)}
-              </td>
-            </tr>
-            )}
-                <tr className="border border-[#333] border-t-0 bg-white">
-              <td className="px-2 py-1.5 font-bold">SUB TOTAL</td>
-              <td className="px-2 py-1.5 text-right font-mono">
-                ₹{financials.taxableSubtotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-              </td>
-            </tr>
-            {showCgst && (
-                    <tr className="border border-[#333] border-t-0 bg-white">
-                  <td className="px-2 py-1.5 font-bold">
-                    CGST
-                    {financialDraft?.cgstMode === 'percent' && financialDraft.cgstDraft.trim()
-                      ? ` (${financialDraft.cgstDraft} %)`
-                      : ' (9 %)'}
-                  </td>
-                  <td className="px-2 py-1.5 text-right font-mono">
-                    ₹{cgst.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              <tbody>
+                <tr>
+                  <td className="px-2 py-1 text-[#4b5563]">Sub Total</td>
+                  <td className="px-2 py-1 text-right font-mono">
+                    ₹{financials.itemTotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </td>
                 </tr>
-            )}
-            {showSgst && (
-                    <tr className="border border-[#333] border-t-0 bg-white">
-                  <td className="px-2 py-1.5 font-bold">
-                    SGST
-                    {financialDraft?.sgstMode === 'percent' && financialDraft.sgstDraft.trim()
-                      ? ` (${financialDraft.sgstDraft} %)`
-                      : ' (9 %)'}
-                  </td>
-                  <td className="px-2 py-1.5 text-right font-mono">
-                    ₹{sgst.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  </td>
-                </tr>
-            )}
-            {showIgst && (
-                    <tr className="border border-[#333] border-t-0 bg-white">
-                  <td className="px-2 py-1.5 font-bold">
-                    IGST
-                    {financialDraft?.igstMode === 'percent' && financialDraft.igstDraft.trim()
-                      ? ` (${financialDraft.igstDraft} %)`
-                      : ' (18 %)'}
-                  </td>
-                  <td className="px-2 py-1.5 text-right font-mono">
-                    ₹{igst.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                {showPf ? (
+                  <tr>
+                    <td className="px-2 py-1 text-[#4b5563]">P &amp; F Charges ({quotation.pf_rate}%)</td>
+                    <td className="px-2 py-1 text-right font-mono">
+                      ₹{financials.pfAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </td>
+                  </tr>
+                ) : null}
+                <tr>
+                  <td className="px-2 py-1 text-[#4b5563]">Freight Charges</td>
+                  <td className="px-2 py-1 text-right text-gray-800">
+                    {showFreight
+                      ? configuredPreview != null
+                        ? formatCurrency(configuredPreview.freightAmount)
+                        : quotation.freight_amount != null && quotation.freight_amount > 0
+                          ? formatCurrency(quotation.freight_amount)
+                          : formatQuotationFreight(quotation)
+                      : quotation.freight_note || 'To-pay'}
                   </td>
                 </tr>
-            )}
-            {!showCgst && !showSgst && !showIgst && financials.gstAmount > 0 && (
-                  <tr className="border border-[#333] border-t-0 bg-white">
-                <td className="px-2 py-1.5 font-bold">GST ({gstRate} %)</td>
-                <td className="px-2 py-1.5 text-right font-mono">
-                  ₹{financials.gstAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </td>
-              </tr>
-            )}
-                <tr className="border border-[#333] border-t-0 bg-[#f9faf7]">
-              <td className="px-2 py-2 font-bold">GRAND TOTAL INR</td>
-              <td className="px-2 py-2 text-right text-base font-bold font-mono" style={{ color: GREEN }}>
-                ₹{financials.grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-              </td>
-            </tr>
-          </tbody>
-        </table>
+                <tr>
+                  <td className="px-2 py-1 text-[#4b5563]">Other Charges</td>
+                  <td className="px-2 py-1 text-right font-mono">₹0.00</td>
+                </tr>
+                <tr className="bg-[#eef3f1] font-semibold">
+                  <td className="px-2 py-1.5">Total before GST</td>
+                  <td className="px-2 py-1.5 text-right font-mono">
+                    ₹{financials.taxableSubtotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </td>
+                </tr>
+                {showCgst ? (
+                  <tr>
+                    <td className="px-2 py-1">CGST @ 9%</td>
+                    <td className="px-2 py-1 text-right font-mono">
+                      ₹{cgst.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </td>
+                  </tr>
+                ) : null}
+                {showSgst ? (
+                  <tr>
+                    <td className="px-2 py-1">SGST @ 9%</td>
+                    <td className="px-2 py-1 text-right font-mono">
+                      ₹{sgst.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </td>
+                  </tr>
+                ) : null}
+                {showIgst ? (
+                  <tr>
+                    <td className="px-2 py-1">IGST @ 18%</td>
+                    <td className="px-2 py-1 text-right font-mono">
+                      ₹{igst.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </td>
+                  </tr>
+                ) : null}
+                {!showCgst && !showSgst && !showIgst && financials.gstAmount > 0 ? (
+                  <tr>
+                    <td className="px-2 py-1">GST ({gstRate}%)</td>
+                    <td className="px-2 py-1 text-right font-mono">
+                      ₹{financials.gstAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </td>
+                  </tr>
+                ) : null}
+                {(showCgst || showSgst) && !showIgst ? (
+                  <tr>
+                    <td className="px-2 py-1">IGST @ 0%</td>
+                    <td className="px-2 py-1 text-right font-mono">₹0.00</td>
+                  </tr>
+                ) : null}
+                <tr style={{ backgroundColor: TEAL }} className="font-extrabold text-white">
+                  <td className="px-2 py-2">GRAND TOTAL (INR)</td>
+                  <td className="px-2 py-2 text-right font-mono">
+                    ₹{financials.grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
           </div>
-      </div>
+        </div>
       </section>
 
-      {notesBody ? (
-        <section className="border-b border-[#333] p-2">
-          <div className="rounded-sm border border-[#333] bg-[#F9FAF7] p-3">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-[11px] font-bold uppercase tracking-wide" style={{ color: NAVY }}>
-              Notes
-            </p>
-            {notesPreviewText !== null && (
-              <span className="rounded-full bg-brand-gold-100 px-2 py-0.5 text-[10px] font-medium text-brand-gold-800">
-                PDF wording
-              </span>
-            )}
-          </div>
-          <p className="mt-2 whitespace-pre-wrap text-[12px] text-gray-800">{notesBody}</p>
+      {paymentTerms || deliveryPeriod ? (
+        <section className="border-b px-3 py-2 sm:px-4" style={{ borderColor: BORDER }}>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {paymentTerms ? (
+              <div className="rounded-md border px-3 py-2 text-[11px] text-[#4b5563]" style={{ backgroundColor: '#f0f6f3', borderColor: '#cfe3da' }}>
+                <p className="font-extrabold tracking-wide" style={{ color: TEAL }}>
+                  PAYMENT TERMS
+                </p>
+                <p className="mt-1">{paymentTerms}</p>
+              </div>
+            ) : null}
+            {deliveryPeriod ? (
+              <div className="rounded-md border px-3 py-2 text-[11px] text-[#4b5563]" style={{ backgroundColor: '#f0f6f3', borderColor: '#cfe3da' }}>
+                <p className="font-extrabold tracking-wide" style={{ color: TEAL }}>
+                  DELIVERY PERIOD
+                </p>
+                <p className="mt-1">{deliveryPeriod}</p>
+              </div>
+            ) : null}
           </div>
         </section>
       ) : null}
 
-      <section className="p-3">
+      <section className="border-b px-3 py-2 sm:px-4" style={{ borderColor: BORDER }}>
+        <div className="rounded-r-md border-l-[3px] bg-[#fafbf9] px-3 py-2 text-[11px]" style={{ borderColor: TEAL }}>
+          <span className="text-[10px] uppercase tracking-wide text-[#6b7280]">Amount in words: </span>
+          <span className="font-bold text-[#1f2733]">{formatAmountInWordsInr(financials.grandTotal)}</span>
+        </div>
+      </section>
+
+      {bankFields.length > 0 ? (
+        <section className="border-b px-3 py-2 sm:px-4" style={{ borderColor: BORDER }}>
+          <div className="rounded-md border p-3" style={{ borderColor: BORDER }}>
+            <p className="mb-2 text-[11px] font-extrabold tracking-wide" style={{ color: TEAL }}>
+              BANK DETAILS
+            </p>
+            <div className="grid grid-cols-1 gap-1 sm:grid-cols-3">
+              {bankFields.map((field) => (
+                <p key={field.label} className="text-[11px] leading-relaxed">
+                  <span className="text-[#6b7280]">{field.label}</span>{' '}
+                  <span className="font-bold text-[#1f2733]">{field.value}</span>
+                </p>
+              ))}
+            </div>
+          </div>
+        </section>
+      ) : null}
+
+      {notesBody ? (
+        <section className="border-b p-3 sm:p-4" style={{ borderColor: BORDER }}>
+          <div className="rounded-sm border bg-[#F9FAF7] p-3" style={{ borderColor: BORDER }}>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-[11px] font-extrabold tracking-wide" style={{ color: TEAL }}>
+                Notes
+              </p>
+              {notesPreviewText !== null ? (
+                <span className="rounded-full bg-brand-gold-100 px-2 py-0.5 text-[10px] font-medium text-brand-gold-800">
+                  PDF wording
+                </span>
+              ) : null}
+            </div>
+            <p className="mt-2 whitespace-pre-wrap text-[12px] text-gray-800">{notesBody}</p>
+          </div>
+        </section>
+      ) : null}
+
+      <section className="p-3 sm:p-4">
         <p className="whitespace-pre-line text-[11px] text-gray-800">{footerContact}</p>
-        <p className="mt-3 text-center text-[13px] font-bold" style={{ color: GREEN }}>
+        <p className="mt-3 text-center text-[13px] font-extrabold tracking-wide" style={{ color: TEAL }}>
           {footerThanks}
         </p>
         <p className="mt-4 text-center text-[10px] italic text-[#6b7280]">{footerDisclaimer}</p>

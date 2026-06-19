@@ -38,7 +38,12 @@ export function filterQuotationsLocal(rows: QuotationListItem[], f: LocalQuotati
   }
 
   if (f.status) {
-    out = out.filter((row) => row.status === f.status)
+    out = out.filter((row) => {
+      const key = f.status as keyof typeof row.line_status_summaries
+      const block = row.line_status_summaries?.[key]
+      if (block && block.count > 0) return true
+      return row.status === f.status
+    })
   }
 
   if (f.dateFrom || f.dateTo) {
