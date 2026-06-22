@@ -191,7 +191,7 @@ async def list_quotations_route(
     offset: int = Query(0),
     search: str | None = Query(None, description="Quote number or client (partial)"),
     client_name: str | None = Query(None, description="Filter by client name or company (partial)"),
-    status: str | None = Query(None, description="po_received | ongoing | lost | hold"),
+    status: str | None = Query(None, description="po_received | ongoing | lost"),
     date_from: date | None = Query(None, description="Created on/after (UTC date)"),
     date_to: date | None = Query(None, description="Created on/before (UTC date)"),
     db: AsyncSession = Depends(get_db),

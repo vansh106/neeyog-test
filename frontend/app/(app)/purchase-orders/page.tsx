@@ -118,7 +118,8 @@ export default function PurchaseOrdersPage() {
               <th className="px-4 py-3">Type / quote ref</th>
               <th className="px-4 py-3">Category</th>
               <th className="px-4 py-3">Item desc</th>
-              <th className="px-4 py-3 text-right">PO ₹/SO no.</th>
+              <th className="px-4 py-3 text-right">PO ₹</th>
+              <th className="px-4 py-3">SO no.</th>
               <th className="px-4 py-3">User</th>
               <th className="px-4 py-3 text-right">Actions</th>
             </tr>
@@ -127,14 +128,14 @@ export default function PurchaseOrdersPage() {
             {isPending &&
               Array.from({ length: 5 }).map((_, i) => (
                 <tr key={i} className="border-t border-[#E2E6DC]">
-                  <td colSpan={8} className="px-4 py-3">
+                  <td colSpan={9} className="px-4 py-3">
                     <Skeleton className="h-4 w-full" />
                   </td>
                 </tr>
               ))}
             {!isPending && list.length === 0 && (
               <tr>
-                <td colSpan={8}>
+                <td colSpan={9}>
                   <EmptyState
                     icon={ClipboardList}
                     title="No purchase orders"
@@ -222,9 +223,9 @@ function PoRow({
       </td>
       <td className="px-4 py-3 text-right">
         <p className="font-mono font-medium">{formatCurrency(po.total_amount)}</p>
-        {po.so_number ? (
-          <p className="mt-0.5 text-[12px] text-surface-muted">{po.so_number}</p>
-        ) : null}
+      </td>
+      <td className="px-4 py-3 font-mono text-[12px] text-gray-900">
+        {po.so_number || <span className="text-surface-muted">—</span>}
       </td>
       <td className="px-4 py-3 text-[12px] text-surface-muted">{po.created_by_name || '—'}</td>
       <td className="px-4 py-3">

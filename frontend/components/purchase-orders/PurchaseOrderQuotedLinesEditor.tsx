@@ -11,7 +11,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import PoQuotedLineNegotiationFields from '@/components/purchase-orders/PoQuotedLineNegotiationFields'
 import { purchaseOrdersApi } from '@/lib/api'
 import {
   buildQuotedLineStateFromPo,
@@ -136,44 +136,20 @@ export default function PurchaseOrderQuotedLinesEditor({
                             Quoted: {formatCurrency(line.unit_price)} × {line.quantity} {line.unit || 'Nos'}
                           </p>
                           {st.selected && (
-                            <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                              <label className="text-[12px]">
-                                <span className="text-surface-muted">Final unit price (₹)</span>
-                                <Input
-                                  type="number"
-                                  min={0}
-                                  step="0.01"
-                                  value={st.unit_price}
-                                  onChange={(e) =>
-                                    setLineState((prev) => ({
-                                      ...prev,
-                                      [idx]: {
-                                        ...prev[idx],
-                                        unit_price: Number(e.target.value) || 0,
-                                      },
-                                    }))
-                                  }
-                                />
-                              </label>
-                              <label className="text-[12px]">
-                                <span className="text-surface-muted">Quantity</span>
-                                <Input
-                                  type="number"
-                                  min={1}
-                                  step={1}
-                                  value={st.quantity}
-                                  onChange={(e) =>
-                                    setLineState((prev) => ({
-                                      ...prev,
-                                      [idx]: {
-                                        ...prev[idx],
-                                        quantity: Math.max(1, Number(e.target.value) || 1),
-                                      },
-                                    }))
-                                  }
-                                />
-                              </label>
-                            </div>
+                            <PoQuotedLineNegotiationFields
+                              value={{
+                                quantity: st.quantity,
+                                unit_price: st.unit_price,
+                                base_unit_price: st.base_unit_price,
+                                customer_discount_pct: st.customer_discount_pct,
+                              }}
+                              onChange={(next) =>
+                                setLineState((prev) => ({
+                                  ...prev,
+                                  [idx]: { ...prev[idx], ...next },
+                                }))
+                              }
+                            />
                           )}
                         </div>
                       </label>

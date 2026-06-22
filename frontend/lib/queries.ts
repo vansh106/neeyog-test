@@ -10,6 +10,7 @@ import {
   usersApi,
   mailboxesApi,
   analyticsApi,
+  type ConversionPipelineGroupBy,
 } from './api'
 import { Permissions } from '@/lib/permissions'
 import { useAuthStore } from '@/stores/authStore'
@@ -317,6 +318,153 @@ export function usePipelineMonthEnquiries(year: number, month: number, userId?: 
     queryFn: () =>
       analyticsApi.pipelineMonthEnquiries(year, month, userId ? { user_id: userId } : undefined),
     enabled: authed,
+    staleTime: 30000,
+  })
+}
+
+export function useConversionPipelineReport(params: {
+  dateFrom: string
+  dateTo: string
+  groupBy: ConversionPipelineGroupBy
+  userId?: string
+}) {
+  const authed = useAuthStore((s) => Boolean(s.access_token))
+  const enabled = authed && Boolean(params.dateFrom && params.dateTo)
+  return useQuery({
+    queryKey: [
+      'analytics',
+      'conversion-pipeline-report',
+      params.userId ?? 'self',
+      params.dateFrom,
+      params.dateTo,
+      params.groupBy,
+    ],
+    queryFn: () =>
+      analyticsApi.conversionPipelineReport({
+        date_from: params.dateFrom,
+        date_to: params.dateTo,
+        group_by: params.groupBy,
+        ...(params.userId ? { user_id: params.userId } : {}),
+      }),
+    enabled,
+    staleTime: 30000,
+  })
+}
+
+export function useQuotationRegisterReport(params: { dateFrom: string; dateTo: string; userId?: string }) {
+  const authed = useAuthStore((s) => Boolean(s.access_token))
+  const enabled = authed && Boolean(params.dateFrom && params.dateTo)
+  return useQuery({
+    queryKey: [
+      'analytics',
+      'quotation-register-report',
+      params.userId ?? 'self',
+      params.dateFrom,
+      params.dateTo,
+    ],
+    queryFn: () =>
+      analyticsApi.quotationRegisterReport({
+        date_from: params.dateFrom,
+        date_to: params.dateTo,
+        ...(params.userId ? { user_id: params.userId } : {}),
+      }),
+    enabled,
+    staleTime: 30000,
+  })
+}
+
+export function useWinLossAnalysisReport(params: { dateFrom: string; dateTo: string; userId?: string }) {
+  const authed = useAuthStore((s) => Boolean(s.access_token))
+  const enabled = authed && Boolean(params.dateFrom && params.dateTo)
+  return useQuery({
+    queryKey: [
+      'analytics',
+      'win-loss-analysis-report',
+      params.userId ?? 'self',
+      params.dateFrom,
+      params.dateTo,
+    ],
+    queryFn: () =>
+      analyticsApi.winLossAnalysisReport({
+        date_from: params.dateFrom,
+        date_to: params.dateTo,
+        ...(params.userId ? { user_id: params.userId } : {}),
+      }),
+    enabled,
+    staleTime: 30000,
+  })
+}
+
+export function useSalesPerformanceByUserReport(params: {
+  dateFrom: string
+  dateTo: string
+  userId?: string
+}) {
+  const authed = useAuthStore((s) => Boolean(s.access_token))
+  const enabled = authed && Boolean(params.dateFrom && params.dateTo)
+  return useQuery({
+    queryKey: [
+      'analytics',
+      'sales-performance-by-user',
+      params.userId ?? 'self',
+      params.dateFrom,
+      params.dateTo,
+    ],
+    queryFn: () =>
+      analyticsApi.salesPerformanceByUserReport({
+        date_from: params.dateFrom,
+        date_to: params.dateTo,
+        ...(params.userId ? { user_id: params.userId } : {}),
+      }),
+    enabled,
+    staleTime: 30000,
+  })
+}
+
+export function useSourceRoiReport(params: { dateFrom: string; dateTo: string; userId?: string }) {
+  const authed = useAuthStore((s) => Boolean(s.access_token))
+  const enabled = authed && Boolean(params.dateFrom && params.dateTo)
+  return useQuery({
+    queryKey: ['analytics', 'source-roi-report', params.userId ?? 'self', params.dateFrom, params.dateTo],
+    queryFn: () =>
+      analyticsApi.sourceRoiReport({
+        date_from: params.dateFrom,
+        date_to: params.dateTo,
+        ...(params.userId ? { user_id: params.userId } : {}),
+      }),
+    enabled,
+    staleTime: 30000,
+  })
+}
+
+export function useSoHandoffReport(params: { dateFrom: string; dateTo: string; userId?: string }) {
+  const authed = useAuthStore((s) => Boolean(s.access_token))
+  const enabled = authed && Boolean(params.dateFrom && params.dateTo)
+  return useQuery({
+    queryKey: ['analytics', 'so-handoff-report', params.userId ?? 'self', params.dateFrom, params.dateTo],
+    queryFn: () =>
+      analyticsApi.soHandoffReport({
+        date_from: params.dateFrom,
+        date_to: params.dateTo,
+        ...(params.userId ? { user_id: params.userId } : {}),
+      }),
+    enabled,
+    staleTime: 30000,
+  })
+}
+
+export function useCustomerReport(params: { dateFrom: string; dateTo: string; userId?: string }) {
+  const authed = useAuthStore((s) => Boolean(s.access_token))
+  const enabled = authed && Boolean(params.dateFrom && params.dateTo)
+  return useQuery({
+    queryKey: ['analytics', 'customer-report', params.userId ?? 'self', params.dateFrom, params.dateTo],
+    queryFn: () =>
+      analyticsApi.customerReport({
+        date_from: params.dateFrom,
+        date_to: params.dateTo,
+        ...(params.userId ? { user_id: params.userId } : {}),
+      }),
+    enabled,
     staleTime: 30000,
   })
 }

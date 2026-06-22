@@ -9,6 +9,8 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import QuotationLineStatusCell from '@/components/quotations/QuotationLineStatusCell'
+import ListingItemDescriptionsCell from '@/components/listing/ListingItemDescriptionsCell'
+import ListingCategoryCell from '@/components/listing/ListingCategoryCell'
 import QuotationListDateEditor, {
   formatQuotationListDate,
 } from '@/components/quotations/QuotationListDateEditor'
@@ -22,7 +24,7 @@ import {
 import { formatCurrency } from '@/lib/utils'
 import type { QuotationListItem } from '@/types'
 
-const COL_COUNT = 14
+const COL_COUNT = 13
 
 function TableSkeletonRows() {
   return (
@@ -171,7 +173,6 @@ export default function QuotationsPage() {
                 <th className="min-w-[120px] whitespace-nowrap px-3 py-3">Ongoing</th>
                 <th className="min-w-[120px] whitespace-nowrap px-3 py-3">PO received</th>
                 <th className="min-w-[100px] whitespace-nowrap px-3 py-3">Lost</th>
-                <th className="min-w-[100px] whitespace-nowrap px-3 py-3">Hold</th>
                 <th className="min-w-[96px] whitespace-nowrap px-3 py-3">Validity</th>
                 <th className="min-w-[110px] whitespace-nowrap px-3 py-3">Next follow-up</th>
                 <th className="min-w-[88px] whitespace-nowrap px-3 py-3">User</th>
@@ -228,16 +229,17 @@ export default function QuotationsPage() {
                       )}
                     </td>
                     <td className="px-3 py-3 align-top text-gray-900">
-                      <p className="font-medium">{q.category_label || q.primary_category}</p>
-                      {q.sub_category ? (
-                        <p className="mt-0.5 text-[12px] text-surface-muted">{q.sub_category}</p>
-                      ) : null}
+                      <ListingCategoryCell
+                        lines={q.category_lines}
+                        category={q.category_label || q.primary_category}
+                        subCategory={q.sub_category}
+                      />
                     </td>
-                    <td
-                      className="max-w-[200px] truncate px-3 py-3 align-top text-[12px] text-surface-muted"
-                      title={q.item_desc_short}
-                    >
-                      {q.item_desc_short}
+                    <td className="max-w-[220px] px-3 py-3 align-top">
+                      <ListingItemDescriptionsCell
+                        lines={q.item_desc_lines}
+                        fallbackShort={q.item_desc_short}
+                      />
                     </td>
                     <td className="whitespace-nowrap px-3 py-3 align-top text-right font-mono text-brand-green-600">
                       {formatCurrency(q.total_amount)}
@@ -255,9 +257,6 @@ export default function QuotationsPage() {
                     </td>
                     <td className="px-3 py-3 align-top">
                       <QuotationLineStatusCell q={q} status="lost" />
-                    </td>
-                    <td className="px-3 py-3 align-top">
-                      <QuotationLineStatusCell q={q} status="hold" />
                     </td>
                     <td className="px-3 py-3 align-top">
                       <QuotationListDateEditor

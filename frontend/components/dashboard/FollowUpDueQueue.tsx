@@ -14,7 +14,6 @@ function dueBadgeClass(urgency: string): string {
 }
 
 function statusClass(status: string): string {
-  if (status === 'hold') return 'bg-slate-100 text-slate-800 border-slate-200'
   return 'bg-sky-50 text-sky-900 border-sky-200'
 }
 

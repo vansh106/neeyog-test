@@ -84,6 +84,9 @@ class PurchaseOrderSelectedLine(BaseModel):
     quantity: int = Field(..., ge=1)
     unit_price: float = Field(..., ge=0)
     quoted_unit_price: float | None = None
+    customer_discount_pct: float | None = Field(None, alias="customerDiscountPct")
+
+    model_config = {"populate_by_name": True}
 
 
 class PurchaseOrderCreateBody(BaseModel):

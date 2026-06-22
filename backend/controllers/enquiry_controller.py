@@ -57,6 +57,7 @@ class EnquiryListItem(BaseModel):
     input_type: str
     source: str = "manual"
     item_desc_short: str = "—"
+    item_desc_lines: list[dict[str, str]] = Field(default_factory=list)
     quotation_id: str | None = None
     quote_number: str | None = None
     next_follow_up_date: str | None = None
@@ -517,6 +518,9 @@ async def handle_list_enquiries(
                 input_type=e.input_type,
                 source=_enquiry_list_source(e),
                 item_desc_short=enquiry_service.item_desc_short_from_enquiry(
+                    e, quote_by_enquiry.get(str(e.id))
+                ),
+                item_desc_lines=enquiry_service.item_desc_lines_from_enquiry(
                     e, quote_by_enquiry.get(str(e.id))
                 ),
                 quotation_id=(

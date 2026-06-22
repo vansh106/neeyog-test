@@ -13,22 +13,10 @@ import {
 } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
 import { ENQUIRY_SOURCE_OPTIONS } from '@/lib/enquirySource'
+import { ENQUIRY_LISTING_STATUS_OPTIONS } from '@/lib/enquiryStatus'
 import type { EnquiryListingFilters as Filters } from '@/lib/filterEnquiriesLocal'
 
-const STATUS_OPTIONS = [
-  { value: 'ALL', label: 'ALL' },
-  { value: 'received', label: 'Received' },
-  { value: 'pending_email_approval', label: 'Pending email approval' },
-  { value: 'email_rejected', label: 'Email rejected' },
-  { value: 'parsing', label: 'Parsing' },
-  { value: 'matching', label: 'Matching' },
-  { value: 'quoting', label: 'Quoting' },
-  { value: 'awaiting_info', label: 'Awaiting info' },
-  { value: 'pending_approval', label: 'Pending approval' },
-  { value: 'pending_human_review', label: 'Pending review' },
-  { value: 'approved', label: 'Approved' },
-  { value: 'failed', label: 'Failed' },
-]
+const STATUS_OPTIONS = ENQUIRY_LISTING_STATUS_OPTIONS
 
 type Props = {
   draft: Filters

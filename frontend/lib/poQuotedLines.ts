@@ -1,10 +1,17 @@
 import type { PurchaseOrder, PurchaseOrderLineItem, QuotationLineItem } from '@/types'
+import {
+  clampDiscountPct,
+  initialQuotedLinePricing,
+  resolveQuotedLineBaseUnitPrice,
+} from '@/lib/poQuotedLinePricing'
 
 export type QuotedLineState = {
   selected: boolean
   quantity: number
   unit_price: number
   quoted_unit_price: number
+  base_unit_price: number
+  customer_discount_pct: number
 }
 
 function lineKey(line: PurchaseOrderLineItem | QuotationLineItem): string {
@@ -48,12 +55,23 @@ export function buildQuotedLineStateFromPo(
       }
     }
 
+    const pricing = poLine
+      ? {
+          quantity: poLine.quantity ?? line.quantity ?? 1,
+          unit_price: poLine.unit_price ?? line.unit_price ?? 0,
+          quoted_unit_price:
+            poLine.quoted_unit_price ?? line.unit_price ?? poLine.unit_price ?? 0,
+          base_unit_price: resolveQuotedLineBaseUnitPrice(poLine),
+          customer_discount_pct: clampDiscountPct(poLine.customer_discount_pct ?? 0),
+        }
+      : {
+          ...initialQuotedLinePricing(line),
+          quantity: line.quantity ?? 1,
+        }
+
     next[idx] = {
       selected: Boolean(poLine),
-      quantity: poLine?.quantity ?? line.quantity ?? 1,
-      unit_price: poLine?.unit_price ?? line.unit_price ?? 0,
-      quoted_unit_price:
-        poLine?.quoted_unit_price ?? line.unit_price ?? poLine?.unit_price ?? 0,
+      ...pricing,
     }
   })
 
@@ -68,5 +86,6 @@ export function quotedLineStateToPayload(state: Record<number, QuotedLineState>)
       quantity: v.quantity,
       unit_price: v.unit_price,
       quoted_unit_price: v.quoted_unit_price,
+      customer_discount_pct: v.customer_discount_pct,
     }))
 }

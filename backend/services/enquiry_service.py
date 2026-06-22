@@ -1700,6 +1700,30 @@ def item_desc_short_from_enquiry(e: Enquiry, quotation: Quotation | None = None)
     return out[:250]
 
 
+def item_desc_lines_from_enquiry(e: Enquiry, quotation: Quotation | None = None) -> list[dict[str, str]]:
+    from services.quotation_service import item_desc_lines_from_lines
+
+    if quotation is not None and isinstance(quotation.line_items, list) and quotation.line_items:
+        return item_desc_lines_from_lines(quotation.line_items)
+    pd = e.parsed_data if isinstance(e.parsed_data, dict) else {}
+    line_items = pd.get("line_items")
+    if isinstance(line_items, list) and line_items:
+        return item_desc_lines_from_lines(line_items)
+    products = pd.get("products_requested", []) if isinstance(pd, dict) else []
+    if not isinstance(products, list):
+        return []
+    out: list[dict[str, str]] = []
+    for p in products:
+        if not isinstance(p, dict):
+            continue
+        full = str(p.get("product_description") or p.get("description") or "").strip()
+        if not full:
+            continue
+        short = full if len(full) <= 52 else full[:49] + "..."
+        out.append({"short": short, "full": full})
+    return out
+
+
 async def update_enquiry_listing_dates(
     enquiry_id: str,
     db: AsyncSession,

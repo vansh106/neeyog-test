@@ -125,7 +125,9 @@ class QuotationListItem(BaseModel):
     primary_category: str
     category_label: str
     sub_category: str | None = None
+    category_lines: list[dict[str, str | None]] = Field(default_factory=list)
     item_desc_short: str
+    item_desc_lines: list[dict[str, str]] = Field(default_factory=list)
     total_amount: float
     po_total_amount: float | None = None
     status: str
@@ -194,16 +196,16 @@ class QuotationTermCreateBody(BaseModel):
 
 
 class QuotationCrmStatusBody(BaseModel):
-    """Listing CRM status: PO received, Ongoing, Lost, Hold (remarks required for Lost/Hold)."""
+    """Listing CRM status: PO received, Ongoing, Lost (remarks required for Lost)."""
 
-    status: str = Field(..., description="po_received | ongoing | lost | hold")
+    status: str = Field(..., description="po_received | ongoing | lost")
     status_remarks: str | None = None
 
 
 class QuotationLineCrmStatusBody(BaseModel):
     """CRM status for a single quotation line item."""
 
-    status: str = Field(..., description="po_received | ongoing | lost | hold")
+    status: str = Field(..., description="po_received | ongoing | lost")
     status_remarks: str | None = None
 
 
@@ -443,7 +445,9 @@ async def handle_list_quotations(
                     primary_category=listing["primary_category"],
                     category_label=listing["category_label"],
                     sub_category=listing["sub_category"],
+                    category_lines=listing.get("category_lines") or [],
                     item_desc_short=listing["item_desc_short"],
+                    item_desc_lines=listing.get("item_desc_lines") or [],
                     total_amount=q.total_amount,
                     po_total_amount=po_total if po_total is not None else None,
                     status=q.status,

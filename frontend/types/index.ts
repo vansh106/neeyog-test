@@ -1,5 +1,15 @@
 export type EnquirySource = 'email' | 'indiamart' | 'manual' | 'referral'
 
+export interface ListingCategoryLine {
+  category: string
+  sub_category?: string | null
+}
+
+export interface ListingItemDescriptionLine {
+  short: string
+  full: string
+}
+
 export interface EnquiryListItem {
   enquiry_id: string
   /** FY + serial (e.g. 262700089); legacy rows may omit. */
@@ -11,6 +21,7 @@ export interface EnquiryListItem {
   /** Business source: email, indiamart, manual, referral */
   source?: EnquirySource | string
   item_desc_short?: string
+  item_desc_lines?: ListingItemDescriptionLine[]
   quotation_id?: string | null
   quote_number?: string | null
   next_follow_up_date?: string | null
@@ -300,13 +311,15 @@ export interface QuotationListItem {
   primary_category: string
   category_label: string
   sub_category?: string | null
+  category_lines?: ListingCategoryLine[]
   item_desc_short: string
+  item_desc_lines?: ListingItemDescriptionLine[]
   total_amount: number
   po_total_amount?: number | null
   status: string
   status_remarks?: string | null
   line_status_summaries: Record<
-    'ongoing' | 'po_received' | 'lost' | 'hold',
+    'ongoing' | 'po_received' | 'lost',
     QuotationLineStatusSummary
   >
   validity_date?: string | null
@@ -375,6 +388,7 @@ export interface PurchaseOrderCreatePayload {
     quantity: number
     unit_price: number
     quoted_unit_price?: number
+    customer_discount_pct?: number
   }>
   manual_line_items?: unknown[]
   client_name?: string

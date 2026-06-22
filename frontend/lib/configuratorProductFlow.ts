@@ -195,6 +195,22 @@ export function fittingCategoryLabel(catalogCategory: string | null | undefined)
   )
 }
 
+/** Parth hose inch → hose fitting size (mm). Used when hose ``size_id_mm`` is in inches. */
+export const HOSE_INCH_TO_FITTING_MM: Readonly<Record<number, number>> = {
+  0.5: 13,
+  0.625: 16, // 5/8"
+  0.75: 19,
+  1: 25,
+  1.25: 32,
+  1.5: 38,
+  2: 51,
+  2.5: 63.5,
+  3: 76,
+  4: 102,
+}
+
+const HOSE_INCH_EPS = 0.001
+
 /** Normalize hose/fitting size labels for comparison (e.g. ``25mm`` → ``25 mm``). */
 export function normalizeSizeMmLabel(raw: string | null | undefined): string | null {
   if (!raw?.trim()) return null
@@ -202,6 +218,35 @@ export function normalizeSizeMmLabel(raw: string | null | undefined): string | n
   const m = t.match(/^(\d+(?:\.\d+)?)\s*mm?$/i)
   if (m) return `${m[1]} mm`
   return t
+}
+
+/** Parse inch size from hose ``size_id_mm`` when stored as fractions/decimals (e.g. ``3/4``, ``1 1/2"``). */
+export function parseHoseInchSize(raw: string | null | undefined): number | null {
+  if (!raw?.trim()) return null
+  let s = raw.trim().replace(/[""″]/g, '"').replace(/\s+/g, ' ')
+  if (/\bmm\b/i.test(s)) return null
+
+  s = s.replace(/\s*(inch|inches|in)\.?$/i, '').trim()
+  s = s.replace(/"$/, '').trim()
+
+  let m = s.match(/^(\d+)\s+(\d+)\s*\/\s*(\d+)$/i)
+  if (m) return Number(m[1]) + Number(m[2]) / Number(m[3])
+
+  m = s.match(/^(\d+)\s*\/\s*(\d+)$/i)
+  if (m) return Number(m[1]) / Number(m[2])
+
+  m = s.match(/^(\d+(?:\.\d+)?)$/i)
+  if (m) return Number(m[1])
+
+  return null
+}
+
+export function hoseInchToFittingMm(inch: number): number | null {
+  if (!Number.isFinite(inch)) return null
+  for (const [inchKey, mm] of Object.entries(HOSE_INCH_TO_FITTING_MM)) {
+    if (Math.abs(inch - Number(inchKey)) < HOSE_INCH_EPS) return mm
+  }
+  return null
 }
 
 function parseSizeMmNumber(valveSize: string | null | undefined): number | null {
@@ -212,6 +257,44 @@ function parseSizeMmNumber(valveSize: string | null | undefined): number | null 
   if (mMm) return Number(mMm[1])
   const plain = valveSize.match(/^(\d+(?:\.\d+)?)$/)
   if (plain) return Number(plain[1])
+  return null
+}
+
+function mmValuesEqual(a: number, b: number): boolean {
+  return Math.abs(a - b) < 0.01
+}
+
+function fittingOptionForTargetMm(targetMm: number, fittingOptions: string[]): string | null {
+  const targetLabel = `${targetMm} mm`
+  const exact = fittingOptions.find(
+    (o) => normalizeSizeMmLabel(o)?.toLowerCase() === targetLabel.toLowerCase(),
+  )
+  if (exact) return exact
+
+  for (const opt of fittingOptions) {
+    const optNum = parseSizeMmNumber(opt)
+    if (optNum != null && mmValuesEqual(optNum, targetMm)) return opt
+  }
+  return null
+}
+
+/** Resolve hose size label to a fitting ``size_mm`` target in mm, if known. */
+export function hoseSizeToFittingTargetMm(hoseSizeIdMm: string | null | undefined): number | null {
+  const hoseNorm = normalizeSizeMmLabel(hoseSizeIdMm)
+  if (!hoseNorm) return null
+
+  const hasMmSuffix = /\bmm\b/i.test(hoseSizeIdMm ?? '') || /mm$/i.test(hoseNorm)
+  if (hasMmSuffix) return parseSizeMmNumber(hoseNorm)
+
+  const inch = parseHoseInchSize(hoseSizeIdMm)
+  if (inch != null) {
+    const fromInch = hoseInchToFittingMm(inch)
+    if (fromInch != null) return fromInch
+  }
+
+  const hoseNum = parseSizeMmNumber(hoseNorm)
+  if (hoseNum != null && !hoseNorm.includes('/')) return hoseNum
+
   return null
 }
 
@@ -227,11 +310,17 @@ export function matchHoseSizeToFittingOption(
   const exact = fittingOptions.find((o) => o.trim().toLowerCase() === hoseLower)
   if (exact) return exact
 
+  const targetMm = hoseSizeToFittingTargetMm(hoseSizeIdMm)
+  if (targetMm != null) {
+    const byMm = fittingOptionForTargetMm(targetMm, fittingOptions)
+    if (byMm) return byMm
+  }
+
   const hoseNum = parseSizeMmNumber(hoseNorm)
   if (hoseNum == null) return null
   for (const opt of fittingOptions) {
     const optNum = parseSizeMmNumber(opt)
-    if (optNum != null && optNum === hoseNum) return opt
+    if (optNum != null && mmValuesEqual(optNum, hoseNum)) return opt
   }
   return null
 }

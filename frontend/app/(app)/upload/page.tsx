@@ -242,7 +242,7 @@ function UploadPageInner() {
       try {
         const res = await createManualEnquiry(form)
         if (res.enquiry_id) {
-          router.push(`/enquiries/${res.enquiry_id}`)
+          router.push('/enquiries')
           return
         }
         setStreamError('Enquiry was created but no id was returned')

@@ -97,8 +97,23 @@ def _build_lines_from_quotation(
         base = dict(src[idx])
         qty = int(sel.get("quantity", base.get("quantity") or 1))
         unit_price = float(sel.get("unit_price", sel.get("unitPrice", base.get("unit_price") or 0)))
+        discount_pct = enquiry_svc._normalize_discount_pct(
+            sel.get("customer_discount_pct", sel.get("customerDiscountPct"))
+        )
+        if discount_pct is None:
+            discount_pct = enquiry_svc._normalize_discount_pct(base.get("customer_discount_pct")) or 0.0
+
+        base_unit = base.get("base_unit_price")
+        if base_unit is None or float(base_unit or 0) <= 0:
+            base_unit = float(base.get("unit_price") or unit_price or 0)
+        base_unit = round(float(base_unit), 2)
+
+        discount_amount = round(base_unit * (discount_pct / 100.0), 2) if discount_pct > 0 else 0.0
         line_total = _line_total(qty, unit_price)
         base["quantity"] = qty
+        base["base_unit_price"] = base_unit
+        base["customer_discount_pct"] = discount_pct
+        base["customer_discount_amount"] = discount_amount
         base["unit_price"] = unit_price
         base["line_total"] = line_total
         base["total"] = line_total

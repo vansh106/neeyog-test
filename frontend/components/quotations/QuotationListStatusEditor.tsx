@@ -5,8 +5,15 @@ import { useQueryClient } from '@tanstack/react-query'
 
 import { Button } from '@/components/ui/button'
 import StatusBadge from '@/components/ui/StatusBadge'
+import QuotationLostRemarksFields from '@/components/quotations/QuotationLostRemarksFields'
 import { quotationsApi } from '@/lib/api'
 import { Permissions } from '@/lib/permissions'
+import {
+  formatLostRemarks,
+  lostRemarksValidationMessage,
+  parseLostRemarks,
+  type LostRemarksDraft,
+} from '@/lib/quotationLostRemarks'
 import {
   QUOTATION_CRM_LABELS,
   QUOTATION_CRM_STATUSES,
@@ -15,16 +22,23 @@ import {
 import { useAuthStore } from '@/stores/authStore'
 import type { QuotationListItem } from '@/types'
 
+const emptyLostRemarks = (): LostRemarksDraft => ({
+  reason1: '',
+  reason2: '',
+  other1: '',
+  other2: '',
+})
+
 export default function QuotationListStatusEditor({ q }: { q: QuotationListItem }) {
   const queryClient = useQueryClient()
   const canEdit = useAuthStore((s) => s.hasPermission(Permissions.APPROVE_QUOTATIONS))
   const [status, setStatus] = useState(q.status)
-  const [remarks, setRemarks] = useState(q.status_remarks ?? '')
+  const [lostRemarks, setLostRemarks] = useState<LostRemarksDraft>(() => parseLostRemarks(q.status_remarks))
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
     setStatus(q.status)
-    setRemarks(q.status_remarks ?? '')
+    setLostRemarks(parseLostRemarks(q.status_remarks))
   }, [q.quotation_id, q.status, q.status_remarks])
 
   const persist = async (nextStatus: string, nextRemarks: string | null) => {
@@ -45,26 +59,30 @@ export default function QuotationListStatusEditor({ q }: { q: QuotationListItem 
   const onStatusChange = async (next: string) => {
     if (next === 'ongoing' || next === 'po_received') {
       setStatus(next)
-      setRemarks('')
+      setLostRemarks(emptyLostRemarks())
       await persist(next, null)
       return
     }
     setStatus(next)
+    if (next !== 'lost') {
+      setLostRemarks(emptyLostRemarks())
+    }
   }
 
-  const saveLostHold = async () => {
-    if (!remarks.trim()) {
-      window.alert('Add remarks for Lost or Hold before saving.')
+  const saveLostRemarks = async () => {
+    const message = lostRemarksValidationMessage(lostRemarks)
+    if (message) {
+      window.alert(message)
       return
     }
-    await persist(status, remarks.trim())
+    await persist(status, formatLostRemarks(lostRemarks))
   }
 
   if (!canEdit) {
     return (
       <div className="max-w-[200px]">
         <StatusBadge status={q.status} kind="quotation_crm" />
-        {(q.status === 'lost' || q.status === 'hold') && q.status_remarks && (
+        {q.status === 'lost' && q.status_remarks && (
           <p className="mt-1 line-clamp-3 text-[11px] leading-snug text-surface-muted" title={q.status_remarks}>
             {q.status_remarks}
           </p>
@@ -73,7 +91,7 @@ export default function QuotationListStatusEditor({ q }: { q: QuotationListItem 
     )
   }
 
-  const showRemarks = status === 'lost' || status === 'hold'
+  const showRemarks = status === 'lost'
 
   return (
     <div className="max-w-[220px] space-y-1.5">
@@ -91,15 +109,15 @@ export default function QuotationListStatusEditor({ q }: { q: QuotationListItem 
       </select>
       {showRemarks && (
         <>
-          <textarea
-            value={remarks}
-            onChange={(e) => setRemarks(e.target.value)}
+          <QuotationLostRemarksFields value={lostRemarks} onChange={setLostRemarks} disabled={busy} />
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            className="h-7 w-full text-[11px]"
             disabled={busy}
-            placeholder="Remarks (required)"
-            rows={2}
-            className="w-full resize-y rounded-md border border-[#E2E6DC] bg-white px-2 py-1.5 text-[11px] text-gray-900 placeholder:text-surface-muted"
-          />
-          <Button type="button" size="sm" variant="secondary" className="h-7 w-full text-[11px]" disabled={busy} onClick={() => void saveLostHold()}>
+            onClick={() => void saveLostRemarks()}
+          >
             Save status
           </Button>
         </>

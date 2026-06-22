@@ -11,7 +11,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import QuotationLostRemarksFields from '@/components/quotations/QuotationLostRemarksFields'
 import { quotationsApi } from '@/lib/api'
+import {
+  formatLostRemarks,
+  lostRemarksValidationMessage,
+  parseLostRemarks,
+  type LostRemarksDraft,
+} from '@/lib/quotationLostRemarks'
 import { Permissions } from '@/lib/permissions'
 import {
   QUOTATION_CRM_LABELS,
@@ -22,6 +29,11 @@ import { formatCurrency } from '@/lib/utils'
 import { useAuthStore } from '@/stores/authStore'
 import type { QuotationLineStatusProduct } from '@/types'
 
+type LineDraft = {
+  status: string
+  lostRemarks: LostRemarksDraft
+}
+
 type Props = {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -30,6 +42,13 @@ type Props = {
   status: QuotationCrmStatus
   products: QuotationLineStatusProduct[]
 }
+
+const emptyLostRemarks = (): LostRemarksDraft => ({
+  reason1: '',
+  reason2: '',
+  other1: '',
+  other2: '',
+})
 
 export default function QuotationLineStatusInfoDialog({
   open,
@@ -42,17 +61,15 @@ export default function QuotationLineStatusInfoDialog({
   const queryClient = useQueryClient()
   const canEdit = useAuthStore((s) => s.hasPermission(Permissions.APPROVE_QUOTATIONS))
   const [busyIndex, setBusyIndex] = useState<number | null>(null)
-  const [drafts, setDrafts] = useState<
-    Record<number, { status: string; remarks: string }>
-  >({})
+  const [drafts, setDrafts] = useState<Record<number, LineDraft>>({})
 
   useEffect(() => {
     if (!open) return
-    const next: Record<number, { status: string; remarks: string }> = {}
+    const next: Record<number, LineDraft> = {}
     for (const p of products) {
       next[p.line_index] = {
         status,
-        remarks: p.status_remarks ?? '',
+        lostRemarks: parseLostRemarks(p.status_remarks),
       }
     }
     setDrafts(next)
@@ -61,16 +78,20 @@ export default function QuotationLineStatusInfoDialog({
   const saveLine = async (lineIndex: number) => {
     const draft = drafts[lineIndex]
     if (!draft) return
-    if ((draft.status === 'lost' || draft.status === 'hold') && !draft.remarks.trim()) {
-      window.alert('Add remarks for Lost or Hold before saving.')
-      return
+    if (draft.status === 'lost') {
+      const message = lostRemarksValidationMessage(draft.lostRemarks)
+      if (message) {
+        window.alert(message)
+        return
+      }
     }
     setBusyIndex(lineIndex)
     try {
+      const remarks =
+        draft.status === 'lost' ? formatLostRemarks(draft.lostRemarks) : null
       await quotationsApi.updateLineCrmStatus(quotationId, lineIndex, {
         status: draft.status,
-        status_remarks:
-          draft.status === 'lost' || draft.status === 'hold' ? draft.remarks.trim() : null,
+        status_remarks: remarks,
       })
       await queryClient.invalidateQueries({ queryKey: ['quotations'] })
       onOpenChange(false)
@@ -94,8 +115,11 @@ export default function QuotationLineStatusInfoDialog({
 
         <ul className="space-y-3">
           {products.map((p) => {
-            const draft = drafts[p.line_index] ?? { status, remarks: p.status_remarks ?? '' }
-            const showRemarks = draft.status === 'lost' || draft.status === 'hold'
+            const draft = drafts[p.line_index] ?? {
+              status,
+              lostRemarks: parseLostRemarks(p.status_remarks),
+            }
+            const showRemarks = draft.status === 'lost'
             return (
               <li
                 key={p.line_index}
@@ -119,7 +143,12 @@ export default function QuotationLineStatusInfoDialog({
                       onChange={(e) =>
                         setDrafts((prev) => ({
                           ...prev,
-                          [p.line_index]: { ...draft, status: e.target.value },
+                          [p.line_index]: {
+                            ...draft,
+                            status: e.target.value,
+                            lostRemarks:
+                              e.target.value === 'lost' ? draft.lostRemarks : emptyLostRemarks(),
+                          },
                         }))
                       }
                     >
@@ -130,18 +159,15 @@ export default function QuotationLineStatusInfoDialog({
                       ))}
                     </select>
                     {showRemarks && (
-                      <textarea
-                        value={draft.remarks}
+                      <QuotationLostRemarksFields
+                        value={draft.lostRemarks}
                         disabled={busyIndex === p.line_index}
-                        onChange={(e) =>
+                        onChange={(lostRemarks) =>
                           setDrafts((prev) => ({
                             ...prev,
-                            [p.line_index]: { ...draft, remarks: e.target.value },
+                            [p.line_index]: { ...draft, lostRemarks },
                           }))
                         }
-                        placeholder="Remarks (required)"
-                        rows={2}
-                        className="w-full resize-y rounded-md border border-[#E2E6DC] bg-white px-2 py-1.5 text-[11px]"
                       />
                     )}
                     <Button

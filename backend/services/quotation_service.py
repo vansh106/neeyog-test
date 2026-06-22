@@ -28,12 +28,14 @@ from services.quotation_audit_diff import (
     financial_rows_from_quotation,
 )
 
-QUOTATION_CRM_STATUSES: frozenset[str] = frozenset({"po_received", "lost", "hold", "ongoing"})
-LINE_CRM_STATUS_ORDER: tuple[str, ...] = ("ongoing", "po_received", "lost", "hold")
+QUOTATION_CRM_STATUSES: frozenset[str] = frozenset({"po_received", "lost", "ongoing"})
+LINE_CRM_STATUS_ORDER: tuple[str, ...] = ("ongoing", "po_received", "lost")
 
 
 def _normalize_line_crm_status(raw: object, *, fallback: str = "ongoing") -> str:
     st = str(raw or fallback).strip().lower()
+    if st == "hold":
+        st = "ongoing"
     if st in QUOTATION_CRM_STATUSES:
         return st
     fb = str(fallback or "ongoing").strip().lower()
@@ -70,12 +72,8 @@ def derive_quotation_status_from_lines(lines: list) -> str:
         return "po_received"
     if all(s == "lost" for s in statuses):
         return "lost"
-    if all(s == "hold" for s in statuses):
-        return "hold"
     if any(s == "ongoing" for s in statuses):
         return "ongoing"
-    if any(s == "hold" for s in statuses):
-        return "hold"
     if any(s == "po_received" for s in statuses):
         return "po_received"
     return "ongoing"
@@ -95,7 +93,7 @@ def build_line_status_summaries(
     for idx, li in enumerate(valid_lines):
         st = _normalize_line_crm_status(li.get("crm_status"), fallback=fallback)
         remarks = li.get("crm_status_remarks")
-        if st in ("lost", "hold"):
+        if st == "lost":
             remarks = str(remarks or "").strip() or None
         else:
             remarks = None
@@ -166,6 +164,56 @@ def _short_label(line: dict) -> str:
     return name or "Item"
 
 
+def _listing_row_short_label(line: dict, *, max_name: int = 52) -> str:
+    """Single-line label for enquiry/quote listing rows (one row per product)."""
+    name = str(line.get("product_name") or line.get("description") or "").strip()
+    if "\n" in name:
+        first = name.split("\n")[0].strip()
+        if first.lower().startswith("product :"):
+            name = first.split(":", 1)[1].strip()
+        else:
+            name = first
+    size = str(line.get("size") or "").strip()
+    if len(name) > max_name:
+        name = name[: max_name - 3] + "..."
+    if size:
+        return f"{name} {size}".strip()
+    return name or "Item"
+
+
+def _full_line_description(line: dict) -> str:
+    desc = str(line.get("product_name") or line.get("description") or "").strip()
+    if not desc:
+        return "—"
+    size = str(line.get("size") or "").strip()
+    qty = line.get("quantity")
+    unit = str(line.get("unit") or "Nos").strip()
+    extras: list[str] = []
+    if size:
+        extras.append(f"Size: {size}")
+    try:
+        if qty is not None and float(qty) > 0:
+            extras.append(f"Qty: {int(float(qty))} {unit}")
+    except (TypeError, ValueError):
+        pass
+    if extras:
+        return f"{desc}\n\n" + "\n".join(extras)
+    return desc
+
+
+def item_desc_lines_from_lines(lines: list[dict]) -> list[dict[str, str]]:
+    out: list[dict[str, str]] = []
+    for li in lines:
+        if not isinstance(li, dict):
+            continue
+        short = _listing_row_short_label(li)
+        full = _full_line_description(li)
+        if short == "Item" and full == "—":
+            continue
+        out.append({"short": short, "full": full})
+    return out
+
+
 def _item_desc_short_from_lines(lines: list[dict]) -> str:
     bits = [_short_label(li) for li in lines[:3] if isinstance(li, dict)]
     bits = [b for b in bits if b and b != "Item"]
@@ -182,45 +230,19 @@ def item_desc_short_from_lines(lines: list[dict]) -> str:
     return _item_desc_short_from_lines(lines)
 
 
-def _sub_category_from_line(li: dict) -> str | None:
-    desc = str(li.get("description") or "")
-    for line in desc.split("\n"):
-        low = line.lower()
-        if "variant" in low and ":" in line:
-            val = line.split(":", 1)[1].strip()
-            return val or None
-    first = desc.split("\n")[0].strip() if desc else ""
-    if first.lower().startswith("product :"):
-        val = first.split(":", 1)[1].strip()
-        return val or None
-    return None
-
-
 def listing_fields_from_quotation(q: Quotation) -> dict:
+    from masters.listing_category import listing_fields_from_lines
+
     lines = q.line_items if isinstance(q.line_items, list) else []
     primary = _primary_category_from_lines(lines)
-    category_label = primary
-    sub_category: str | None = None
-    for li in lines:
-        if not isinstance(li, dict):
-            continue
-        ct = str(li.get("catalog_table") or "").strip()
-        if ct:
-            category_label = _category_label(ct)
-        sub_category = _sub_category_from_line(li)
-        if sub_category:
-            break
-    if not sub_category:
-        for li in lines:
-            if isinstance(li, dict):
-                sub_category = _sub_category_from_line(li)
-                if sub_category:
-                    break
+    masters = listing_fields_from_lines(lines, primary_fallback=primary)
     return {
         "primary_category": primary,
-        "category_label": category_label,
-        "sub_category": sub_category,
+        "category_label": masters["category_label"],
+        "sub_category": masters["sub_category"],
+        "category_lines": masters["category_lines"],
         "item_desc_short": _item_desc_short_from_lines(lines),
+        "item_desc_lines": item_desc_lines_from_lines(lines),
     }
 
 
@@ -879,14 +901,14 @@ async def update_quotation_crm_status(
         raise ValueError(f"Invalid status. Use one of: {', '.join(sorted(QUOTATION_CRM_STATUSES))}")
 
     remarks = (str(status_remarks).strip() if status_remarks is not None else "") or None
-    if st in ("lost", "hold") and not remarks:
-        raise ValueError("Remarks are required for Lost and Hold")
+    if st == "lost" and not remarks:
+        raise ValueError("Remarks are required for Lost")
 
     q = await get_quotation(quotation_id, db)
     lines = copy.deepcopy(q.line_items) if isinstance(q.line_items, list) else []
     if not lines:
         q.status = st
-        q.status_remarks = remarks if st in ("lost", "hold") else None
+        q.status_remarks = remarks if st == "lost" else None
     else:
         updated: list[dict] = []
         for li in lines:
@@ -894,7 +916,7 @@ async def update_quotation_crm_status(
                 continue
             row = dict(li)
             row["crm_status"] = st
-            row["crm_status_remarks"] = remarks if st in ("lost", "hold") else None
+            row["crm_status_remarks"] = remarks if st == "lost" else None
             updated.append(row)
         q.line_items = updated
         flag_modified(q, "line_items")
@@ -936,8 +958,8 @@ async def update_line_crm_status(
 ) -> Quotation:
     st = _normalize_line_crm_status(status)
     remarks = (str(status_remarks).strip() if status_remarks is not None else "") or None
-    if st in ("lost", "hold") and not remarks:
-        raise ValueError("Remarks are required for Lost and Hold")
+    if st == "lost" and not remarks:
+        raise ValueError("Remarks are required for Lost")
 
     q = await get_quotation(quotation_id, db)
     lines = copy.deepcopy(q.line_items) if isinstance(q.line_items, list) else []
@@ -946,7 +968,7 @@ async def update_line_crm_status(
 
     row = dict(lines[line_index])
     row["crm_status"] = st
-    row["crm_status_remarks"] = remarks if st in ("lost", "hold") else None
+    row["crm_status_remarks"] = remarks if st == "lost" else None
     lines[line_index] = row
     q.line_items = lines
     flag_modified(q, "line_items")
@@ -1137,7 +1159,7 @@ async def update_quotation_from_manual_line_items(
                 old.get("crm_status"), fallback=q.status or "ongoing"
             )
             old_remarks = old.get("crm_status_remarks")
-            if qli["crm_status"] in ("lost", "hold") and old_remarks:
+            if qli["crm_status"] == "lost" and old_remarks:
                 qli["crm_status_remarks"] = str(old_remarks).strip() or None
         else:
             qli["crm_status"] = "ongoing"

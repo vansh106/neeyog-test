@@ -356,7 +356,7 @@ export default function QuotationDetailPage() {
                       <div className="mt-3 flex flex-wrap items-center gap-2">
                         <StatusBadge status={quotation.status} kind="quotation_crm" />
                       </div>
-                      {(quotation.status === 'lost' || quotation.status === 'hold') && quotation.status_remarks && (
+                      {quotation.status === 'lost' && quotation.status_remarks && (
                         <p className="mt-2 text-[12px] leading-snug text-surface-muted">
                           <span className="font-medium text-gray-700">Remarks: </span>
                           {quotation.status_remarks}

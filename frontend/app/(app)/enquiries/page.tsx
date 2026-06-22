@@ -10,6 +10,7 @@ import EmptyState from '@/components/ui/EmptyState'
 import { Skeleton } from '@/components/ui/skeleton'
 import EnquiryListingFiltersPanel from '@/components/enquiries/EnquiryListingFilters'
 import EnquiryListDateEditor from '@/components/enquiries/EnquiryListDateEditor'
+import ListingItemDescriptionsCell from '@/components/listing/ListingItemDescriptionsCell'
 import { enquirySourceBadgeClass, formatEnquirySourceLabel } from '@/lib/enquirySource'
 import { useEnquiriesListingDataset } from '@/lib/queries'
 import { formatQuotationListDate } from '@/components/quotations/QuotationListDateEditor'
@@ -227,11 +228,11 @@ export default function EnquiriesPage() {
                       <td className="px-3 py-3 align-top text-[13px] text-surface-foreground">
                         {(e.client_org_name ?? '').trim() || '—'}
                       </td>
-                      <td
-                        className="max-w-[200px] truncate px-3 py-3 align-top text-[12px] text-surface-muted"
-                        title={e.item_desc_short || ''}
-                      >
-                        {e.item_desc_short || '—'}
+                      <td className="max-w-[220px] px-3 py-3 align-top">
+                        <ListingItemDescriptionsCell
+                          lines={e.item_desc_lines}
+                          fallbackShort={e.item_desc_short}
+                        />
                       </td>
                       <td className="px-3 py-3 align-top text-surface-muted" title={e.created_at}>
                         <span className="block text-[13px]">{formatRelativeTime(e.created_at)}</span>

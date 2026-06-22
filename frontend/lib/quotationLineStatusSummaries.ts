@@ -22,7 +22,6 @@ export function resolveLineStatusSummaries(
     ongoing: EMPTY_SUMMARY(total),
     po_received: EMPTY_SUMMARY(total),
     lost: EMPTY_SUMMARY(total),
-    hold: EMPTY_SUMMARY(total),
   }
   base[st] = {
     count: 1,

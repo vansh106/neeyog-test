@@ -959,6 +959,457 @@ export type PipelineMonthEnquiriesResponse = {
   }>
 }
 
+export type ConversionPipelineGroupBy = 'month' | 'user' | 'category' | 'customer'
+
+export type ConversionPipelineRow = {
+  row_key: string
+  group_label: string
+  enquiry_count: number
+  quote_count: number
+  quoted_value: number
+  po_count: number
+  po_value: number
+  conversion_pct: number
+  is_total?: boolean
+}
+
+export type ConversionPipelineReportResponse = {
+  report_title: string
+  generated_at: string
+  date_from: string
+  date_to: string
+  group_by: ConversionPipelineGroupBy
+  group_by_label: string
+  scope_label: string
+  record_count: number
+  conversion_threshold_pct: number
+  rows: ConversionPipelineRow[]
+  totals: ConversionPipelineRow & { is_total: true }
+}
+
+export type QuotationRegisterDisplayStatus =
+  | 'open'
+  | 'won'
+  | 'lost'
+  | 'expired'
+  | 'expiring_soon'
+
+export type QuotationRegisterRow = {
+  quotation_id: string
+  quote_ref: string
+  date_raised: string | null
+  customer_name: string
+  product: string
+  category: string
+  quoted_value: number
+  display_status: QuotationRegisterDisplayStatus
+  crm_status: string
+  salesperson: string
+  salesperson_id: string | null
+  expiry_date: string | null
+  expiry_warning: boolean
+}
+
+export type QuotationRegisterReportResponse = {
+  report_title: string
+  generated_at: string
+  date_from: string
+  date_to: string
+  scope_label: string
+  record_count: number
+  total_quoted_value: number
+  salespeople: Array<{ id: string; name: string }>
+  rows: QuotationRegisterRow[]
+}
+
+export type WinLossOutcome = 'won' | 'lost'
+
+export type WinLossAnalysisRow = {
+  quotation_id: string
+  quote_ref: string
+  customer_name: string
+  product: string
+  category: string
+  quoted_value: number
+  outcome: WinLossOutcome
+  loss_reason: string | null
+  loss_reason_raw: string | null
+  salesperson: string
+  salesperson_id: string | null
+}
+
+export type WinLossAnalysisSummary = {
+  total_quoted_value: number
+  total_won_value: number
+  total_lost_value: number
+  total_quoted_count: number
+  total_won_count: number
+  total_lost_count: number
+  win_rate_value_pct: number
+  win_rate_count_pct: number
+  top_loss_reason: string | null
+  top_loss_reason_count: number
+}
+
+export type WinLossAnalysisReportResponse = {
+  report_title: string
+  generated_at: string
+  date_from: string
+  date_to: string
+  scope_label: string
+  record_count: number
+  loss_reason_categories: string[]
+  categories: string[]
+  salespeople: Array<{ id: string; name: string }>
+  summary: WinLossAnalysisSummary
+  loss_reason_breakdown: DashboardChartsResponse['lost_reasons']
+  rows: WinLossAnalysisRow[]
+}
+
+export type SalesPerformanceUserRow = {
+  user_id: string
+  salesperson_name: string
+  enquiry_count: number
+  quote_count: number
+  quoted_value: number
+  po_count: number
+  won_value: number
+  win_rate_pct: number
+  avg_response_hours: number | null
+}
+
+export type SalesPerformanceByUserReportResponse = {
+  report_title: string
+  generated_at: string
+  date_from: string
+  date_to: string
+  scope_label: string
+  record_count: number
+  rows: SalesPerformanceUserRow[]
+  totals: SalesPerformanceUserRow
+}
+
+export type SourceRoiRow = {
+  source_key: string
+  source_label: string
+  enquiry_count: number
+  quote_count: number
+  quoted_value: number
+  po_count: number
+  won_value: number
+  win_rate_pct: number
+  revenue_share_pct: number
+  bar_color: string
+  is_highest_win_rate?: boolean
+  is_lowest_win_rate?: boolean
+}
+
+export type SourceRoiReportResponse = {
+  report_title: string
+  generated_at: string
+  date_from: string
+  date_to: string
+  scope_label: string
+  record_count: number
+  rows: SourceRoiRow[]
+  totals: SourceRoiRow
+}
+
+export type SoHandoffRow = {
+  po_id: string
+  po_reference: string
+  customer_name: string
+  po_value: number
+  po_date: string | null
+  so_created: boolean
+  so_number: string | null
+  so_creation_date: string | null
+  days_to_handoff: number | null
+  handoff_owner: string
+  handoff_owner_id: string | null
+  po_age_days: number
+  handoff_overdue: boolean
+}
+
+export type SoHandoffReportResponse = {
+  report_title: string
+  generated_at: string
+  date_from: string
+  date_to: string
+  scope_label: string
+  record_count: number
+  handoff_overdue_days: number
+  summary: {
+    total_pos: number
+    so_created_count: number
+    pct_so_created: number
+    avg_days_to_handoff: number | null
+  }
+  handoff_owners: Array<{ id: string; name: string }>
+  rows: SoHandoffRow[]
+}
+
+export type CustomerReportRow = {
+  customer_key: string
+  customer_name: string
+  enquiry_count: number
+  quote_count: number
+  quoted_value: number
+  po_count: number
+  po_value: number
+  win_rate_pct: number
+  last_activity_date: string | null
+  primary_source_key: string
+  primary_source_label: string
+  primary_category: string
+  customer_tier: string
+  customer_tier_label: string
+}
+
+export type CustomerReportTotals = CustomerReportRow & {
+  customer_count: number
+  avg_win_rate_pct: number
+}
+
+export type CustomerReportResponse = {
+  report_title: string
+  generated_at: string
+  date_from: string
+  date_to: string
+  scope_label: string
+  record_count: number
+  tier_thresholds_inr: Array<{ tier: string; label: string; min_po_value: number }>
+  source_channels: Array<{ key: string; label: string }>
+  rows: CustomerReportRow[]
+  totals: CustomerReportTotals
+}
+
+export type ReportsBundleResponse = {
+  generated_at: string
+  date_from: string
+  date_to: string
+  scope_label: string
+  conversion_pipeline: Record<ConversionPipelineGroupBy, ConversionPipelineReportResponse>
+  quotation_register: QuotationRegisterReportResponse
+  win_loss_analysis: WinLossAnalysisReportResponse
+  sales_performance_by_user: SalesPerformanceByUserReportResponse
+  source_roi: SourceRoiReportResponse
+  so_handoff: SoHandoffReportResponse
+  customer: CustomerReportResponse
+  response_sla: ResponseSlaReportResponse
+  pending_ageing: PendingAgeingReportResponse
+  lost_business: LostBusinessReportResponse
+  avg_po_value: AvgPoValueReportResponse
+  discount_price_variance: DiscountPriceVarianceReportResponse
+}
+
+export type ResponseSlaRow = {
+  enquiry_id: string
+  enquiry_ref: string
+  customer_name: string
+  category_key: string
+  category: string
+  received_at: string
+  quote_sent_at: string
+  response_hours: number
+  sla_met: boolean
+  salesperson: string
+  salesperson_id: string | null
+}
+
+export type ResponseSlaReportResponse = {
+  report_title: string
+  generated_at: string
+  date_from: string
+  date_to: string
+  scope_label: string
+  record_count: number
+  default_sla_target_hours: number
+  sla_target_hours: number
+  sla_target_options: number[]
+  categories: string[]
+  salespeople: Array<{ id: string; name: string }>
+  summary: {
+    total_enquiries: number
+    sla_met_count: number
+    sla_met_pct: number
+    avg_response_hours: number | null
+    worst_response_hours: number | null
+  }
+  weekly_trend: {
+    weeks: Array<{
+      week_label: string
+      week_start: string
+      avg_hours: number
+      enquiry_count: number
+      is_milestone?: boolean
+    }>
+    target_hours: number
+    milestone_week: string | null
+    milestone_hours: number | null
+  }
+  rows: ResponseSlaRow[]
+}
+
+export type PendingAgeingRow = {
+  item_id: string
+  item_type: 'enquiry' | 'quotation'
+  reference: string
+  customer_name: string
+  product: string
+  category: string
+  quoted_value: number
+  stage_key: 'enquiry' | 'quoted' | 'negotiation'
+  stage_label: string
+  created_date: string
+  last_activity_date: string | null
+  age_days: number
+  ageing_bucket_key: 'green' | 'amber' | 'red' | 'critical'
+  ageing_bucket_label: string
+  salesperson: string
+  salesperson_id: string | null
+  next_action_due: string | null
+  next_action_urgency: 'overdue' | 'upcoming' | 'neutral' | 'none'
+}
+
+export type PendingAgeingReportResponse = {
+  report_title: string
+  generated_at: string
+  date_from: string
+  date_to: string
+  as_of_date: string
+  scope_label: string
+  record_count: number
+  ageing_buckets: Array<{ key: string; label: string }>
+  bucket_summaries: Array<{ bucket_key: string; bucket_label: string; count: number; total_value: number }>
+  categories: string[]
+  stages: Array<{ key: string; label: string }>
+  salespeople: Array<{ id: string; name: string }>
+  summary: {
+    total_open_value: number
+    item_count: number
+    avg_age_days: number
+  }
+  rows: PendingAgeingRow[]
+}
+
+export type LostBusinessRow = {
+  quotation_id: string
+  quote_ref: string
+  customer_name: string
+  product: string
+  category: string
+  quoted_value: number
+  loss_date: string | null
+  loss_reason: string | null
+  loss_reason_raw: string | null
+  competitor: string | null
+  salesperson: string
+  salesperson_id: string | null
+  stage_lost_at_key: string
+  stage_lost_at_label: string
+  notes: string | null
+}
+
+export type LostBusinessReportResponse = {
+  report_title: string
+  generated_at: string
+  date_from: string
+  date_to: string
+  scope_label: string
+  record_count: number
+  loss_reason_categories: string[]
+  categories: string[]
+  stages_lost_at: Array<{ key: string; label: string }>
+  salespeople: Array<{ id: string; name: string }>
+  summary: {
+    total_lost_value: number
+    loss_count: number
+    avg_deal_size_lost: number
+    top_loss_reason: string | null
+    top_loss_reason_count: number
+    top_loss_reason_by_value: string | null
+    top_loss_reason_value: number
+  }
+  loss_reason_breakdown: DashboardChartsResponse['lost_reasons']
+  rows: LostBusinessRow[]
+}
+
+export type AvgPoValueDimension = 'customer' | 'product' | 'category'
+
+export type AvgPoValueRow = {
+  dimension_name: string
+  po_count: number
+  total_po_value: number
+  avg_po_value: number
+  min_po_value: number
+  max_po_value: number
+  value_range: number
+  avg_bar_pct: number
+  outlier: 'high' | 'low' | null
+}
+
+export type AvgPoValueDimensionBlock = {
+  rows: AvgPoValueRow[]
+  summary: {
+    overall_avg_po_value: number
+    total_po_count: number
+    total_won_value: number
+  }
+}
+
+export type AvgPoValueReportResponse = {
+  report_title: string
+  generated_at: string
+  date_from: string
+  date_to: string
+  scope_label: string
+  record_count: number
+  dimensions: Record<AvgPoValueDimension, AvgPoValueDimensionBlock>
+}
+
+export type DiscountPriceVarianceRow = {
+  po_id: string
+  quotation_id: string | null
+  reference: string
+  quote_ref: string
+  customer_name: string
+  product: string
+  category: string
+  list_price: number
+  quoted_price: number
+  final_po_price: number
+  discount_pct: number
+  discount_value: number
+  variance_pct: number
+  discount_band: 'none' | 'low' | 'medium' | 'high'
+  approval_status: 'approved' | 'pending' | 'not_required'
+  salesperson: string
+  salesperson_id: string | null
+}
+
+export type DiscountPriceVarianceReportResponse = {
+  report_title: string
+  generated_at: string
+  date_from: string
+  date_to: string
+  scope_label: string
+  record_count: number
+  discount_thresholds: {
+    acceptable_max_pct: number
+    moderate_max_pct: number
+    approval_threshold_pct: number
+  }
+  categories: string[]
+  salespeople: Array<{ id: string; name: string }>
+  summary: {
+    avg_discount_pct: number
+    total_discount_value: number
+    discounted_deal_count: number
+  }
+  rows: DiscountPriceVarianceRow[]
+}
+
 export const analyticsApi = {
   bookingTarget: <T = BookingTargetTrackerResponse>(params?: { user_id?: string; year?: number; month?: number }) =>
     get<T>('/api/analytics/booking-target', params as Record<string, unknown> | undefined),
@@ -982,6 +1433,63 @@ export const analyticsApi = {
       month,
       ...(params ?? {}),
     } as Record<string, unknown>),
+  conversionPipelineReport: <T = ConversionPipelineReportResponse>(params: {
+    date_from: string
+    date_to: string
+    group_by: ConversionPipelineGroupBy
+    user_id?: string
+  }) => get<T>('/api/analytics/conversion-pipeline-report', params as Record<string, unknown>),
+  quotationRegisterReport: <T = QuotationRegisterReportResponse>(params: {
+    date_from: string
+    date_to: string
+    user_id?: string
+  }) => get<T>('/api/analytics/quotation-register-report', params as Record<string, unknown>),
+  winLossAnalysisReport: <T = WinLossAnalysisReportResponse>(params: {
+    date_from: string
+    date_to: string
+    user_id?: string
+  }) => get<T>('/api/analytics/win-loss-analysis-report', params as Record<string, unknown>),
+  salesPerformanceByUserReport: <T = SalesPerformanceByUserReportResponse>(params: {
+    date_from: string
+    date_to: string
+    user_id?: string
+  }) => get<T>('/api/analytics/sales-performance-by-user-report', params as Record<string, unknown>),
+  sourceRoiReport: <T = SourceRoiReportResponse>(params: {
+    date_from: string
+    date_to: string
+    user_id?: string
+  }) => get<T>('/api/analytics/source-roi-report', params as Record<string, unknown>),
+  soHandoffReport: <T = SoHandoffReportResponse>(params: {
+    date_from: string
+    date_to: string
+    user_id?: string
+  }) => get<T>('/api/analytics/so-handoff-report', params as Record<string, unknown>),
+  customerReport: <T = CustomerReportResponse>(params: {
+    date_from: string
+    date_to: string
+    user_id?: string
+  }) => get<T>('/api/analytics/customer-report', params as Record<string, unknown>),
+  reportsBundle: <T = ReportsBundleResponse>(params: {
+    date_from: string
+    date_to: string
+    user_id?: string
+  }) => get<T>('/api/analytics/reports-bundle', params as Record<string, unknown>),
+  responseSlaReport: <T = ResponseSlaReportResponse>(params: {
+    date_from: string
+    date_to: string
+    sla_target_hours?: number
+    user_id?: string
+  }) => get<T>('/api/analytics/response-sla-report', params as Record<string, unknown>),
+  pendingAgeingReport: <T = PendingAgeingReportResponse>(params: {
+    date_from: string
+    date_to: string
+    user_id?: string
+  }) => get<T>('/api/analytics/pending-ageing-report', params as Record<string, unknown>),
+  lostBusinessReport: <T = LostBusinessReportResponse>(params: {
+    date_from: string
+    date_to: string
+    user_id?: string
+  }) => get<T>('/api/analytics/lost-business-report', params as Record<string, unknown>),
 }
 
 export async function changePasswordApi(

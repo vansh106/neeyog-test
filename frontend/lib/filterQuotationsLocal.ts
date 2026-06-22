@@ -24,7 +24,17 @@ export function filterQuotationsLocal(rows: QuotationListItem[], f: LocalQuotati
       const cn = norm(row.client_name || '')
       const cc = norm(row.client_company || '')
       const desc = norm(row.item_desc_short || '')
-      return num.includes(q) || enq.includes(q) || cn.includes(q) || cc.includes(q) || desc.includes(q)
+      const linesBlob = norm(
+        (row.item_desc_lines ?? []).map((l) => `${l.short} ${l.full}`).join(' '),
+      )
+      return (
+        num.includes(q) ||
+        enq.includes(q) ||
+        cn.includes(q) ||
+        cc.includes(q) ||
+        desc.includes(q) ||
+        linesBlob.includes(q)
+      )
     })
   }
 
