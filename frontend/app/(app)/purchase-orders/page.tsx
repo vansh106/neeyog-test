@@ -11,6 +11,7 @@ import { Button, buttonVariants } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import CreatePurchaseOrderDialog from '@/components/purchase-orders/CreatePurchaseOrderDialog'
 import DeletePurchaseOrderDialog from '@/components/purchase-orders/DeletePurchaseOrderDialog'
+import EnterPoSoNumberDialog from '@/components/purchase-orders/EnterPoSoNumberDialog'
 import { usePurchaseOrdersListingDataset } from '@/lib/queries'
 import { purchaseOrdersApi } from '@/lib/api'
 import { Permissions } from '@/lib/permissions'
@@ -23,11 +24,21 @@ function formatPoDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })
 }
 
+const SO_ENTRY_DEADLINE_MS = 24 * 60 * 60 * 1000
+
+function isSoEntryOverdue(createdAt: string, soNumber?: string | null): boolean {
+  if (soNumber?.trim()) return false
+  const createdMs = new Date(createdAt).getTime()
+  if (Number.isNaN(createdMs)) return false
+  return Date.now() - createdMs >= SO_ENTRY_DEADLINE_MS
+}
+
 export default function PurchaseOrdersPage() {
   const queryClient = useQueryClient()
   const canCreate = useAuthStore((s) => s.hasPermission(Permissions.CREATE_PURCHASE_ORDERS))
   const canDelete = useAuthStore((s) => s.hasPermission(Permissions.DELETE_PURCHASE_ORDERS))
   const [createOpen, setCreateOpen] = useState(false)
+  const [soEntryTarget, setSoEntryTarget] = useState<PurchaseOrderListItem | null>(null)
   const [search, setSearch] = useState('')
   const [clientFilter, setClientFilter] = useState('')
   const [typeFilter, setTypeFilter] = useState('')
@@ -149,6 +160,8 @@ export default function PurchaseOrdersPage() {
                 key={po.po_id}
                 po={po}
                 canDelete={canDelete}
+                canEnterSo={canCreate}
+                onEnterSo={() => setSoEntryTarget(po)}
                 onDelete={() => {
                   setDeleteError(null)
                   setDeleteTarget(po)
@@ -160,6 +173,14 @@ export default function PurchaseOrdersPage() {
       </div>
 
       <CreatePurchaseOrderDialog open={createOpen} onOpenChange={setCreateOpen} />
+
+      <EnterPoSoNumberDialog
+        po={soEntryTarget}
+        open={soEntryTarget != null}
+        onOpenChange={(next) => {
+          if (!next) setSoEntryTarget(null)
+        }}
+      />
 
       <DeletePurchaseOrderDialog
         po={deleteTarget}
@@ -184,10 +205,14 @@ export default function PurchaseOrdersPage() {
 function PoRow({
   po,
   canDelete,
+  canEnterSo,
+  onEnterSo,
   onDelete,
 }: {
   po: PurchaseOrderListItem
   canDelete: boolean
+  canEnterSo: boolean
+  onEnterSo: () => void
   onDelete: () => void
 }) {
   return (
@@ -224,8 +249,22 @@ function PoRow({
       <td className="px-4 py-3 text-right">
         <p className="font-mono font-medium">{formatCurrency(po.total_amount)}</p>
       </td>
-      <td className="px-4 py-3 font-mono text-[12px] text-gray-900">
-        {po.so_number || <span className="text-surface-muted">—</span>}
+      <td className="px-4 py-3">
+        <p className="font-mono text-[12px] text-gray-900">
+          {po.so_number || <span className="text-surface-muted">—</span>}
+        </p>
+        {isSoEntryOverdue(po.created_at, po.so_number) &&
+          (canEnterSo ? (
+            <button
+              type="button"
+              onClick={onEnterSo}
+              className="mt-0.5 text-left text-[11px] font-medium leading-snug text-red-600 underline-offset-2 hover:underline"
+            >
+              Enter SO number
+            </button>
+          ) : (
+            <p className="mt-0.5 text-[11px] font-medium leading-snug text-red-600">Enter SO number</p>
+          ))}
       </td>
       <td className="px-4 py-3 text-[12px] text-surface-muted">{po.created_by_name || '—'}</td>
       <td className="px-4 py-3">
