@@ -9,7 +9,7 @@ import uuid
 import json
 from datetime import date, datetime, timedelta, timezone
 
-from sqlalchemy import and_, desc, false, func, or_, select
+from sqlalchemy import and_, desc, false, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -1722,6 +1722,104 @@ def item_desc_lines_from_enquiry(e: Enquiry, quotation: Quotation | None = None)
         short = full if len(full) <= 52 else full[:49] + "..."
         out.append({"short": short, "full": full})
     return out
+
+
+async def archive_enquiry(
+    enquiry_id: str,
+    db: AsyncSession,
+    *,
+    performed_by: str = "user",
+    performed_by_name: str | None = None,
+) -> Enquiry:
+    e = await get_enquiry(enquiry_id, db)
+    if e.is_archived:
+        return e
+    e.is_archived = True
+    await db.execute(
+        update(Quotation)
+        .where(Quotation.enquiry_id == e.id, Quotation.is_archived.is_(False))
+        .values(is_archived=True)
+    )
+    db.add(
+        AuditLog(
+            id=uuid.uuid4(),
+            entity_type="enquiry",
+            entity_id=e.id,
+            action="enquiry_archived",
+            performed_by=performed_by or "user",
+            details={
+                "performed_by_name": performed_by_name,
+                "enquiry_id": str(e.id),
+                "enquiry_number": e.enquiry_number,
+            },
+        )
+    )
+    await db.commit()
+    await db.refresh(e)
+    return e
+
+
+async def assign_enquiry_user(
+    enquiry_id: str,
+    assignee_user_id: uuid.UUID,
+    db: AsyncSession,
+    *,
+    performed_by: str = "user",
+    performed_by_name: str | None = None,
+) -> Enquiry:
+    e = await get_enquiry(enquiry_id, db)
+    assignee = (
+        await db.execute(
+            select(User).where(
+                User.id == assignee_user_id,
+                User.is_active.is_(True),
+            )
+        )
+    ).scalar_one_or_none()
+    if assignee is None:
+        raise ValueError("User not found or inactive")
+    if str(getattr(assignee, "tier", "") or "") == "superadmin":
+        raise ValueError("Cannot assign enquiries to super admin")
+
+    old_user_id = str(e.created_by_user_id) if e.created_by_user_id else None
+    old_user_name = (e.created_by_name or "").strip() or None
+    new_name = (assignee.full_name or "").strip() or str(assignee.email).strip()
+
+    e.created_by_user_id = assignee.id
+    e.created_by_name = new_name or None
+
+    assignee_phone = (assignee.phone or "").strip() or None
+    await db.execute(
+        update(Quotation)
+        .where(Quotation.enquiry_id == e.id)
+        .values(
+            created_by_user_id=assignee.id,
+            created_by_name=new_name or None,
+            created_by_phone=assignee_phone,
+        )
+    )
+
+    db.add(
+        AuditLog(
+            id=uuid.uuid4(),
+            entity_type="enquiry",
+            entity_id=e.id,
+            action="enquiry_assigned",
+            performed_by=performed_by or "user",
+            details={
+                "performed_by_name": performed_by_name,
+                "enquiry_id": str(e.id),
+                "enquiry_number": e.enquiry_number,
+                "from_user_id": old_user_id,
+                "from_user_name": old_user_name,
+                "to_user_id": str(assignee.id),
+                "to_user_name": new_name,
+            },
+        )
+    )
+    await db.commit()
+    await db.refresh(e)
+    return e
 
 
 async def update_enquiry_listing_dates(

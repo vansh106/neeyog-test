@@ -1,4 +1,5 @@
 import type { QuotationListItem } from '@/types'
+import { matchesArchiveFilter, type ArchiveFilter } from '@/lib/archiveFilter'
 
 function norm(s: string): string {
   return s.trim().toLowerCase()
@@ -10,11 +11,12 @@ export type LocalQuotationFilters = {
   status: string
   dateFrom: string
   dateTo: string
+  archive: ArchiveFilter
 }
 
 /** Instant in-memory filter; no network. */
 export function filterQuotationsLocal(rows: QuotationListItem[], f: LocalQuotationFilters): QuotationListItem[] {
-  let out = rows
+  let out = rows.filter((row) => matchesArchiveFilter(row.is_archived, f.archive))
 
   const q = norm(f.search)
   if (q) {

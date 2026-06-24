@@ -184,6 +184,10 @@ class Enquiry(Base):
     #: Next CRM follow-up (editable from enquiry list).
     next_follow_up_date: Mapped[date | None] = mapped_column(Date, nullable=True)
 
+    is_archived: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false"), index=True
+    )
+
     quotations: Mapped[list["Quotation"]] = relationship(back_populates="enquiry")
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)

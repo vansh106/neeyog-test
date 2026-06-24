@@ -151,6 +151,16 @@ async def patch_quotation_listing_dates_route(
     return await quotation_controller.handle_patch_quotation_listing_dates(quotation_id, body, db, user)
 
 
+@router.post("/{quotation_id}/archive")
+async def archive_quotation_route(
+    quotation_id: str,
+    user: CurrentUser = Depends(require_permission(Permission.DELETE_QUOTATIONS)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Soft-archive a quotation (excluded from analytics)."""
+    return await quotation_controller.handle_archive_quotation(quotation_id, db, user)
+
+
 @router.get("/{quotation_id}/audit", response_model=QuotationAuditResponse)
 async def get_quotation_audit_route(
     quotation_id: str,

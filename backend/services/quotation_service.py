@@ -999,6 +999,36 @@ async def update_line_crm_status(
     return q
 
 
+async def archive_quotation(
+    quotation_id: str,
+    db: AsyncSession,
+    *,
+    performed_by: str = "user",
+    performed_by_name: str | None = None,
+) -> Quotation:
+    q = await get_quotation(quotation_id, db)
+    if q.is_archived:
+        return q
+    q.is_archived = True
+    db.add(
+        AuditLog(
+            id=uuid.uuid4(),
+            entity_type="quotation",
+            entity_id=q.id,
+            action="quotation_archived",
+            performed_by=performed_by or "user",
+            details={
+                "performed_by_name": performed_by_name,
+                "quotation_id": str(q.id),
+                "quote_number": q.quote_number,
+            },
+        )
+    )
+    await db.commit()
+    await db.refresh(q)
+    return q
+
+
 async def update_quotation_listing_dates(
     quotation_id: str,
     db: AsyncSession,

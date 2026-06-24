@@ -1,4 +1,5 @@
 import type { EnquiryListItem } from '@/types'
+import { matchesArchiveFilter, type ArchiveFilter } from '@/lib/archiveFilter'
 
 function norm(s: string): string {
   return s.trim().toLowerCase()
@@ -89,8 +90,9 @@ export function defaultEnquiryListingDraft(): EnquiryListingFilters {
 export function filterEnquiriesLocal(
   rows: EnquiryListItem[],
   f: EnquiryListingFilters,
+  archive: ArchiveFilter = 'active',
 ): EnquiryListItem[] {
-  let out = rows
+  let out = rows.filter((row) => matchesArchiveFilter(row.is_archived, archive))
 
   if (f.useFromDate && f.dateFrom.trim()) {
     const from = f.dateFrom.trim()

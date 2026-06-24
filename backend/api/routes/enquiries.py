@@ -11,6 +11,7 @@ from controllers.enquiry_controller import (
     EmailApprovalRequest,
     EmailApprovalResponse,
     EmailInboxItem,
+    EnquiryAssignUserBody,
     EnquiryListItem,
     EnquiryListingDatesBody,
     EnquiryResponse,
@@ -114,6 +115,27 @@ async def patch_enquiry_listing_dates_route(
 ):
     """Next follow-up date on the enquiry list."""
     return await enquiry_controller.handle_patch_enquiry_listing_dates(enquiry_id, body, db, user)
+
+
+@router.patch("/{enquiry_id}/assign-user")
+async def assign_enquiry_user_route(
+    enquiry_id: str,
+    body: EnquiryAssignUserBody,
+    user: CurrentUser = Depends(require_permission(Permission.VIEW_ENQUIRIES)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Reassign enquiry ownership to another user (admin / superadmin only)."""
+    return await enquiry_controller.handle_assign_enquiry_user(enquiry_id, body, db, user)
+
+
+@router.post("/{enquiry_id}/archive")
+async def archive_enquiry_route(
+    enquiry_id: str,
+    user: CurrentUser = Depends(require_permission(Permission.DELETE_ENQUIRIES)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Soft-archive an enquiry and its quotations (excluded from analytics)."""
+    return await enquiry_controller.handle_archive_enquiry(enquiry_id, db, user)
 
 
 @router.post("/{enquiry_id}/email-approval", response_model=EmailApprovalResponse)

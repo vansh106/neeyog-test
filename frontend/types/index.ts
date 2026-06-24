@@ -26,6 +26,8 @@ export interface EnquiryListItem {
   quote_number?: string | null
   next_follow_up_date?: string | null
   created_at: string
+  /** User who owns the enquiry for listing / dashboard scope. */
+  created_by_user_id?: string | null
   /** User who created the enquiry (upload / manual); omitted for older rows or inbox sync. */
   created_by_name?: string | null
   erp_export_available?: boolean
@@ -35,6 +37,7 @@ export interface EnquiryListItem {
   is_non_standard_customer?: boolean
   series?: string | null
   is_sales_enquiry?: boolean
+  is_archived?: boolean
 }
 
 export interface EnquiryResponse {
@@ -327,6 +330,7 @@ export interface QuotationListItem {
   created_at: string
   /** Logged-in user who created the quotation (manual flow); omitted for older rows or system-generated quotes. */
   created_by_name?: string | null
+  is_archived?: boolean
 }
 
 export interface PurchaseOrderLineItem extends QuotationLineItem {

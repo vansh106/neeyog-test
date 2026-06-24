@@ -62,6 +62,7 @@ class EnquiryListItem(BaseModel):
     quote_number: str | None = None
     next_follow_up_date: str | None = None
     created_at: str
+    created_by_user_id: str | None = None
     created_by_name: str | None = None
     erp_export_available: bool = False
     category: str | None = None
@@ -69,10 +70,15 @@ class EnquiryListItem(BaseModel):
     is_non_standard_customer: bool = False
     series: str | None = None
     is_sales_enquiry: bool = False
+    is_archived: bool = False
 
 
 class EnquiryListingDatesBody(BaseModel):
     next_follow_up_date: date | None = None
+
+
+class EnquiryAssignUserBody(BaseModel):
+    user_id: str
 
 
 class ManualSelectedProduct(BaseModel):
@@ -539,6 +545,7 @@ async def handle_list_enquiries(
                     else None
                 ),
                 created_at=e.created_at.isoformat() if e.created_at else "",
+                created_by_user_id=str(e.created_by_user_id) if e.created_by_user_id else None,
                 created_by_name=(e.created_by_name or "").strip() or None,
                 erp_export_available=bool(getattr(e, "erp_export_path", None)),
                 category=_enquiry_list_category(e),
@@ -546,6 +553,7 @@ async def handle_list_enquiries(
                 is_non_standard_customer=e.company_id is None,
                 series=_enquiry_series(e),
                 is_sales_enquiry=_enquiry_is_sales(e),
+                is_archived=bool(getattr(e, "is_archived", False)),
             )
             for e in enquiries
         ]
@@ -574,6 +582,63 @@ async def handle_patch_enquiry_listing_dates(
         return {"enquiry_id": str(e.id), "next_follow_up_date": (
             e.next_follow_up_date.isoformat() if getattr(e, "next_follow_up_date", None) else None
         )}
+    except ProductNotFoundError:
+        raise HTTPException(status_code=404, detail="Enquiry not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+async def handle_assign_enquiry_user(
+    enquiry_id: str,
+    body: EnquiryAssignUserBody,
+    db: AsyncSession,
+    user: CurrentUser,
+) -> dict:
+    if not _is_admin_scope(user):
+        raise HTTPException(status_code=403, detail="Admin access required")
+    try:
+        assignee_id = uuid.UUID(str(body.user_id).strip())
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid user_id")
+    try:
+        e = await enquiry_service.assign_enquiry_user(
+            enquiry_id,
+            assignee_id,
+            db,
+            performed_by=user.email,
+            performed_by_name=user.full_name or None,
+        )
+        return {
+            "enquiry_id": str(e.id),
+            "created_by_user_id": str(e.created_by_user_id) if e.created_by_user_id else None,
+            "created_by_name": (e.created_by_name or "").strip() or None,
+        }
+    except ProductNotFoundError:
+        raise HTTPException(status_code=404, detail="Enquiry not found")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+async def handle_archive_enquiry(
+    enquiry_id: str,
+    db: AsyncSession,
+    user: CurrentUser,
+) -> dict:
+    try:
+        current = await enquiry_service.get_enquiry(enquiry_id, db)
+        _ensure_enquiry_access(current, user)
+        e = await enquiry_service.archive_enquiry(
+            enquiry_id,
+            db,
+            performed_by=user.email,
+            performed_by_name=user.full_name or None,
+        )
+        return {
+            "enquiry_id": str(e.id),
+            "is_archived": bool(getattr(e, "is_archived", False)),
+        }
     except ProductNotFoundError:
         raise HTTPException(status_code=404, detail="Enquiry not found")
     except Exception as e:

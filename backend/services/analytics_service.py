@@ -130,6 +130,7 @@ async def _avg_response_hours(
         Quotation.created_at >= start_dt,
         Quotation.created_at < end_dt,
         Quotation.is_archived.is_(False),
+        Enquiry.is_archived.is_(False),
         Quotation.created_by_user_id.in_(user_ids),
     )
     result = await db.execute(stmt)
@@ -151,6 +152,7 @@ async def _enquiry_count(
     stmt = select(func.count(Enquiry.id)).where(
         Enquiry.created_at >= start_dt,
         Enquiry.created_at < end_dt,
+        Enquiry.is_archived.is_(False),
         Enquiry.created_by_user_id.in_(user_ids),
     )
     result = await db.execute(stmt)
@@ -545,6 +547,7 @@ async def get_action_queues(
         .options(selectinload(Enquiry.branch).selectinload(ClientBranch.company))
         .where(
             ~has_quotation,
+            Enquiry.is_archived.is_(False),
             Enquiry.status.notin_(list(TERMINAL_ENQUIRY_STATUSES)),
         )
     )
@@ -1222,7 +1225,7 @@ async def get_pipeline_month_enquiries(
     stmt = (
         select(Enquiry)
         .options(selectinload(Enquiry.branch).selectinload(ClientBranch.company))
-        .where(Enquiry.created_at >= start_dt, Enquiry.created_at < end_dt)
+        .where(Enquiry.created_at >= start_dt, Enquiry.created_at < end_dt, Enquiry.is_archived.is_(False))
         .order_by(Enquiry.created_at.desc())
     )
     if user_ids:
@@ -1321,7 +1324,7 @@ async def _load_report_scope_data(
             selectinload(Enquiry.branch).selectinload(ClientBranch.company),
             selectinload(Enquiry.quotations),
         )
-        .where(Enquiry.created_at >= start_dt, Enquiry.created_at < end_dt)
+        .where(Enquiry.created_at >= start_dt, Enquiry.created_at < end_dt, Enquiry.is_archived.is_(False))
     )
     if user_ids:
         enq_stmt = enq_stmt.where(Enquiry.created_by_user_id.in_(user_ids))
@@ -1960,6 +1963,7 @@ async def _avg_response_hours_by_user(
             Quotation.created_at >= start_dt,
             Quotation.created_at < end_dt,
             Quotation.is_archived.is_(False),
+            Enquiry.is_archived.is_(False),
             Quotation.created_by_user_id.in_(user_ids),
         )
         .group_by(Quotation.created_by_user_id)
@@ -2744,6 +2748,7 @@ async def _load_open_pipeline_items(
         .options(selectinload(Enquiry.branch).selectinload(ClientBranch.company))
         .where(
             ~has_quotation,
+            Enquiry.is_archived.is_(False),
             Enquiry.status.notin_(list(TERMINAL_ENQUIRY_STATUSES)),
             Enquiry.created_at < as_of_end,
         )

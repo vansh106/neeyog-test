@@ -137,6 +137,7 @@ class QuotationListItem(BaseModel):
     next_follow_up_date: str | None = None
     created_at: str
     created_by_name: str | None = None
+    is_archived: bool = False
 
 
 class QuotationHistoryItem(BaseModel):
@@ -457,6 +458,7 @@ async def handle_list_quotations(
                     next_follow_up_date=follow_up.isoformat() if follow_up else None,
                     created_at=q.created_at.isoformat() if q.created_at else "",
                     created_by_name=(q.created_by_name or "").strip() or None,
+                    is_archived=bool(getattr(q, "is_archived", False)),
                 )
             )
         return items
@@ -539,6 +541,30 @@ async def handle_patch_quotation_listing_dates(
             performed_by_name=user.full_name or None,
         )
         return _quotation_api_dict(q)
+    except ProductNotFoundError:
+        raise HTTPException(status_code=404, detail="Quotation not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+async def handle_archive_quotation(
+    quotation_id: str,
+    db: AsyncSession,
+    user: CurrentUser,
+) -> dict:
+    try:
+        current = await quotation_service.get_quotation(quotation_id, db)
+        _ensure_quotation_access(current, user)
+        q = await quotation_service.archive_quotation(
+            quotation_id,
+            db,
+            performed_by=user.email,
+            performed_by_name=user.full_name or None,
+        )
+        return {
+            "quotation_id": str(q.id),
+            "is_archived": bool(getattr(q, "is_archived", False)),
+        }
     except ProductNotFoundError:
         raise HTTPException(status_code=404, detail="Quotation not found")
     except Exception as e:

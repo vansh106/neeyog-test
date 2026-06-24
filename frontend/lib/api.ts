@@ -260,6 +260,10 @@ export const enquiriesApi = {
     id: string,
     body: { next_follow_up_date?: string | null },
   ) => patch<T>(`/api/enquiries/${encodeURIComponent(id)}/listing-dates`, body),
+  archive: <T = unknown>(id: string) =>
+    post<T>(`/api/enquiries/${encodeURIComponent(id)}/archive`, {}),
+  assignUser: <T = unknown>(id: string, body: { user_id: string }) =>
+    patch<T>(`/api/enquiries/${encodeURIComponent(id)}/assign-user`, body),
   listEmailInbox: <T = unknown>(params?: {
     status?: string
     limit?: number
@@ -332,6 +336,8 @@ export const quotationsApi = {
     id: string,
     body: { validity_date?: string | null; next_follow_up_date?: string | null },
   ) => patch<T>(`/api/quotations/${encodeURIComponent(id)}/listing-dates`, body),
+  archive: <T = unknown>(id: string) =>
+    post<T>(`/api/quotations/${encodeURIComponent(id)}/archive`, {}),
   getQuoteHistory: <T = unknown>(
     params: {
       category: string
