@@ -52,6 +52,7 @@ const PERM_LABELS: Record<string, string> = {
   email_sync_trigger: 'Trigger Email Sync',
   reports_view: 'View Reports',
   reports_export: 'Export Reports',
+  view_indiamart: 'View IndiaMart Leads',
   users_view: 'View Team',
   users_create: 'Create Team Members',
   users_edit: 'Edit Team Permissions',
@@ -115,7 +116,7 @@ export default function AdminPage() {
   const [fullName, setFullName] = useState('')
   const [email, setEmail] = useState('')
   const [jobTitle, setJobTitle] = useState('')
-  const [tier, setTier] = useState<'member' | 'admin'>('member')
+  const [tier, setTier] = useState<'member' | 'admin' | 'indiamart'>('member')
   const [monthlyBookingTarget, setMonthlyBookingTarget] = useState('1000000')
   const [selected, setSelected] = useState<Set<string>>(new Set())
 
@@ -262,9 +263,12 @@ export default function AdminPage() {
     if (!sheetOpen) return
     if (mode === 'create') {
       initMbAccessFromDefaults(tier)
+      if (tier === 'indiamart' && presets['IndiaMart Account']) {
+        setSelected(new Set(presets['IndiaMart Account']))
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- initMbAccessFromDefaults is stable helper
-  }, [sheetOpen, mode, tier, mailboxList])
+  }, [sheetOpen, mode, tier, mailboxList, presets])
 
   useEffect(() => {
     if (!sheetOpen || mode !== 'edit' || !editUser) return
@@ -297,7 +301,7 @@ export default function AdminPage() {
     setFullName(u.full_name)
     setEmail(u.email)
     setJobTitle(u.job_title ?? '')
-    setTier(u.tier === 'admin' ? 'admin' : 'member')
+    setTier(u.tier === 'admin' ? 'admin' : u.tier === 'indiamart' ? 'indiamart' : 'member')
     setMonthlyBookingTarget(String(u.monthly_booking_target ?? 1000000))
     setSelected(new Set(u.permissions))
     setSheetOpen(true)
@@ -578,6 +582,10 @@ export default function AdminPage() {
                         Admin
                       </label>
                     )}
+                    <label className="flex items-center gap-2">
+                      <input type="radio" checked={tier === 'indiamart'} onChange={() => setTier('indiamart')} />
+                      IndiaMart account
+                    </label>
                   </div>
                 </div>
               </>

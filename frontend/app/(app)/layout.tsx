@@ -43,11 +43,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     }
   }, [hydrated, user, access_token, router])
 
-  /** Re-issue JWT after DB permission backfill (migration) so the client store matches the token. */
+  /** Sync JWT + user profile (tier, permissions) from server once per session. */
   useEffect(() => {
     if (!hydrated || !user || !access_token || rbacBootstrapAttempted.current) return
-    if (user.tier === 'superadmin') return
-    if ((user.permissions?.length ?? 0) > 0) return
     rbacBootstrapAttempted.current = true
     void refreshAccessToken()
   }, [hydrated, user, access_token])

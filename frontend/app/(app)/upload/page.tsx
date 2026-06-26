@@ -25,7 +25,7 @@ import ManualEntryForm from '@/components/upload/ManualEntryForm'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
-import { createManualEnquiry, downloadQuotationPdf, enquiriesApi, uploadEmailStream } from '@/lib/api'
+import { createManualEnquiry, downloadQuotationPdf, enquiriesApi, indiamartApi, uploadEmailStream } from '@/lib/api'
 import { Permissions } from '@/lib/permissions'
 import { useEmailSyncStatus, useTriggerEmailSync } from '@/lib/queries'
 import { cn, formatCurrency, truncateId } from '@/lib/utils'
@@ -37,6 +37,7 @@ import type {
   ClientVerificationContext,
   ClientVerificationResponse,
   ManualEnquiryCreateForm,
+  IndiaMartPrefillResponse,
 } from '@/types'
 
 type InputType = 'email' | 'indiamart' | 'manual'
@@ -115,6 +116,7 @@ function UploadPageInner() {
   const searchParams = useSearchParams()
   const refEnquiryId = searchParams.get('ref')
   const tabParam = searchParams.get('tab')
+  const indiamartQueryId = searchParams.get('indiamart')
 
   const { data: syncStatus } = useEmailSyncStatus()
   const triggerSync = useTriggerEmailSync()
@@ -139,11 +141,43 @@ function UploadPageInner() {
   const [clientVerified, setClientVerified] = useState<ClientVerificationResponse | null>(null)
 
   const [prefillManualNotes, setPrefillManualNotes] = useState<string | null>(null)
+  const [indiamartPrefill, setIndiamartPrefill] = useState<IndiaMartPrefillResponse | null>(null)
+  const [indiamartPrefillError, setIndiamartPrefillError] = useState<string | null>(null)
   const [pdfDownloadBusy, setPdfDownloadBusy] = useState(false)
 
   useEffect(() => {
-    if (tabParam === 'manual') setActiveTab('manual')
-  }, [tabParam])
+    if (tabParam === 'manual' || indiamartQueryId) setActiveTab('manual')
+  }, [tabParam, indiamartQueryId])
+
+  useEffect(() => {
+    if (!indiamartQueryId) {
+      setIndiamartPrefill(null)
+      setIndiamartPrefillError(null)
+      return
+    }
+    let cancelled = false
+    indiamartApi
+      .getPrefill<IndiaMartPrefillResponse>(indiamartQueryId)
+      .then((data) => {
+        if (cancelled) return
+        if (!data.can_create_inquiry && data.linked_enquiry_id) {
+          router.replace(`/enquiries/${data.linked_enquiry_id}`)
+          return
+        }
+        setIndiamartPrefill(data)
+        setPrefillManualNotes(data.notes)
+        setIndiamartPrefillError(null)
+      })
+      .catch((e) => {
+        if (!cancelled) {
+          setIndiamartPrefill(null)
+          setIndiamartPrefillError(e instanceof Error ? e.message : 'Could not load IndiaMart lead')
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [indiamartQueryId, router])
 
   useEffect(() => {
     if (!refEnquiryId) {
@@ -242,7 +276,7 @@ function UploadPageInner() {
       try {
         const res = await createManualEnquiry(form)
         if (res.enquiry_id) {
-          router.push('/enquiries')
+          router.push(`/enquiries/${res.enquiry_id}`)
           return
         }
         setStreamError('Enquiry was created but no id was returned')
@@ -632,6 +666,21 @@ function UploadPageInner() {
             </TabsContent>
 
             <TabsContent value="manual">
+              {indiamartQueryId && (
+                <div className="mb-4 rounded-lg border border-brand-green-200 bg-brand-green-50/50 px-4 py-3 text-[13px] text-gray-800">
+                  {indiamartPrefillError ? (
+                    <p className="text-red-700">{indiamartPrefillError}</p>
+                  ) : indiamartPrefill ? (
+                    <p>
+                      Creating enquiry from IndiaMart lead{' '}
+                      <span className="font-mono text-[12px]">{indiamartPrefill.unique_query_id}</span>.
+                      Client details are pre-filled — review and click Create enquiry.
+                    </p>
+                  ) : (
+                    <p className="text-surface-muted">Loading IndiaMart lead…</p>
+                  )}
+                </div>
+              )}
               <p className="mb-4 text-[13px] text-surface-muted">
                 Select or add a client to create an enquiry. You&apos;ll add products and generate the quotation on
                 the enquiry detail page.
@@ -641,12 +690,15 @@ function UploadPageInner() {
                 fallback={<p className="text-[13px] text-surface-muted">You do not have permission to submit manual enquiries.</p>}
               >
                 <ManualEntryForm
-                  key={refEnquiryId || 'no-email-ref'}
+                  key={indiamartQueryId || refEnquiryId || 'no-email-ref'}
                   stage="client"
                   isProcessing={isStreaming}
                   onSubmitManual={() => {}}
                   onCreateEnquiry={handleCreateManualEnquiry}
                   prefillNotesFromEnquiry={prefillManualNotes}
+                  matcherClientHint={indiamartPrefill?.client_hint ?? null}
+                  initialEnquirySource={indiamartPrefill?.source ?? (indiamartQueryId ? 'indiamart' : undefined)}
+                  indiamartQueryId={indiamartQueryId}
                 />
               </PermissionGate>
             </TabsContent>

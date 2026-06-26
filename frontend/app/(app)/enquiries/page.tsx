@@ -138,7 +138,7 @@ export default function EnquiriesPage() {
   const chips: { key: Pipeline; label: string }[] = [
     { key: 'all', label: 'All' },
     { key: 'complete', label: 'Complete' },
-    { key: 'incomplete', label: 'Incomplete' },
+    { key: 'incomplete', label: 'Not Quoted' },
     { key: 'pending', label: 'Pending' },
     { key: 'failed', label: 'Failed' },
   ]

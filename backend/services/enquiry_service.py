@@ -343,7 +343,7 @@ def _calc_totals(
     return normalized, item_total, gst_amount, pf_amount, total_amount
 
 
-EMAIL_AGENT_INPUT_TYPES = frozenset({"email", "email_sync", "indiamart"})
+EMAIL_AGENT_INPUT_TYPES = frozenset({"email", "email_sync"})
 
 
 def is_email_agent_enquiry(e: Enquiry) -> bool:
@@ -1169,6 +1169,125 @@ async def create_manual_enquiry(
         "status": "received",
         "flow_type": "manual",
         "message": "Enquiry created — add products on the enquiry page to generate a quotation",
+        "quotation_id": None,
+        "pdf_available": False,
+        "pdf_path": None,
+        "quote_number": None,
+        "subtotal": None,
+        "total_amount": None,
+        "line_items": [],
+        "ai_reasoning": [],
+        "requires_human_review": False,
+    }
+
+
+async def create_indiamart_pickup_enquiry(
+    body: dict,
+    db: AsyncSession,
+    *,
+    source_message: str,
+    indiamart_query_id: str,
+    indiamart_unique_query_id: str,
+    created_by_user_id: uuid.UUID | None = None,
+    created_by_name: str | None = None,
+) -> dict:
+    """Create enquiry from IndiaMart pickup — source message stored for enquiry detail page."""
+    from services.client_service import increment_branch_enquiry_count
+
+    cb_uid = created_by_user_id
+    cb_raw = (created_by_name or "").strip()
+    cb_name = cb_raw[:255] if cb_raw else None
+    notes = str(body.get("notes") or "").strip()
+
+    resolved = await _resolve_manual_client_identity(body, db)
+    client_name = resolved["client_name"]
+    client_company = resolved["client_company"]
+    client_email = resolved["client_email"]
+    client_phone = resolved["client_phone"]
+    company_id_uuid = resolved["company_id_uuid"]
+    branch_id_uuid = resolved["branch_id_uuid"]
+    employee_for_quote = resolved["employee_for_quote"]
+    mode = resolved["mode"]
+    selected_client_id = resolved["selected_client_id"]
+
+    enquiry_id = uuid.uuid4()
+    manual_client: dict = {"mode": mode}
+    if mode == "existing" and selected_client_id:
+        manual_client["selected_client_id"] = selected_client_id
+    elif mode == "new":
+        nc = body.get("newClient") or {}
+        manual_client["new_client"] = {
+            "company_name": str(nc.get("company_name") or "").strip(),
+            "branch_name": str(nc.get("branch_name") or "Head Office").strip(),
+            "contact_name": str(nc.get("contact_name") or "").strip(),
+            "phone": str(nc.get("phone") or ""),
+            "email": str(nc.get("email") or ""),
+            "city": str(nc.get("city") or "").strip(),
+            "address_line1": str(nc.get("address_line1") or nc.get("address") or "").strip(),
+        }
+
+    parsed_data: dict = {
+        "client_name": client_name,
+        "client_company": client_company,
+        "client_email": client_email,
+        "client_phone": client_phone,
+        "priority": "Normal",
+        "notes": notes,
+        "manual_client": manual_client,
+        "branch_id": str(branch_id_uuid) if branch_id_uuid else None,
+        "client_employee_id": str(employee_for_quote.id) if employee_for_quote else None,
+        "enquiry_source": "indiamart",
+        "indiamart_query_id": indiamart_query_id,
+        "indiamart_unique_query_id": indiamart_unique_query_id,
+        "email_approval": {"status": "not_applicable"},
+    }
+
+    enquiry_no = await allocate_enquiry_number(db)
+    enquiry = Enquiry(
+        id=enquiry_id,
+        client_config="parth_valves",
+        raw_input=(source_message or "").strip(),
+        input_type="indiamart",
+        status="received",
+        flow_type="manual",
+        parsed_data=parsed_data,
+        matched_products=[],
+        created_by_user_id=cb_uid,
+        created_by_name=cb_name,
+        enquiry_number=enquiry_no,
+    )
+    if company_id_uuid is not None:
+        enquiry.company_id = company_id_uuid
+    if branch_id_uuid is not None:
+        enquiry.branch_id = branch_id_uuid
+
+    db.add(enquiry)
+    await db.flush()
+
+    if branch_id_uuid is not None:
+        await increment_branch_enquiry_count(str(branch_id_uuid), db)
+
+    audit = AuditLog(
+        id=uuid.uuid4(),
+        entity_type="enquiry",
+        entity_id=enquiry_id,
+        action="indiamart_pickup",
+        performed_by="user",
+        details={
+            "client_company": client_company,
+            "client_name": client_name,
+            "indiamart_query_id": indiamart_query_id,
+            "indiamart_unique_query_id": indiamart_unique_query_id,
+        },
+    )
+    db.add(audit)
+
+    return {
+        "enquiry_id": str(enquiry_id),
+        "enquiry_number": (enquiry.enquiry_number or "").strip() or None,
+        "status": "received",
+        "flow_type": "manual",
+        "message": "IndiaMart lead picked up — add products on the enquiry page to generate a quotation",
         "quotation_id": None,
         "pdf_available": False,
         "pdf_path": None,

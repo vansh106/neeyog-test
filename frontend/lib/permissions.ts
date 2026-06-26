@@ -26,6 +26,7 @@ export const Permissions = {
   EMAIL_SYNC_TRIGGER: 'email_sync_trigger',
   REPORTS_VIEW: 'reports_view',
   REPORTS_EXPORT: 'reports_export',
+  VIEW_INDIAMART: 'view_indiamart',
   USERS_VIEW: 'users_view',
   USERS_CREATE: 'users_create',
   USERS_EDIT: 'users_edit',

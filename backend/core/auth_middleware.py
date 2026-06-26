@@ -40,6 +40,10 @@ class CurrentUser:
     def is_admin_or_above(self) -> bool:
         return self.tier in ("admin", "superadmin")
 
+    @property
+    def can_access_indiamart(self) -> bool:
+        return self.tier in ("admin", "superadmin", "indiamart")
+
 
 async def get_current_user(
     credentials: Annotated[HTTPAuthorizationCredentials, Depends(security)],
@@ -108,6 +112,20 @@ def require_admin_permissions(*permissions: Permission):
                         "message": "You don't have permission to perform this action.",
                     },
                 )
+        return current_user
+
+    return checker
+
+
+def require_indiamart_access():
+    """Admin, superadmin, or dedicated IndiaMart account tier."""
+
+    async def checker(current_user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
+        if not current_user.can_access_indiamart:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="IndiaMart access required",
+            )
         return current_user
 
     return checker

@@ -344,13 +344,23 @@ export default function EnquiryDetailPage() {
     return null
   }, [ext, parsed])
 
+  const isIndiaMartEnquiry = useMemo(() => {
+    const inputType = (ext?.input_type || '').toLowerCase()
+    const src =
+      (typeof parsed?.enquiry_source === 'string' && parsed.enquiry_source) ||
+      (typeof ext?.source === 'string' && ext.source) ||
+      ''
+    return inputType === 'indiamart' || src === 'indiamart'
+  }, [ext?.input_type, ext?.source, parsed?.enquiry_source])
+
   const requiresEmailApproval = useMemo(() => {
+    if (isIndiaMartEnquiry) return false
     const fromApi = (ext as { requires_email_approval?: boolean } | undefined)?.requires_email_approval
     if (typeof fromApi === 'boolean') return fromApi
     const st = (ext?.status || '').toLowerCase()
     if (st === 'pending_email_approval') return true
     return (emailApproval?.status || '').toLowerCase() === 'pending'
-  }, [emailApproval?.status, ext?.status])
+  }, [emailApproval?.status, ext?.status, isIndiaMartEnquiry])
 
   const isEmailRejected = (ext?.status || '').toLowerCase() === 'email_rejected'
 
@@ -516,7 +526,7 @@ export default function EnquiryDetailPage() {
     if (quoteId) return false
     const inputType = (ext?.input_type || '').toLowerCase()
     const flow = (ext?.flow_type || '').toLowerCase()
-    return inputType === 'manual_dropdown' || flow === 'manual'
+    return inputType === 'manual_dropdown' || inputType === 'indiamart' || flow === 'manual'
   }, [ext?.flow_type, ext?.input_type, quoteId])
 
   const matcherClientHint = useMemo(() => {
@@ -575,10 +585,16 @@ export default function EnquiryDetailPage() {
       missingList.length > 0)
 
   const emailLikeSource = useMemo(() => {
+    const inputType = (ext?.input_type || '').toLowerCase()
+    const src =
+      (typeof parsed?.enquiry_source === 'string' && parsed.enquiry_source) ||
+      (typeof ext?.source === 'string' && ext.source) ||
+      ''
+    if (inputType === 'indiamart' || src === 'indiamart') return true
     const raw = (ext?.raw_input || '').trim()
     if (!raw) return false
     return raw.toLowerCase().includes('from:') || raw.toLowerCase().includes('subject:')
-  }, [ext?.raw_input])
+  }, [ext?.input_type, ext?.raw_input, ext?.source, parsed?.enquiry_source])
 
   const matcherCompleteness =
     matcher && typeof matcher.product_completeness === 'string' ? matcher.product_completeness : null
@@ -594,6 +610,7 @@ export default function EnquiryDetailPage() {
   const showMatcherRail =
     !!matcher &&
     !quoteId &&
+    !isIndiaMartEnquiry &&
     !requiresEmailApproval &&
     !isEmailRejected &&
     (ext?.status === 'matcher_ready' ||

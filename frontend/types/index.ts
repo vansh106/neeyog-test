@@ -659,6 +659,78 @@ export interface ManualEnquiryCreateForm {
   priority: 'Normal' | 'High' | 'Urgent'
   notes: string
   source: EnquirySource
+  /** Links enquiry to IndiaMart query (one active enquiry per query until archived). */
+  indiamartQueryId?: string | null
+}
+
+export interface IndiaMartQueryItem {
+  id: string
+  unique_query_id: string
+  query_type: string | null
+  query_type_label: string
+  query_time: string | null
+  sender_name: string | null
+  sender_email: string | null
+  sender_mobile: string | null
+  sender_company: string | null
+  sender_city: string | null
+  sender_state: string | null
+  sender_address: string | null
+  sender_country_iso: string | null
+  query_message: string | null
+  query_product_name: string | null
+  enquiry_id: string | null
+  enquiry_number: string | null
+  is_picked_up: boolean
+  can_pickup: boolean
+  picked_up_by_user_id: string | null
+  picked_up_by_name: string | null
+  picked_up_at: string | null
+  is_archived: boolean
+  created_at: string | null
+  /** @deprecated use can_pickup */
+  can_create_inquiry?: boolean
+  created_at: string | null
+}
+
+export interface IndiaMartPickupResponse {
+  query: IndiaMartQueryItem
+  enquiry_id: string
+  enquiry_number: string | null
+}
+
+export interface IndiaMartQueryListResponse {
+  queries: IndiaMartQueryItem[]
+  total: number
+  last_sync_at: string | null
+  last_sync_status: string | null
+  last_sync_message: string | null
+  using_dummy_data: boolean
+}
+
+export interface IndiaMartPrefillResponse {
+  query_id: string
+  unique_query_id: string
+  source: EnquirySource
+  notes: string
+  can_create_inquiry?: boolean
+  can_pickup: boolean
+  is_picked_up: boolean
+  linked_enquiry_id: string | null
+  client_hint: {
+    mode: 'new' | 'existing'
+    newClient?: {
+      company_name?: string
+      branch_name?: string
+      contact_name?: string
+      phone?: string
+      email?: string
+      city?: string
+      state?: string
+      address_line1?: string
+    }
+    selectedClientId?: string
+  }
 }
 
 export interface ManualEnquiryForm {

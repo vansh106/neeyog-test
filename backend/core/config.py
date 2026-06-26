@@ -86,6 +86,12 @@ class Settings(BaseSettings):
         "buyer,query,contacted,requirement,looking for,interested,message,product"
     )
 
+    # IndiaMart Lead Manager Pull API (v2 delta sync — omit start/end for incremental leads)
+    indiamart_crm_key: str = ""
+    indiamart_sync_enabled: bool = True
+    indiamart_sync_interval_seconds: int = 600
+    indiamart_use_dummy_data: bool = True
+
     model_config = {
         "env_file": str(Path(__file__).resolve().parent.parent / ".env"),
         "env_file_encoding": "utf-8",

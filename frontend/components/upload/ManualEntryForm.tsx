@@ -36,7 +36,13 @@ import type {
   PriceCalculationResult,
   SupplierResponse,
 } from '@/types'
+import EnquiryNotesField from '@/components/enquiries/EnquiryNotesField'
 import { ENQUIRY_SOURCE_OPTIONS } from '@/lib/enquirySource'
+import {
+  buildEnquiryNotes,
+  EMPTY_MASTER_NOTES_SELECTIONS,
+  type MasterNotesSelections,
+} from '@/lib/enquiryMasterNotes'
 import { CLIENT_INDUSTRY_OPTIONS, type EnquirySource } from '@/types'
 
 const BRANCH_PRIMARY_CONTACT = '__branch_primary__'
@@ -78,6 +84,12 @@ type Props = {
   matcherClientHint?: MatcherClientHint | null
   /** Bump to remount valve configurator (e.g. clear matcher seed for full manual). */
   matcherSeedVersion?: number
+  /** Pre-set enquiry source (e.g. IndiaMart flow). */
+  initialEnquirySource?: EnquirySource
+  /** Links created enquiry back to IndiaMart query row. */
+  indiamartQueryId?: string | null
+  /** Override primary button label when ``stage`` is ``client``. */
+  clientStageSubmitLabel?: string
   /** Read-only client label shown when ``stage`` is ``products``. */
   clientSummaryLabel?: string | null
   /** Pre-select quote contact from enquiry ``parsed_data``. */
@@ -575,6 +587,9 @@ export default function ManualEntryForm({
   matcherSeed,
   matcherClientHint,
   matcherSeedVersion = 0,
+  initialEnquirySource,
+  indiamartQueryId,
+  clientStageSubmitLabel,
   clientSummaryLabel,
   initialClientEmployeeId,
 }: Props) {
@@ -582,7 +597,15 @@ export default function ManualEntryForm({
   const showProductsSection = stage !== 'client'
   useWarmupMatcherCatalog(matcherSeed?.catalogKey ?? null)
 
-  const [enquirySource, setEnquirySource] = useState<EnquirySource>('manual')
+  const [enquirySource, setEnquirySource] = useState<EnquirySource>(initialEnquirySource ?? 'manual')
+  const [masterNoteSelections, setMasterNoteSelections] = useState<MasterNotesSelections>(
+    EMPTY_MASTER_NOTES_SELECTIONS,
+  )
+  const [additionalNotes, setAdditionalNotes] = useState(() => (prefillNotesFromEnquiry || '').trim())
+  const enquiryNotes = useMemo(
+    () => buildEnquiryNotes(masterNoteSelections, additionalNotes),
+    [masterNoteSelections, additionalNotes],
+  )
   const [clientMode, setClientMode] = useState<'existing' | 'new'>('existing')
   const [newClient, setNewClient] = useState({
     company_name: '',
@@ -631,6 +654,14 @@ export default function ManualEntryForm({
       }))
     }
   }, [matcherClientHint])
+
+  useEffect(() => {
+    if (initialEnquirySource) setEnquirySource(initialEnquirySource)
+  }, [initialEnquirySource])
+
+  useEffect(() => {
+    setAdditionalNotes((prefillNotesFromEnquiry || '').trim())
+  }, [prefillNotesFromEnquiry])
 
   useEffect(() => {
     if (!initialClientEmployeeId || stage === 'client') return
@@ -1158,8 +1189,9 @@ export default function ManualEntryForm({
         address: newClient.address_line1 || newClient.address,
       },
       priority: 'Normal' as const,
-      notes: (prefillNotesFromEnquiry || '').trim(),
+      notes: enquiryNotes,
       source: enquirySource,
+      ...(indiamartQueryId ? { indiamartQueryId } : {}),
     }
     if (
       clientMode === 'existing' &&
@@ -1228,7 +1260,7 @@ export default function ManualEntryForm({
         ),
       ),
       priority: 'Normal',
-      notes: (prefillNotesFromEnquiry || '').trim(),
+      notes: enquiryNotes,
     }
     if (netOrderTotals?.subtotal != null) {
       const { pf, pfRate } = resolvePfAmount(
@@ -1309,8 +1341,8 @@ export default function ManualEntryForm({
   const submitLabel =
     stage === 'client'
       ? isProcessing
-        ? 'Creating…'
-        : 'Create Enquiry →'
+        ? 'Working…'
+        : (clientStageSubmitLabel ?? 'Create Enquiry →')
       : stage === 'products'
         ? isProcessing
           ? 'Generating…'
@@ -1354,6 +1386,7 @@ export default function ManualEntryForm({
 
       {/* ── Client Details ─────────────────────────────────────────── */}
       {showClientSection ? (
+      <>
       <section className="rounded-xl border border-surface-border bg-white p-5 shadow-sm border-t-2 border-t-brand-navy-200">
         <div className="flex items-center justify-between gap-3">
           <h2 className="text-[15px] font-semibold text-gray-900">Client Details</h2>
@@ -1960,6 +1993,15 @@ export default function ManualEntryForm({
           </div>
         )}
       </section>
+
+      <EnquiryNotesField
+        selections={masterNoteSelections}
+        onSelectionsChange={setMasterNoteSelections}
+        additionalNotes={additionalNotes}
+        onAdditionalNotesChange={setAdditionalNotes}
+        className="mt-4"
+      />
+      </>
       ) : null}
 
       {/* ── Products (valve configurator) ───────────────────────────── */}

@@ -18,6 +18,7 @@ import {
   ChevronRight,
   Mail,
   LogOut,
+  Store,
 } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
@@ -39,6 +40,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: '/upload', label: 'Upload', icon: Upload, permission: Permissions.UPLOAD_EMAIL },
   { href: '/emails', label: 'Emails', icon: Mail, permission: Permissions.VIEW_ENQUIRIES },
   { href: '/enquiries', label: 'Enquiries', icon: Inbox, permission: Permissions.VIEW_ENQUIRIES },
+  { href: '/indiamart', label: 'IndiaMart', icon: Store },
   { href: '/quotations', label: 'Quotations', icon: FileText, permission: Permissions.VIEW_QUOTATIONS },
   { href: '/purchase-orders', label: 'Purchase Orders', icon: ClipboardList, permission: Permissions.VIEW_PURCHASE_ORDERS },
   { href: '/reports', label: 'Reports', icon: BarChart2, permission: Permissions.REPORTS_VIEW },

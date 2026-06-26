@@ -30,9 +30,13 @@ async def create_user(
     created_by_id: str,
     db: AsyncSession,
 ) -> tuple[User, str]:
-    if tier not in (UserTier.ADMIN.value, UserTier.MEMBER.value):
-        raise ValueError("Tier must be 'member' or 'admin'")
+    if tier not in (UserTier.ADMIN.value, UserTier.MEMBER.value, UserTier.INDIAMART.value):
+        raise ValueError("Tier must be 'member', 'admin', or 'indiamart'")
     valid = _valid_permission_values()
+    if tier == UserTier.INDIAMART.value and not permissions:
+        from config.permissions import PERMISSION_PRESETS
+
+        permissions = [p.value for p in PERMISSION_PRESETS.get("IndiaMart Account", [])]
     for p in permissions:
         if p not in valid:
             raise ValueError(f"Invalid permission: {p}")

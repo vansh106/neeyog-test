@@ -78,7 +78,7 @@ async def broadcast_new_email(
         "subject": subject,
         "preview": (raw_email or "")[:120] + "...",
         "input_type": input_type,
-        "status": "pending_email_approval" if (input_type or "").strip().lower() in ("email", "email_sync", "indiamart") else "received",
+        "status": "pending_email_approval" if (input_type or "").strip().lower() in ("email", "email_sync") else "received",
     }
     if enquiry_number:
         payload["enquiry_number"] = enquiry_number

@@ -50,6 +50,9 @@ class Permission(str, Enum):
     REPORTS_VIEW = "reports_view"
     REPORTS_EXPORT = "reports_export"
 
+    # ── IndiaMart ──────────────────────────
+    VIEW_INDIAMART = "view_indiamart"
+
     # ── User Management ────────────────────
     USERS_VIEW = "users_view"
     USERS_CREATE = "users_create"
@@ -106,6 +109,9 @@ PERMISSION_GROUPS: dict[str, list[Permission]] = {
     "Reports": [
         Permission.REPORTS_VIEW,
         Permission.REPORTS_EXPORT,
+    ],
+    "IndiaMart": [
+        Permission.VIEW_INDIAMART,
     ],
     "User Management": [
         Permission.USERS_VIEW,
@@ -170,6 +176,15 @@ PERMISSION_PRESETS: dict[str, list[Permission]] = {
         Permission.MASTERS_VIEW,
         Permission.EMAIL_SYNC_VIEW,
         Permission.REPORTS_VIEW,
+    ],
+    "IndiaMart Account": [
+        Permission.VIEW_INDIAMART,
+        Permission.UPLOAD_EMAIL,
+        Permission.VIEW_ENQUIRIES,
+        Permission.VIEW_QUOTATIONS,
+        Permission.DOWNLOAD_PDF,
+        Permission.CLIENT_VIEW,
+        Permission.CLIENT_VERIFY,
     ],
     "Admin": [
         p for p in Permission if p != Permission.SYSTEM_SETTINGS_EDIT

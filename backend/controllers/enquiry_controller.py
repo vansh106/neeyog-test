@@ -172,6 +172,7 @@ class ManualEnquiryCreateRequest(BaseModel):
     source: str = "manual"
     client_employee_id: str | None = Field(None, alias="clientEmployeeId")
     new_client_employee: ManualNewClientEmployeeRequest | None = Field(None, alias="newClientEmployee")
+    indiamart_query_id: str | None = Field(None, alias="indiamartQueryId")
 
     @model_validator(mode="after")
     def validate_fields(self):
@@ -750,6 +751,18 @@ async def handle_create_manual_enquiry(
             created_by_user_id=creator_id,
             created_by_name=creator_name,
         )
+        imq_raw = (body.indiamart_query_id or "").strip()
+        if imq_raw and result.get("enquiry_id"):
+            from services import indiamart_service
+
+            try:
+                await indiamart_service.link_enquiry(
+                    db,
+                    query_id=uuid.UUID(imq_raw),
+                    enquiry_id=uuid.UUID(result["enquiry_id"]),
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
         return EnquiryResponse(**result)
     except EnquiryParseError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e

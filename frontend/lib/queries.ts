@@ -10,6 +10,7 @@ import {
   usersApi,
   mailboxesApi,
   analyticsApi,
+  indiamartApi,
   type ConversionPipelineGroupBy,
 } from './api'
 import { Permissions } from '@/lib/permissions'
@@ -21,6 +22,7 @@ import type {
   HealthResponse, ClientConfig, EmailSyncStatus,
   Accessories,
   MasterSheetDefaultSupplier,
+  IndiaMartQueryListResponse,
 } from '@/types'
 
 export function useHealth() {
@@ -479,5 +481,30 @@ export function useSheetDefaultSuppliers() {
     },
     enabled: authed,
     staleTime: 60_000,
+  })
+}
+
+export function useIndiaMartQueries(includeArchived = false) {
+  const authed = useAuthStore((s) => Boolean(s.access_token))
+  return useQuery<IndiaMartQueryListResponse>({
+    queryKey: ['indiamart-queries', includeArchived],
+    queryFn: () =>
+      indiamartApi.listQueries<IndiaMartQueryListResponse>({
+        include_archived: includeArchived,
+        auto_sync: true,
+      }),
+    enabled: authed,
+    staleTime: 30_000,
+    refetchInterval: 120_000,
+  })
+}
+
+export function useTriggerIndiaMartSync() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => indiamartApi.syncNow(),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['indiamart-queries'] })
+    },
   })
 }

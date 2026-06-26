@@ -54,7 +54,7 @@ export default function ActionQueueCard({ data, className }: Props) {
       <div className="max-h-[360px] overflow-y-auto">
         <div className="px-4 pt-3 pb-2">
           <p className="text-[10px] font-semibold uppercase tracking-wider text-surface-muted">
-            Incomplete enquiries · {incomplete.count}
+            Not quoted enquiries · {incomplete.count}
           </p>
         </div>
         {incomplete.items.length === 0 ? (

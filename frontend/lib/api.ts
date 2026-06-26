@@ -383,6 +383,18 @@ export const purchaseOrdersApi = {
   delete: <T = unknown>(id: string) => del<T>(`/api/purchase-orders/${encodeURIComponent(id)}`),
 }
 
+export const indiamartApi = {
+  listQueries: <T = unknown>(params?: { include_archived?: boolean; auto_sync?: boolean }) =>
+    get<T>('/api/indiamart/queries', params as Record<string, unknown>),
+  syncNow: <T = unknown>() => post<T>('/api/indiamart/sync', {}),
+  getPrefill: <T = unknown>(queryId: string) =>
+    get<T>(`/api/indiamart/queries/${encodeURIComponent(queryId)}/prefill`),
+  pickupQuery: <T = unknown>(queryId: string, body: import('@/types').ManualEnquiryCreateForm) =>
+    post<T>(`/api/indiamart/queries/${encodeURIComponent(queryId)}/pickup`, body),
+  archiveQuery: <T = unknown>(queryId: string) =>
+    post<T>(`/api/indiamart/queries/${encodeURIComponent(queryId)}/archive`, {}),
+}
+
 export const mastersApi = {
   listProducts: <T = unknown>(params?: { category?: string }) =>
     get<T>('/api/masters/products', params as Record<string, unknown>),

@@ -23,6 +23,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/dashboard': 'Dashboard',
   '/upload': 'Upload',
   '/enquiries': 'Enquiries',
+  '/indiamart': 'IndiaMart',
   '/quotations': 'Quotations',
   '/reports': 'Reports',
   '/masters': 'Masters',
@@ -71,7 +72,9 @@ export default function Topbar() {
       ? { cls: 'bg-red-100 text-red-700 border-red-200', label: 'Super Admin' }
       : tier === 'admin'
         ? { cls: 'bg-blue-50 text-blue-800 border-blue-200', label: 'Admin' }
-        : {
+        : tier === 'indiamart'
+          ? { cls: 'bg-amber-50 text-amber-800 border-amber-200', label: 'IndiaMart Account' }
+          : {
             cls: 'bg-brand-green-50 text-brand-green-700 border-brand-green-200',
             label: user?.job_title?.trim() || 'Member',
           }

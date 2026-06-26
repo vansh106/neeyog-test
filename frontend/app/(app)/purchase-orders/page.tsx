@@ -26,8 +26,12 @@ function formatPoDate(iso: string): string {
 
 const SO_ENTRY_DEADLINE_MS = 24 * 60 * 60 * 1000
 
+function isSoMissing(soNumber?: string | null): boolean {
+  return !soNumber?.trim()
+}
+
 function isSoEntryOverdue(createdAt: string, soNumber?: string | null): boolean {
-  if (soNumber?.trim()) return false
+  if (!isSoMissing(soNumber)) return false
   const createdMs = new Date(createdAt).getTime()
   if (Number.isNaN(createdMs)) return false
   return Date.now() - createdMs >= SO_ENTRY_DEADLINE_MS
@@ -215,6 +219,9 @@ function PoRow({
   onEnterSo: () => void
   onDelete: () => void
 }) {
+  const soMissing = isSoMissing(po.so_number)
+  const soOverdue = isSoEntryOverdue(po.created_at, po.so_number)
+
   return (
     <tr className="border-t border-[#E2E6DC] hover:bg-[#FAFAF8]/80">
       <td className="px-4 py-3">
@@ -253,17 +260,27 @@ function PoRow({
         <p className="font-mono text-[12px] text-gray-900">
           {po.so_number || <span className="text-surface-muted">—</span>}
         </p>
-        {isSoEntryOverdue(po.created_at, po.so_number) &&
+        {soMissing &&
           (canEnterSo ? (
             <button
               type="button"
               onClick={onEnterSo}
-              className="mt-0.5 text-left text-[11px] font-medium leading-snug text-red-600 underline-offset-2 hover:underline"
+              className={cn(
+                'mt-0.5 text-left text-[11px] font-medium leading-snug underline-offset-2 hover:underline',
+                soOverdue ? 'text-red-600' : 'text-brand-navy-600',
+              )}
             >
               Enter SO number
             </button>
           ) : (
-            <p className="mt-0.5 text-[11px] font-medium leading-snug text-red-600">Enter SO number</p>
+            <p
+              className={cn(
+                'mt-0.5 text-[11px] font-medium leading-snug',
+                soOverdue ? 'text-red-600' : 'text-surface-muted',
+              )}
+            >
+              Enter SO number
+            </p>
           ))}
       </td>
       <td className="px-4 py-3 text-[12px] text-surface-muted">{po.created_by_name || '—'}</td>

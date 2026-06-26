@@ -320,6 +320,7 @@ class QuotationProductHistory(Base):
 class UserTier(str, enum.Enum):
     SUPERADMIN = "superadmin"
     ADMIN = "admin"
+    INDIAMART = "indiamart"
     MEMBER = "member"
 
 
@@ -742,6 +743,63 @@ class PurchaseOrder(Base):
     )
     created_by_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_by_user: Mapped["User | None"] = relationship("User", foreign_keys=[created_by_user_id])
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+
+
+class IndiaMartSyncState(Base):
+    """Singleton row tracking the last successful IndiaMart delta sync."""
+
+    __tablename__ = "indiamart_sync_state"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    last_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_sync_status: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    last_sync_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class IndiaMartQuery(Base):
+    """Lead/query pulled from IndiaMart CRM API (deduped by ``unique_query_id``)."""
+
+    __tablename__ = "indiamart_queries"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    unique_query_id: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    query_type: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    query_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    sender_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    sender_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    sender_mobile: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    sender_company: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    sender_city: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    sender_state: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    sender_address: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sender_country_iso: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    query_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    query_product_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    raw_payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+    enquiry_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("enquiries.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    picked_up_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    picked_up_by_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    picked_up_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    enquiry_number: Mapped[str | None] = mapped_column(String(20), nullable=True, index=True)
+    is_archived: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false"), index=True
+    )
+
+    enquiry: Mapped["Enquiry | None"] = relationship("Enquiry", foreign_keys=[enquiry_id])
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)

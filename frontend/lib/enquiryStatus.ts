@@ -1,6 +1,6 @@
 /** Display labels for enquiry workflow statuses (API values unchanged). */
 export const ENQUIRY_STATUS_LABELS: Record<string, string> = {
-  received: 'Incomplete',
+  received: 'Not Quoted',
   approved: 'Quoted',
   pending_email_approval: 'Pending email approval',
   email_rejected: 'Email rejected',
@@ -12,7 +12,7 @@ export const ENQUIRY_STATUS_LABELS: Record<string, string> = {
   pending_human_review: 'Pending review',
   failed: 'Failed',
   complete: 'Complete',
-  incomplete: 'Incomplete',
+  incomplete: 'Not Quoted',
   quoted: 'Quoted',
   approved_sent: 'Quoted',
   email_approved: 'Email approved',

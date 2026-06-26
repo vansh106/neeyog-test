@@ -56,13 +56,13 @@ export default function IncompleteEnquiriesQueue({ data }: Props) {
     <div className="flex min-h-0 flex-col rounded-xl border border-[#E2E6DC] bg-white shadow-sm">
       <div className="border-b border-[#E2E6DC] px-4 py-3">
         <h3 className="text-[14px] font-semibold text-gray-900">
-          Incomplete Enquiries ({data.count})
+          Not Quoted Enquiries ({data.count})
         </h3>
       </div>
 
       <div className="max-h-[320px] overflow-y-auto">
         {data.items.length === 0 ? (
-          <p className="px-4 py-6 text-[13px] text-surface-muted">No incomplete enquiries right now.</p>
+          <p className="px-4 py-6 text-[13px] text-surface-muted">No not-quoted enquiries right now.</p>
         ) : (
           <ul className="divide-y divide-[#ECEEE8]">
             {data.items.map((item) => {

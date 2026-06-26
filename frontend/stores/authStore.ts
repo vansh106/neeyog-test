@@ -27,6 +27,7 @@ interface AuthStore {
   hasPermission: (permission: string) => boolean
   hasAny: (...permissions: string[]) => boolean
   isAdminOrAbove: () => boolean
+  canAccessIndiaMart: () => boolean
   updateToken: (token: string) => void
   setUser: (user: AuthUser) => void
   login: (email: string, password: string) => Promise<{ is_first_login: boolean }>
@@ -71,6 +72,15 @@ export const useAuthStore = create<AuthStore>()(
       isAdminOrAbove: () => {
         const { user } = get()
         return user?.tier === 'admin' || user?.tier === 'superadmin'
+      },
+
+      canAccessIndiaMart: () => {
+        const { user, hasPermission } = get()
+        if (!user) return false
+        if (user.tier === 'admin' || user.tier === 'superadmin' || user.tier === 'indiamart') {
+          return true
+        }
+        return hasPermission('view_indiamart')
       },
 
       updateToken: (token) => set({ access_token: token }),

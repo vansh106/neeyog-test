@@ -34,8 +34,8 @@ class CreateUserRequest(BaseModel):
     @field_validator("tier")
     @classmethod
     def validate_tier(cls, v: str) -> str:
-        if v not in ("member", "admin"):
-            raise ValueError("Tier must be 'member' or 'admin'")
+        if v not in ("member", "admin", "indiamart"):
+            raise ValueError("Tier must be 'member', 'admin', or 'indiamart'")
         return v
 
     @field_validator("permissions")
