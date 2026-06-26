@@ -21,6 +21,11 @@ from db.models import AuditLog, ClientCompany, PurchaseOrder, Quotation, Quotati
 from services.masters_service import _category_label
 from services import enquiry_service as enquiry_svc
 from services.pdf_service import generate_quotation_pdf
+from services.quotation_description_sanitize import (
+    sanitize_quotation_description_for_display,
+    strip_supplier_names_from_text,
+    supplier_names_for_client,
+)
 from services.quotation_audit_diff import (
     build_financial_change_view,
     build_line_items_change_view,
@@ -30,6 +35,7 @@ from services.quotation_audit_diff import (
 
 QUOTATION_CRM_STATUSES: frozenset[str] = frozenset({"po_received", "lost", "ongoing"})
 LINE_CRM_STATUS_ORDER: tuple[str, ...] = ("ongoing", "po_received", "lost")
+LOCKED_LINE_CRM_STATUSES: frozenset[str] = frozenset({"po_received", "lost"})
 
 
 def _normalize_line_crm_status(raw: object, *, fallback: str = "ongoing") -> str:
@@ -38,8 +44,12 @@ def _normalize_line_crm_status(raw: object, *, fallback: str = "ongoing") -> str
         st = "ongoing"
     if st in QUOTATION_CRM_STATUSES:
         return st
-    fb = str(fallback or "ongoing").strip().lower()
-    return fb if fb in QUOTATION_CRM_STATUSES else "ongoing"
+    return fallback if fallback in QUOTATION_CRM_STATUSES else "ongoing"
+
+
+def is_line_crm_status_locked(raw: object, *, fallback: str = "ongoing") -> bool:
+    """PO received and Lost line statuses cannot be changed."""
+    return _normalize_line_crm_status(raw, fallback=fallback) in LOCKED_LINE_CRM_STATUSES
 
 
 def _line_quantity(li: dict) -> int:
@@ -148,14 +158,21 @@ def _primary_category_from_lines(lines: list[dict]) -> str:
     return max(counts, key=lambda k: counts[k])
 
 
-def _short_label(line: dict) -> str:
-    name = str(line.get("product_name") or line.get("description") or "").strip()
+def _product_title_from_desc_text(name: str, supplier_names: list[str] | None = None) -> str:
     if "\n" in name:
         first = name.split("\n")[0].strip()
         if first.lower().startswith("product :"):
             name = first.split(":", 1)[1].strip()
         else:
             name = first
+    if supplier_names:
+        return strip_supplier_names_from_text(name, supplier_names)
+    return name
+
+
+def _short_label(line: dict, supplier_names: list[str] | None = None) -> str:
+    raw = str(line.get("product_name") or line.get("description") or "").strip()
+    name = _product_title_from_desc_text(raw, supplier_names)
     size = str(line.get("size") or "").strip()
     if len(name) > 36:
         name = name[:33] + "..."
@@ -164,15 +181,15 @@ def _short_label(line: dict) -> str:
     return name or "Item"
 
 
-def _listing_row_short_label(line: dict, *, max_name: int = 52) -> str:
+def _listing_row_short_label(
+    line: dict,
+    *,
+    max_name: int = 52,
+    supplier_names: list[str] | None = None,
+) -> str:
     """Single-line label for enquiry/quote listing rows (one row per product)."""
-    name = str(line.get("product_name") or line.get("description") or "").strip()
-    if "\n" in name:
-        first = name.split("\n")[0].strip()
-        if first.lower().startswith("product :"):
-            name = first.split(":", 1)[1].strip()
-        else:
-            name = first
+    raw = str(line.get("product_name") or line.get("description") or "").strip()
+    name = _product_title_from_desc_text(raw, supplier_names)
     size = str(line.get("size") or "").strip()
     if len(name) > max_name:
         name = name[: max_name - 3] + "..."
@@ -181,8 +198,10 @@ def _listing_row_short_label(line: dict, *, max_name: int = 52) -> str:
     return name or "Item"
 
 
-def _full_line_description(line: dict) -> str:
+def _full_line_description(line: dict, supplier_names: list[str] | None = None) -> str:
     desc = str(line.get("product_name") or line.get("description") or "").strip()
+    if supplier_names:
+        desc = sanitize_quotation_description_for_display(desc, supplier_names)
     if not desc:
         return "—"
     size = str(line.get("size") or "").strip()
@@ -201,21 +220,21 @@ def _full_line_description(line: dict) -> str:
     return desc
 
 
-def item_desc_lines_from_lines(lines: list[dict]) -> list[dict[str, str]]:
+def item_desc_lines_from_lines(lines: list[dict], supplier_names: list[str] | None = None) -> list[dict[str, str]]:
     out: list[dict[str, str]] = []
     for li in lines:
         if not isinstance(li, dict):
             continue
-        short = _listing_row_short_label(li)
-        full = _full_line_description(li)
+        short = _listing_row_short_label(li, supplier_names=supplier_names)
+        full = _full_line_description(li, supplier_names=supplier_names)
         if short == "Item" and full == "—":
             continue
         out.append({"short": short, "full": full})
     return out
 
 
-def _item_desc_short_from_lines(lines: list[dict]) -> str:
-    bits = [_short_label(li) for li in lines[:3] if isinstance(li, dict)]
+def _item_desc_short_from_lines(lines: list[dict], supplier_names: list[str] | None = None) -> str:
+    bits = [_short_label(li, supplier_names) for li in lines[:3] if isinstance(li, dict)]
     bits = [b for b in bits if b and b != "Item"]
     if not bits:
         return "—"
@@ -225,12 +244,12 @@ def _item_desc_short_from_lines(lines: list[dict]) -> str:
     return out[:250]
 
 
-def item_desc_short_from_lines(lines: list[dict]) -> str:
+def item_desc_short_from_lines(lines: list[dict], supplier_names: list[str] | None = None) -> str:
     """Public helper for enquiry / PO style listing snippets."""
-    return _item_desc_short_from_lines(lines)
+    return _item_desc_short_from_lines(lines, supplier_names)
 
 
-def listing_fields_from_quotation(q: Quotation) -> dict:
+def listing_fields_from_quotation(q: Quotation, *, supplier_names: list[str] | None = None) -> dict:
     from masters.listing_category import listing_fields_from_lines
 
     lines = q.line_items if isinstance(q.line_items, list) else []
@@ -241,8 +260,8 @@ def listing_fields_from_quotation(q: Quotation) -> dict:
         "category_label": masters["category_label"],
         "sub_category": masters["sub_category"],
         "category_lines": masters["category_lines"],
-        "item_desc_short": _item_desc_short_from_lines(lines),
-        "item_desc_lines": item_desc_lines_from_lines(lines),
+        "item_desc_short": _item_desc_short_from_lines(lines, supplier_names),
+        "item_desc_lines": item_desc_lines_from_lines(lines, supplier_names),
     }
 
 
@@ -573,6 +592,7 @@ async def update_quotation_financial_summary(
 
     pdf_path = await regenerate_quotation_pdf(
         q,
+        db=db,
         prepared_by_email=performed_by,
         prepared_by_name=performed_by_name,
     )
@@ -698,17 +718,21 @@ def _quotation_payload_for_pdf(
 async def regenerate_quotation_pdf(
     q: Quotation,
     *,
+    db: AsyncSession | None = None,
     prepared_by_email: str | None = None,
     prepared_by_name: str | None = None,
 ) -> str | None:
     settings = get_settings()
     client_json = settings.get_client_json()
+    supplier_names = await supplier_names_for_client(db) if db is not None else []
+    payload = _quotation_payload_for_pdf(
+        q,
+        prepared_by_email=prepared_by_email,
+        prepared_by_name=prepared_by_name,
+    )
+    payload["supplier_names"] = supplier_names
     pdf_path = await generate_quotation_pdf(
-        _quotation_payload_for_pdf(
-            q,
-            prepared_by_email=prepared_by_email,
-            prepared_by_name=prepared_by_name,
-        ),
+        payload,
         client_json,
     )
     return pdf_path
@@ -815,6 +839,7 @@ async def get_quotation_pdf_path(
     # Always regenerate on download so the file matches the latest UI/PDF template.
     regenerated = await regenerate_quotation_pdf(
         quotation,
+        db=db,
         prepared_by_email=prepared_by_email,
         prepared_by_name=prepared_by_name,
     )
@@ -915,6 +940,9 @@ async def update_quotation_crm_status(
             if not isinstance(li, dict):
                 continue
             row = dict(li)
+            if is_line_crm_status_locked(row.get("crm_status")):
+                updated.append(row)
+                continue
             row["crm_status"] = st
             row["crm_status_remarks"] = remarks if st == "lost" else None
             updated.append(row)
@@ -967,6 +995,11 @@ async def update_line_crm_status(
         raise ValueError("Invalid line index")
 
     row = dict(lines[line_index])
+    if is_line_crm_status_locked(row.get("crm_status")):
+        current = _normalize_line_crm_status(row.get("crm_status"))
+        label = current.replace("_", " ")
+        raise ValueError(f"Cannot change status: this product is locked as {label}.")
+
     row["crm_status"] = st
     row["crm_status_remarks"] = remarks if st == "lost" else None
     lines[line_index] = row
@@ -1281,6 +1314,7 @@ async def update_quotation_from_manual_line_items(
         "pf_rate": pf_rate,
         "pf_amount": pf_amount,
         "total_amount": total_amount,
+        "supplier_names": await supplier_names_for_client(db),
     }
 
     pdf_path = await generate_quotation_pdf(quotation_data, client_json)
@@ -1357,6 +1391,7 @@ async def update_quotation_pdf_display_overrides(
 
     pdf_path = await regenerate_quotation_pdf(
         q,
+        db=db,
         prepared_by_email=performed_by,
         prepared_by_name=performed_by_name,
     )

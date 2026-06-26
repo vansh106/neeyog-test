@@ -16,6 +16,7 @@ from core.exceptions import ProductNotFoundError, QuotationBuildError
 from db.models import Quotation
 from services import quotation_service
 from services import quotation_terms_service
+from services.quotation_description_sanitize import supplier_names_for_client
 
 
 def _is_admin_scope(user: CurrentUser) -> bool:
@@ -128,12 +129,12 @@ class QuotationListItem(BaseModel):
     category_lines: list[dict[str, str | None]] = Field(default_factory=list)
     item_desc_short: str
     item_desc_lines: list[dict[str, str]] = Field(default_factory=list)
+    subtotal: float
     total_amount: float
     po_total_amount: float | None = None
     status: str
     status_remarks: str | None = None
     line_status_summaries: dict[str, QuotationLineStatusSummary]
-    validity_date: str | None = None
     next_follow_up_date: str | None = None
     created_at: str
     created_by_name: str | None = None
@@ -408,10 +409,11 @@ async def handle_list_quotations(
         po_totals = await quotation_service.po_totals_by_quotation_ids(
             db, [q.id for q in quotations]
         )
+        supplier_names = await supplier_names_for_client(db)
         items: list[QuotationListItem] = []
         status_filter = str(status).strip().lower() if status and str(status).strip() else None
         for q in quotations:
-            listing = quotation_service.listing_fields_from_quotation(q)
+            listing = quotation_service.listing_fields_from_quotation(q, supplier_names=supplier_names)
             lines = q.line_items if isinstance(q.line_items, list) else []
             summaries_raw = quotation_service.build_line_status_summaries(
                 lines, fallback_status=q.status or "ongoing"
@@ -427,9 +429,6 @@ async def handle_list_quotations(
                 )
                 for key, block in summaries_raw.items()
             }
-            validity = getattr(q, "validity_date", None)
-            if validity is None:
-                validity = quotation_service.default_validity_date(q.created_at, q.validity_days)
             follow_up = getattr(q, "next_follow_up_date", None)
             po_total = po_totals.get(str(q.id))
             items.append(
@@ -449,12 +448,12 @@ async def handle_list_quotations(
                     category_lines=listing.get("category_lines") or [],
                     item_desc_short=listing["item_desc_short"],
                     item_desc_lines=listing.get("item_desc_lines") or [],
+                    subtotal=float(q.subtotal or 0),
                     total_amount=q.total_amount,
                     po_total_amount=po_total if po_total is not None else None,
                     status=q.status,
                     status_remarks=q.status_remarks,
                     line_status_summaries=summaries,
-                    validity_date=validity.isoformat() if validity else None,
                     next_follow_up_date=follow_up.isoformat() if follow_up else None,
                     created_at=q.created_at.isoformat() if q.created_at else "",
                     created_by_name=(q.created_by_name or "").strip() or None,

@@ -50,8 +50,7 @@ export default function QuotationLineStatusCell({ q, status }: Props) {
         onOpenChange={setOpen}
         quotationId={q.quotation_id}
         quoteNumber={q.quote_number}
-        status={status}
-        products={products}
+        products={products.map((p) => ({ ...p, status }))}
       />
     </>
   )

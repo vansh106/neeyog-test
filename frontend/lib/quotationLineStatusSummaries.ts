@@ -1,5 +1,9 @@
-import type { QuotationLineStatusSummary, QuotationListItem } from '@/types'
+import type { QuotationLineStatusProduct, QuotationLineStatusSummary, QuotationListItem } from '@/types'
 import { QUOTATION_CRM_STATUSES, type QuotationCrmStatus } from '@/lib/quotationCrmStatus'
+
+export type QuotationLineStatusProductRow = QuotationLineStatusProduct & {
+  status: QuotationCrmStatus
+}
 
 const EMPTY_SUMMARY = (total: number): QuotationLineStatusSummary => ({
   count: 0,
@@ -37,4 +41,15 @@ export function resolveLineStatusSummaries(
     ],
   }
   return base
+}
+
+export function collectQuotationLineProducts(q: QuotationListItem): QuotationLineStatusProductRow[] {
+  const summaries = resolveLineStatusSummaries(q)
+  const rows: QuotationLineStatusProductRow[] = []
+  for (const status of QUOTATION_CRM_STATUSES) {
+    for (const product of summaries[status].products) {
+      rows.push({ ...product, status })
+    }
+  }
+  return rows.sort((a, b) => a.line_index - b.line_index)
 }

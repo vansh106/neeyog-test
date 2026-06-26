@@ -1,9 +1,12 @@
 'use client'
 
+import { useMemo } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { Info } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { formatAmountInWordsInr } from '@/lib/formatAmountInWords'
 import { effectiveLinePdfDisplay } from '@/lib/quotationLineDisplay'
+import { suppliersApi } from '@/lib/api'
 import {
   buildDefaultFooterContact,
   buildDefaultMetaEnquiryColumn,
@@ -66,6 +69,15 @@ export default function QuotationFormatPreview({
   const website = String(clientConfig?.website || '').trim()
 
   const lineItems = quotation.line_items ?? []
+  const { data: suppliers } = useQuery({
+    queryKey: ['suppliers', 'quotation-sanitize'],
+    queryFn: () => suppliersApi.getSuppliers(false),
+    staleTime: 5 * 60 * 1000,
+  })
+  const supplierNames = useMemo(
+    () => (suppliers ?? []).map((s) => s.name).filter((name) => name.trim()),
+    [suppliers],
+  )
   const custCompany = (quotation.client_company || quotation.client_name || 'Customer').trim()
 
   let concernDisplay: string | null = null
@@ -217,8 +229,8 @@ export default function QuotationFormatPreview({
           <div className="px-3 py-1.5 text-[11px] font-extrabold tracking-wide" style={{ backgroundColor: '#f0f6f3', color: TEAL }}>
             QUOTATION FOR
           </div>
-          <div className="grid grid-cols-1 gap-3 p-3 text-[11px] sm:grid-cols-2">
-            <div>
+          <div className="flex flex-col gap-3 p-3 text-[11px] sm:flex-row sm:items-start sm:justify-between">
+            <div className="min-w-0 flex-1">
               <p className="text-[13px] font-extrabold text-[#1f2733]">{custCompany}</p>
               {(ov?.company_left_extra || []).map((row, i) => (
                 <p key={`cex-${i}`} className="mt-1 whitespace-pre-line text-[#4b5563]">
@@ -226,7 +238,7 @@ export default function QuotationFormatPreview({
                 </p>
               ))}
             </div>
-            <div className="space-y-1">
+            <div className="w-full shrink-0 space-y-1 text-right sm:max-w-[48%]">
               {concernDisplay ? (
                 <p>
                   <span className="text-[#6b7280]">Kind Attn.</span> {concernDisplay}
@@ -246,7 +258,9 @@ export default function QuotationFormatPreview({
           </div>
         </div>
 
-        <p className="mt-3 text-center text-[11px] italic text-[#4b5563]">{thankYouText}</p>
+        {thankYouText ? (
+          <p className="mt-3 text-center text-[11px] italic text-[#4b5563]">{thankYouText}</p>
+        ) : null}
       </section>
 
       <section className="border-b p-2 sm:p-3" style={{ borderColor: BORDER }}>
@@ -265,7 +279,7 @@ export default function QuotationFormatPreview({
             </thead>
             <tbody>
               {lineItems.map((line: QuotationLineItem, idx: number) => {
-                const pdfDisp = effectiveLinePdfDisplay(line, idx, pdfOverrides)
+                const pdfDisp = effectiveLinePdfDisplay(line, idx, pdfOverrides, supplierNames)
                 const disc =
                   typeof line.customer_discount_pct === 'number' && Number.isFinite(line.customer_discount_pct)
                     ? line.customer_discount_pct
@@ -435,6 +449,13 @@ export default function QuotationFormatPreview({
         </div>
       </section>
 
+      <section className="border-b px-3 py-2 sm:px-4" style={{ borderColor: BORDER }}>
+        <div className="rounded-r-md border-l-[3px] bg-[#fafbf9] px-3 py-2 text-[11px]" style={{ borderColor: TEAL }}>
+          <span className="text-[10px] uppercase tracking-wide text-[#6b7280]">Amount in words: </span>
+          <span className="font-bold text-[#1f2733]">{formatAmountInWordsInr(financials.grandTotal)}</span>
+        </div>
+      </section>
+
       {paymentTerms || deliveryPeriod ? (
         <section className="border-b px-3 py-2 sm:px-4" style={{ borderColor: BORDER }}>
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -458,25 +479,20 @@ export default function QuotationFormatPreview({
         </section>
       ) : null}
 
-      <section className="border-b px-3 py-2 sm:px-4" style={{ borderColor: BORDER }}>
-        <div className="rounded-r-md border-l-[3px] bg-[#fafbf9] px-3 py-2 text-[11px]" style={{ borderColor: TEAL }}>
-          <span className="text-[10px] uppercase tracking-wide text-[#6b7280]">Amount in words: </span>
-          <span className="font-bold text-[#1f2733]">{formatAmountInWordsInr(financials.grandTotal)}</span>
-        </div>
-      </section>
-
       {bankFields.length > 0 ? (
         <section className="border-b px-3 py-2 sm:px-4" style={{ borderColor: BORDER }}>
           <div className="rounded-md border p-3" style={{ borderColor: BORDER }}>
             <p className="mb-2 text-[11px] font-extrabold tracking-wide" style={{ color: TEAL }}>
               BANK DETAILS
             </p>
-            <div className="grid grid-cols-1 gap-1 sm:grid-cols-3">
+            <div className="flex flex-wrap text-[11px] leading-relaxed">
               {bankFields.map((field) => (
-                <p key={field.label} className="text-[11px] leading-relaxed">
-                  <span className="text-[#6b7280]">{field.label}</span>{' '}
-                  <span className="font-bold text-[#1f2733]">{field.value}</span>
-                </p>
+                <div key={field.label} className="w-full py-1 pr-2 sm:w-1/3">
+                  <span className="inline-block w-[86px] align-top text-[#6b7280]">{field.label}</span>
+                  <span className="inline-block max-w-[calc(100%-92px)] align-top font-bold text-[#1f2733]">
+                    {field.value}
+                  </span>
+                </div>
               ))}
             </div>
           </div>

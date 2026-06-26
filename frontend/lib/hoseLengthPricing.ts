@@ -1,11 +1,15 @@
-export type HoseLengthUnit = 'm' | 'cm'
+export type HoseLengthUnit = 'm' | 'cm' | 'mm'
 
 export function hoseLengthUnitLabel(unit: HoseLengthUnit): string {
-  return unit === 'cm' ? 'cm' : 'mtr'
+  if (unit === 'cm') return 'cm'
+  if (unit === 'mm') return 'mm'
+  return 'mtr'
 }
 
 export function hoseLengthToMeters(value: number, unit: HoseLengthUnit): number {
-  return unit === 'cm' ? value / 100 : value
+  if (unit === 'cm') return value / 100
+  if (unit === 'mm') return value / 1000
+  return value
 }
 
 export function parseHoseLengthInput(raw: string): number | null {
@@ -16,6 +20,7 @@ export function parseHoseLengthInput(raw: string): number | null {
 
 export function formatHoseLength(value: number, unit: HoseLengthUnit): string {
   if (unit === 'cm') return `${value} cm`
+  if (unit === 'mm') return `${value} mm`
   return `${value} mtr`
 }
 

@@ -144,7 +144,7 @@ export function buildDefaultMetaOwnerColumn(
 }
 
 export function defaultThankYouBanner(): string {
-  return 'Thank you for your enquiry and for considering us as your supplier. We are pleased to submit our offer:'
+  return ''
 }
 
 export function defaultCompanyRightBlurb(): string {

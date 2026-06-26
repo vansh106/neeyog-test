@@ -30,6 +30,7 @@ from db.models import (
 from services.email_display_infer import infer_company_from_email_raw
 from services.email_inbox_filters import raw_input_is_quotation_work_related
 from services.fiscal_numbering import allocate_enquiry_number, allocate_quote_number
+from services.quotation_description_sanitize import supplier_names_for_client
 
 logger = logging.getLogger(__name__)
 
@@ -1529,6 +1530,7 @@ async def process_manual_dropdown(
         quotation_data["prepared_by_email"] = prepared_by_email
     if prepared_by_phone:
         quotation_data["prepared_by_phone"] = prepared_by_phone
+    quotation_data["supplier_names"] = await supplier_names_for_client(db)
     if employee_for_quote is not None:
         quotation_data["quotation_client_employee"] = {
             "full_name": str(employee_for_quote.full_name or "").strip(),
@@ -1789,15 +1791,20 @@ async def latest_quotations_by_enquiry_ids(
     return out
 
 
-def item_desc_short_from_enquiry(e: Enquiry, quotation: Quotation | None = None) -> str:
+def item_desc_short_from_enquiry(
+    e: Enquiry,
+    quotation: Quotation | None = None,
+    *,
+    supplier_names: list[str] | None = None,
+) -> str:
     from services.quotation_service import item_desc_short_from_lines
 
     if quotation is not None and isinstance(quotation.line_items, list) and quotation.line_items:
-        return item_desc_short_from_lines(quotation.line_items)
+        return item_desc_short_from_lines(quotation.line_items, supplier_names)
     pd = e.parsed_data if isinstance(e.parsed_data, dict) else {}
     line_items = pd.get("line_items")
     if isinstance(line_items, list) and line_items:
-        return item_desc_short_from_lines(line_items)
+        return item_desc_short_from_lines(line_items, supplier_names)
     products = pd.get("products_requested", []) if isinstance(pd, dict) else []
     if not isinstance(products, list):
         return "—"
@@ -1819,15 +1826,20 @@ def item_desc_short_from_enquiry(e: Enquiry, quotation: Quotation | None = None)
     return out[:250]
 
 
-def item_desc_lines_from_enquiry(e: Enquiry, quotation: Quotation | None = None) -> list[dict[str, str]]:
+def item_desc_lines_from_enquiry(
+    e: Enquiry,
+    quotation: Quotation | None = None,
+    *,
+    supplier_names: list[str] | None = None,
+) -> list[dict[str, str]]:
     from services.quotation_service import item_desc_lines_from_lines
 
     if quotation is not None and isinstance(quotation.line_items, list) and quotation.line_items:
-        return item_desc_lines_from_lines(quotation.line_items)
+        return item_desc_lines_from_lines(quotation.line_items, supplier_names)
     pd = e.parsed_data if isinstance(e.parsed_data, dict) else {}
     line_items = pd.get("line_items")
     if isinstance(line_items, list) and line_items:
-        return item_desc_lines_from_lines(line_items)
+        return item_desc_lines_from_lines(line_items, supplier_names)
     products = pd.get("products_requested", []) if isinstance(pd, dict) else []
     if not isinstance(products, list):
         return []

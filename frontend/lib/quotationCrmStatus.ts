@@ -18,6 +18,11 @@ export function quotationCrmLabel(status: string): string {
   return status.replace(/_/g, ' ')
 }
 
+export function isLineCrmStatusLocked(status: string): boolean {
+  const normalized = status === 'hold' ? 'ongoing' : status
+  return normalized === 'po_received' || normalized === 'lost'
+}
+
 export const QUOTATION_CRM_LIST_PHRASE: Record<QuotationCrmStatus, string> = {
   ongoing: 'ongoing',
   po_received: 'PO received',

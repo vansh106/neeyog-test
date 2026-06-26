@@ -24,9 +24,7 @@ import type { QuotationListItem } from '@/types'
 
 const emptyLostRemarks = (): LostRemarksDraft => ({
   reason1: '',
-  reason2: '',
   other1: '',
-  other2: '',
 })
 
 export default function QuotationListStatusEditor({ q }: { q: QuotationListItem }) {

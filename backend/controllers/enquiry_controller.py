@@ -18,6 +18,7 @@ from core.auth_middleware import CurrentUser
 from core.exceptions import EnquiryParseError, ProductNotFoundError
 from db.models import Enquiry
 from services import enquiry_service
+from services.quotation_description_sanitize import supplier_names_for_client
 from services.email_display_infer import infer_company_from_email_raw
 
 logger = logging.getLogger(__name__)
@@ -515,6 +516,7 @@ async def handle_list_enquiries(
         quote_by_enquiry = await enquiry_service.latest_quotations_by_enquiry_ids(
             db, [e.id for e in enquiries]
         )
+        supplier_names = await supplier_names_for_client(db)
         return [
             EnquiryListItem(
                 enquiry_id=str(e.id),
@@ -525,10 +527,10 @@ async def handle_list_enquiries(
                 input_type=e.input_type,
                 source=_enquiry_list_source(e),
                 item_desc_short=enquiry_service.item_desc_short_from_enquiry(
-                    e, quote_by_enquiry.get(str(e.id))
+                    e, quote_by_enquiry.get(str(e.id)), supplier_names=supplier_names
                 ),
                 item_desc_lines=enquiry_service.item_desc_lines_from_enquiry(
-                    e, quote_by_enquiry.get(str(e.id))
+                    e, quote_by_enquiry.get(str(e.id)), supplier_names=supplier_names
                 ),
                 quotation_id=(
                     str(quote_by_enquiry[str(e.id)].id)

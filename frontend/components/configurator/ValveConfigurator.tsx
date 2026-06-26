@@ -1779,6 +1779,7 @@ export function ValveConfigurator({
                   <SelectContent>
                     <SelectItem value="m">mtr</SelectItem>
                     <SelectItem value="cm">cm</SelectItem>
+                    <SelectItem value="mm">mm</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

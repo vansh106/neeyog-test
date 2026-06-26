@@ -24,6 +24,7 @@ from reportlab.platypus import Image as RLImage
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from core.config import get_settings
+from services.quotation_description_sanitize import sanitize_quotation_description_for_display
 
 logger = logging.getLogger(__name__)
 
@@ -88,28 +89,13 @@ def _flow_from_kv_rows(rows: object, style: ParagraphStyle) -> list:
     return out
 
 
-def _sanitize_description_for_display(desc: object) -> str:
-    """Drop spec lines with no value (legacy quotes stored ``----`` placeholders)."""
-    if not desc:
-        return ""
-    out: list[str] = []
-    for line in str(desc).split("\n"):
-        if " : " not in line:
-            out.append(line)
-            continue
-        label, _sep, val = line.partition(" : ")
-        if label.strip().lower() in ("supplier", "supplier id"):
-            continue
-        v = val.strip()
-        if not v or v in ("----", "—", "-"):
-            continue
-        out.append(line)
-    return "\n".join(out)
+def _sanitize_description_for_display(desc: object, supplier_names: list[str] | None = None) -> str:
+    return sanitize_quotation_description_for_display(desc, supplier_names)
 
 
-def _description_paragraph_html(desc: object) -> str:
+def _description_paragraph_html(desc: object, supplier_names: list[str] | None = None) -> str:
     """Render multi-line key/value description (one pair per line) for ReportLab."""
-    cleaned = _sanitize_description_for_display(desc)
+    cleaned = _sanitize_description_for_display(desc, supplier_names)
     if not cleaned:
         return ""
     parts: list[str] = []
@@ -228,16 +214,38 @@ def _bank_details_rows(client_config: dict) -> list[tuple[str, str]]:
     return rows
 
 
+def _meta_value_paragraph_html(value: str) -> str:
+    """Format meta-strip values; break emails so they stay inside the column."""
+    v = str(value or "").strip()
+    if not v:
+        return "<b>—</b>"
+    if "@" in v and " " not in v:
+        local, _, domain = v.partition("@")
+        return f"<b>{escape(local)}<br/>@{escape(domain)}</b>"
+    return f"<b>{escape(v)}</b>"
+
+
 def _build_meta_col_table(
     items: list[tuple[str, str]],
     col_width: float,
     label_style: ParagraphStyle,
     value_style: ParagraphStyle,
 ) -> Table:
-    label_w = col_width * 0.46
-    value_w = col_width * 0.54
+    # Outer meta strip cells already have horizontal padding — keep inner table narrower.
+    inner_w = max(col_width - 18, 40)
+    label_w = inner_w * 0.44
+    value_w = inner_w * 0.56
+    value_style_wrapped = ParagraphStyle(
+        f"{value_style.name}Wrap",
+        parent=value_style,
+        alignment=TA_RIGHT,
+        wordWrap="CJK",
+    )
     rows = [
-        [Paragraph(f'<font color="#6b7280">{escape(label)}</font>', label_style), Paragraph(f"<b>{escape(value)}</b>", value_style)]
+        [
+            Paragraph(f'<font color="#6b7280">{escape(label)}</font>', label_style),
+            Paragraph(_meta_value_paragraph_html(value), value_style_wrapped),
+        ]
         for label, value in items
         if label or value
     ]
@@ -252,7 +260,7 @@ def _build_meta_col_table(
                 ("TOPPADDING", (0, 0), (-1, -1), 1.5),
                 ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5),
                 ("LEFTPADDING", (0, 0), (-1, -1), 0),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 2),
             ]
         )
     )
@@ -385,6 +393,12 @@ async def generate_quotation_pdf(
             leading=12,
             textColor=_TEXT,
         )
+        s_cust_right = ParagraphStyle(
+            "CustRight",
+            parent=s_addr,
+            alignment=TA_RIGHT,
+            wordWrap="CJK",
+        )
         s_meta_l = ParagraphStyle("MetaL", parent=s_normal, fontSize=7.9, textColor=_MUTED, alignment=TA_LEFT)
         s_meta_v = ParagraphStyle("MetaV", parent=s_normal, fontSize=7.9, textColor=_TEXT, alignment=TA_LEFT)
         s_cell = ParagraphStyle("Cell", parent=s_normal, fontSize=8, leading=11, textColor=_TEXT)
@@ -478,6 +492,10 @@ async def generate_quotation_pdf(
         el.append(Spacer(1, 3 * mm))
 
         pdf_ov = quotation_data.get("pdf_display_overrides")
+        supplier_names_raw = quotation_data.get("supplier_names")
+        supplier_names: list[str] = []
+        if isinstance(supplier_names_raw, list):
+            supplier_names = [str(n).strip() for n in supplier_names_raw if str(n).strip()]
 
         q_date_str = quotation_data.get("quotation_date") or date.today().strftime("%d/%m/%Y")
         validity_days = int(quotation_data.get("validity_days", 15))
@@ -582,27 +600,42 @@ async def generate_quotation_pdf(
         cust_right_lines: list = []
         if concern_text:
             cust_right_lines.append(
-                Paragraph(f'<font color="#6b7280">Kind Attn.</font> {concern_text}', s_addr)
+                Paragraph(f'<font color="#6b7280">Kind Attn.</font> {concern_text}', s_cust_right)
             )
         if client_phone:
             cust_right_lines.append(
-                Paragraph(f'<font color="#6b7280">Contact</font> {escape(str(client_phone))}', s_addr)
+                Paragraph(
+                    f'<font color="#6b7280">Contact</font> {escape(str(client_phone))}',
+                    s_cust_right,
+                )
             )
         if client_email:
+            email_val = str(client_email).strip()
+            if "@" in email_val and " " not in email_val:
+                local, _, domain = email_val.partition("@")
+                email_html = f"{escape(local)}<br/>@{escape(domain)}"
+            else:
+                email_html = escape(email_val)
             cust_right_lines.append(
-                Paragraph(f'<font color="#6b7280">Email</font> {escape(str(client_email))}', s_addr)
+                Paragraph(
+                    f'<font color="#6b7280">Email</font> {email_html}',
+                    s_cust_right,
+                )
             )
 
         cust_body = Table(
             [[cust_left_lines, cust_right_lines]],
-            colWidths=_table_col_widths(page_content_w, [0.55, 0.45]),
+            colWidths=_table_col_widths(page_content_w, [0.52, 0.48]),
         )
         cust_body.setStyle(
             TableStyle(
                 [
                     ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                    ("LEFTPADDING", (0, 0), (-1, -1), 10),
-                    ("RIGHTPADDING", (0, 0), (-1, -1), 10),
+                    ("ALIGN", (1, 0), (1, 0), "RIGHT"),
+                    ("LEFTPADDING", (0, 0), (0, 0), 10),
+                    ("RIGHTPADDING", (1, 0), (1, 0), 10),
+                    ("LEFTPADDING", (1, 0), (1, 0), 4),
+                    ("RIGHTPADDING", (0, 0), (0, 0), 4),
                     ("TOPPADDING", (0, 0), (-1, -1), 8),
                     ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
                 ]
@@ -634,26 +667,24 @@ async def generate_quotation_pdf(
             )
         )
         el.append(customer_box)
-        el.append(Spacer(1, 3 * mm))
 
-        thank_txt = (
-            f"Thank you for your enquiry and for considering {company} as your supplier. "
-            "We are pleased to submit our offer:"
-        )
+        thank_txt = ""
         if isinstance(pdf_ov, dict) and str(pdf_ov.get("thank_you_row") or "").strip():
             thank_txt = str(pdf_ov.get("thank_you_row") or "").strip()
-        el.append(
-            Paragraph(
-                f"<i>{escape(thank_txt)}</i>",
-                ParagraphStyle(
-                    "CenterThanks",
-                    parent=s_normal,
-                    alignment=1,
-                    fontSize=8.2,
-                    textColor=_MUTED_TEXT,
-                ),
+        if thank_txt:
+            el.append(Spacer(1, 3 * mm))
+            el.append(
+                Paragraph(
+                    f"<i>{escape(thank_txt)}</i>",
+                    ParagraphStyle(
+                        "CenterThanks",
+                        parent=s_normal,
+                        alignment=1,
+                        fontSize=8.2,
+                        textColor=_MUTED_TEXT,
+                    ),
+                )
             )
-        )
         el.append(Spacer(1, 3 * mm))
 
         # ── Line items table ──────────────────────────────────────────
@@ -684,7 +715,7 @@ async def generate_quotation_pdf(
                 desc = str(row_ov["description"])
             elif row_ov.get("product_name"):
                 desc = str(row_ov["product_name"])
-            desc = _sanitize_description_for_display(desc)
+            desc = _sanitize_description_for_display(desc, supplier_names)
             size = item.get("size", "")
             if row_ov.get("size"):
                 size = str(row_ov["size"])
@@ -699,7 +730,7 @@ async def generate_quotation_pdf(
             except (TypeError, ValueError):
                 disc_f = 0.0
 
-            desc_html = _description_paragraph_html(desc)
+            desc_html = _description_paragraph_html(desc, supplier_names)
             qty_cell = f"{escape(str(qty))} {escape(str(unit))}".strip()
             rate_cell = "TBD" if price_tbd else f"{price:,.2f}"
             total_cell = "TBD" if price_tbd else f"{total:,.2f}"
@@ -727,7 +758,7 @@ async def generate_quotation_pdf(
                 rate = str(srow.get("rate") or "").strip() or "—"
                 disc = str(srow.get("disc") or "").strip() or "—"
                 tot = str(srow.get("total") or "").strip() or "—"
-                desc_html = _description_paragraph_html(desc) if desc != "—" else "—"
+                desc_html = _description_paragraph_html(desc, supplier_names) if desc != "—" else "—"
                 table_data.append(
                     [
                         Paragraph(escape(sr), s_cell),
@@ -946,6 +977,29 @@ async def generate_quotation_pdf(
         el.append(terms_summary)
 
         el.append(Spacer(1, 3 * mm))
+        words_para = Paragraph(
+            (
+                f'<font color="#6b7280"><b>AMOUNT IN WORDS:</b></font> '
+                f'<b>{escape(_amount_in_words_inr(total_amount))}</b>'
+            ),
+            ParagraphStyle("Words", parent=s_terms, fontSize=8, leading=11, leftIndent=0),
+        )
+        words_tbl = Table([[words_para]], colWidths=[page_content_w])
+        words_tbl.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#fafbf9")),
+                    ("LINEBEFORE", (0, 0), (0, -1), 3, _PRIMARY),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 10),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 10),
+                    ("TOPPADDING", (0, 0), (-1, -1), 6),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+                ]
+            )
+        )
+        el.append(words_tbl)
+
+        el.append(Spacer(1, 3 * mm))
         payment_terms = str(client_config.get("payment_terms") or "").strip()
         delivery_period = str(client_config.get("delivery_period") or "").strip()
         if isinstance(pdf_ov, dict):
@@ -990,29 +1044,6 @@ async def generate_quotation_pdf(
             )
             el.append(paydel_tbl)
 
-        el.append(Spacer(1, 3 * mm))
-        words_para = Paragraph(
-            (
-                f'<font color="#6b7280"><b>AMOUNT IN WORDS:</b></font> '
-                f'<b>{escape(_amount_in_words_inr(total_amount))}</b>'
-            ),
-            ParagraphStyle("Words", parent=s_terms, fontSize=8, leading=11, leftIndent=0),
-        )
-        words_tbl = Table([[words_para]], colWidths=[page_content_w])
-        words_tbl.setStyle(
-            TableStyle(
-                [
-                    ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#fafbf9")),
-                    ("LINEBEFORE", (0, 0), (0, -1), 3, _PRIMARY),
-                    ("LEFTPADDING", (0, 0), (-1, -1), 10),
-                    ("RIGHTPADDING", (0, 0), (-1, -1), 10),
-                    ("TOPPADDING", (0, 0), (-1, -1), 6),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
-                ]
-            )
-        )
-        el.append(words_tbl)
-
         bank_rows = _bank_details_rows(client_config)
         if bank_rows:
             el.append(Spacer(1, 3 * mm))
@@ -1021,7 +1052,7 @@ async def generate_quotation_pdf(
             col_w = page_content_w / 3.0
             for label, value in bank_rows:
                 cell = Paragraph(
-                    f'<font color="#6b7280">{escape(label)}</font> <b>{escape(value)}</b>',
+                    f'<font color="#6b7280">{escape(label)}</font><br/><b>{escape(value)}</b>',
                     ParagraphStyle("BankCell", parent=s_terms, fontSize=7.6, leading=11),
                 )
                 row_buf.append(cell)
@@ -1038,9 +1069,9 @@ async def generate_quotation_pdf(
                     [
                         ("VALIGN", (0, 0), (-1, -1), "TOP"),
                         ("LEFTPADDING", (0, 0), (-1, -1), 0),
-                        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
-                        ("TOPPADDING", (0, 0), (-1, -1), 2),
-                        ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+                        ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+                        ("TOPPADDING", (0, 0), (-1, -1), 4),
+                        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
                     ]
                 )
             )

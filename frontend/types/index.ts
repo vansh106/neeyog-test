@@ -208,7 +208,6 @@ export interface Quotation {
   total_amount: number
   validity_days: number
   validity_date?: string | null
-  next_follow_up_date?: string | null
   status: string
   status_remarks?: string | null
   pdf_path: string | null
@@ -317,6 +316,7 @@ export interface QuotationListItem {
   category_lines?: ListingCategoryLine[]
   item_desc_short: string
   item_desc_lines?: ListingItemDescriptionLine[]
+  subtotal: number
   total_amount: number
   po_total_amount?: number | null
   status: string
@@ -325,7 +325,6 @@ export interface QuotationListItem {
     'ongoing' | 'po_received' | 'lost',
     QuotationLineStatusSummary
   >
-  validity_date?: string | null
   next_follow_up_date?: string | null
   created_at: string
   /** Logged-in user who created the quotation (manual flow); omitted for older rows or system-generated quotes. */
@@ -1075,7 +1074,7 @@ export interface AssembledProduct {
   include_bracket: boolean
   /** Cut length for hose products (masters price is per meter). */
   hose_length?: number | null
-  hose_length_unit?: 'm' | 'cm' | null
+  hose_length_unit?: 'm' | 'cm' | 'mm' | null
   /** True when the main product is a free-text temporary line (not from catalog). */
   is_temporary?: boolean
   /** Product family context for temporary products. */

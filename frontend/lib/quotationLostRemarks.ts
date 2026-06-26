@@ -9,9 +9,7 @@ const REMARKS_SEPARATOR = ' | '
 
 export type LostRemarksDraft = {
   reason1: string
-  reason2: string
   other1: string
-  other2: string
 }
 
 function readCustomReasons(): string[] {
@@ -62,7 +60,7 @@ function isKnownReason(value: string, options: string[]): boolean {
   return BUILT_IN_LOST_REASONS.includes(value as (typeof BUILT_IN_LOST_REASONS)[number]) || options.includes(value)
 }
 
-function partToDraft(part: string, options: string[]): Pick<LostRemarksDraft, 'reason1' | 'other1'> {
+function partToDraft(part: string, options: string[]): LostRemarksDraft {
   const trimmed = part.trim()
   if (!trimmed) return { reason1: '', other1: '' }
   if (isKnownReason(trimmed, options)) {
@@ -72,27 +70,20 @@ function partToDraft(part: string, options: string[]): Pick<LostRemarksDraft, 'r
   return { reason1: LOST_REASON_OTHER, other1: trimmed }
 }
 
+/** Parses stored remarks — only the first reason is used (legacy `a | b` keeps `a`). */
 export function parseLostRemarks(remarks: string | null | undefined): LostRemarksDraft {
   const options = getLostReasonSelectOptions()
   const text = (remarks ?? '').trim()
   if (!text) {
-    return { reason1: '', reason2: '', other1: '', other2: '' }
+    return { reason1: '', other1: '' }
   }
 
-  const parts = text.split(REMARKS_SEPARATOR).map((p) => p.trim()).filter(Boolean)
-  if (parts.length === 0) {
-    return { reason1: '', reason2: '', other1: '', other2: '' }
+  const firstPart = text.split(REMARKS_SEPARATOR).map((p) => p.trim()).filter(Boolean)[0] ?? ''
+  if (!firstPart) {
+    return { reason1: '', other1: '' }
   }
 
-  const first = partToDraft(parts[0], options)
-  const second = parts[1] ? partToDraft(parts[1], getLostReasonSelectOptions()) : { reason1: '', other1: '' }
-
-  return {
-    reason1: first.reason1,
-    other1: first.other1,
-    reason2: second.reason1,
-    other2: second.other1,
-  }
+  return partToDraft(firstPart, options)
 }
 
 function resolveReason(selection: string, otherText: string): string | null {
@@ -105,18 +96,10 @@ function resolveReason(selection: string, otherText: string): string | null {
 }
 
 export function formatLostRemarks(draft: LostRemarksDraft): string {
-  const parts: string[] = []
-  const r1 = resolveReason(draft.reason1, draft.other1)
-  const r2 = resolveReason(draft.reason2, draft.other2)
-  if (r1) {
-    if (draft.reason1 === LOST_REASON_OTHER) rememberCustomLostReason(r1)
-    parts.push(r1)
-  }
-  if (r2) {
-    if (draft.reason2 === LOST_REASON_OTHER) rememberCustomLostReason(r2)
-    parts.push(r2)
-  }
-  return parts.join(REMARKS_SEPARATOR)
+  const reason = resolveReason(draft.reason1, draft.other1)
+  if (!reason) return ''
+  if (draft.reason1 === LOST_REASON_OTHER) rememberCustomLostReason(reason)
+  return reason
 }
 
 export function isLostRemarksComplete(draft: LostRemarksDraft): boolean {
@@ -125,13 +108,10 @@ export function isLostRemarksComplete(draft: LostRemarksDraft): boolean {
 
 export function lostRemarksValidationMessage(draft: LostRemarksDraft): string | null {
   if (draft.reason1 === LOST_REASON_OTHER && !draft.other1.trim()) {
-    return 'Enter a reason for Other (reason 1).'
-  }
-  if (draft.reason2 === LOST_REASON_OTHER && !draft.other2.trim()) {
-    return 'Enter a reason for Other (reason 2).'
+    return 'Enter a reason for Other.'
   }
   if (!isLostRemarksComplete(draft)) {
-    return 'Select at least one lost reason.'
+    return 'Select a lost reason.'
   }
   return null
 }

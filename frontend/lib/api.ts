@@ -853,6 +853,7 @@ export type ActionQueuesResponse = {
       account_name: string
       expiring_value: number
       no_follow_up_logged: boolean
+      has_overdue?: boolean
     }>
   }
 }

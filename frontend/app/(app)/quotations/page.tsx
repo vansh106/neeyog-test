@@ -10,7 +10,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import ArchiveRecordDialog from '@/components/listing/ArchiveRecordDialog'
-import QuotationLineStatusCell from '@/components/quotations/QuotationLineStatusCell'
+import QuotationLineStatusColumn from '@/components/quotations/QuotationLineStatusColumn'
 import ListingItemDescriptionsCell from '@/components/listing/ListingItemDescriptionsCell'
 import ListingCategoryCell from '@/components/listing/ListingCategoryCell'
 import QuotationListDateEditor, {
@@ -30,7 +30,7 @@ import { useAuthStore } from '@/stores/authStore'
 import { formatCurrency, cn } from '@/lib/utils'
 import type { QuotationListItem } from '@/types'
 
-const COL_COUNT = 14
+const COL_COUNT = 11
 
 function TableSkeletonRows() {
   return (
@@ -90,7 +90,7 @@ export default function QuotationsPage() {
       }),
     [allRows, searchInput, clientFilter, statusFilter, dateFrom, dateTo, archiveFilter],
   )
-  const totalValue = list.reduce((sum, q) => sum + q.total_amount, 0)
+  const totalValue = list.reduce((sum, q) => sum + (q.subtotal ?? q.total_amount), 0)
 
   const clearFilters = () => {
     setSearchInput('')
@@ -204,7 +204,7 @@ export default function QuotationsPage() {
 
       <div className="overflow-hidden rounded-xl border border-surface-border bg-white shadow-sm">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[1680px] border-collapse text-left">
+          <table className="w-full min-w-[1420px] border-collapse text-left">
             <thead>
               <tr className="bg-[#F4F5F0] text-[11px] font-medium uppercase tracking-wide text-[#8A9488]">
                 <th className="min-w-[120px] whitespace-nowrap px-3 py-3">Quote / Enq</th>
@@ -214,10 +214,7 @@ export default function QuotationsPage() {
                 <th className="min-w-[160px] whitespace-nowrap px-3 py-3">Item Description</th>
                 <th className="min-w-[88px] whitespace-nowrap px-3 py-3 text-right">Quote ₹</th>
                 <th className="min-w-[72px] whitespace-nowrap px-3 py-3 text-right">PO ₹</th>
-                <th className="min-w-[120px] whitespace-nowrap px-3 py-3">Ongoing</th>
-                <th className="min-w-[120px] whitespace-nowrap px-3 py-3">PO received</th>
-                <th className="min-w-[100px] whitespace-nowrap px-3 py-3">Lost</th>
-                <th className="min-w-[96px] whitespace-nowrap px-3 py-3">Validity</th>
+                <th className="min-w-[140px] whitespace-nowrap px-3 py-3">Status</th>
                 <th className="min-w-[110px] whitespace-nowrap px-3 py-3">Next follow-up</th>
                 <th className="min-w-[88px] whitespace-nowrap px-3 py-3">User</th>
                 <th className="min-w-[72px] whitespace-nowrap px-3 py-3 text-right">Actions</th>
@@ -290,7 +287,7 @@ export default function QuotationsPage() {
                       />
                     </td>
                     <td className="whitespace-nowrap px-3 py-3 align-top text-right font-mono text-brand-green-600">
-                      {formatCurrency(q.total_amount)}
+                      {formatCurrency(q.subtotal ?? q.total_amount)}
                     </td>
                     <td className="whitespace-nowrap px-3 py-3 align-top text-right font-mono text-gray-900">
                       {q.po_total_amount != null && q.po_total_amount > 0
@@ -298,20 +295,7 @@ export default function QuotationsPage() {
                         : '—'}
                     </td>
                     <td className="px-3 py-3 align-top">
-                      <QuotationLineStatusCell q={q} status="ongoing" />
-                    </td>
-                    <td className="px-3 py-3 align-top">
-                      <QuotationLineStatusCell q={q} status="po_received" />
-                    </td>
-                    <td className="px-3 py-3 align-top">
-                      <QuotationLineStatusCell q={q} status="lost" />
-                    </td>
-                    <td className="px-3 py-3 align-top">
-                      <QuotationListDateEditor
-                        quotationId={q.quotation_id}
-                        field="validity_date"
-                        value={q.validity_date}
-                      />
+                      <QuotationLineStatusColumn q={q} />
                     </td>
                     <td className="px-3 py-3 align-top">
                       <QuotationListDateEditor

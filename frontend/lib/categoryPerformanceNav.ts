@@ -13,6 +13,9 @@ export type HierarchicalCategoryRow = CategoryMetric & {
   bar_width_pct: number
 }
 
+/** Dashboard matrix: family (depth 0) and category (depth 1) only — no sub-categories or SKUs. */
+const CATEGORY_PERF_MAX_DEPTH = 1
+
 /** Extra metric keys rolled into specific masters nav groups. */
 const GROUP_EXTRA_KEYS: Record<string, string[]> = {
   Valves: ['coarse:valves'],
@@ -122,7 +125,7 @@ function walkNav(
       bar_width_pct: maxWon > 0 ? Math.round((rollup.won_value / maxWon) * 1000) / 10 : 0,
     })
 
-    if (node.kind === 'group' && !collapseChildren(node)) {
+    if (node.kind === 'group' && !collapseChildren(node) && depth < CATEGORY_PERF_MAX_DEPTH) {
       walkNav(node.children, byKey, depth + 1, maxWon, medianRate, out)
     }
   }
@@ -154,11 +157,13 @@ export function buildHierarchicalCategoryRows(
   )
 
   const navRollups: Pick<CategoryMetric, 'won_value' | 'quoted_value'>[] = []
-  function collectRollups(nodes: MasterNavNode[]) {
+  function collectRollups(nodes: MasterNavNode[], depth = 0) {
     for (const node of nodes) {
       if (!hasActivity(node, byKey)) continue
       navRollups.push(metricsForNode(node, byKey))
-      if (node.kind === 'group') collectRollups(node.children)
+      if (node.kind === 'group' && depth < CATEGORY_PERF_MAX_DEPTH) {
+        collectRollups(node.children, depth + 1)
+      }
     }
   }
   collectRollups(MASTER_SIDEBAR_NAV)

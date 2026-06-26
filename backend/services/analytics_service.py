@@ -506,8 +506,8 @@ def _due_meta(due: date | None, today: date) -> tuple[str, str, int]:
         return label, "overdue", -1000 + delta
     if delta == 0:
         return "Due today", "today", 0
-    if delta <= 3:
-        return f"Due in {delta}d", "soon", delta
+    if delta <= 2:
+        return f"Due in {delta}d" if delta > 0 else "Due today", "soon", delta
     return due.strftime("%d %b"), "neutral", 100 + delta
 
 
@@ -575,7 +575,7 @@ async def get_action_queues(
         Quotation.status.in_(["ongoing", "hold"]),
         or_(
             Quotation.next_follow_up_date.is_(None),
-            Quotation.next_follow_up_date <= today + timedelta(days=3),
+            Quotation.next_follow_up_date <= today + timedelta(days=2),
         ),
     )
     if user_ids:
@@ -601,32 +601,36 @@ async def get_action_queues(
         )
     follow_items.sort(key=lambda x: (x["due_rank"], -x["deal_value"]))
 
-    expiry_end = today + timedelta(days=7)
-    expiry_stmt = select(Quotation).where(
+    alert_stmt = select(Quotation).where(
         Quotation.is_archived.is_(False),
-        Quotation.status == "ongoing",
-        Quotation.validity_date.isnot(None),
-        Quotation.validity_date >= today,
-        Quotation.validity_date <= expiry_end,
+        Quotation.status.in_(["ongoing", "hold"]),
+        or_(
+            Quotation.next_follow_up_date.is_(None),
+            Quotation.next_follow_up_date <= today + timedelta(days=2),
+        ),
     )
     if user_ids:
-        expiry_stmt = expiry_stmt.where(Quotation.created_by_user_id.in_(user_ids))
+        alert_stmt = alert_stmt.where(Quotation.created_by_user_id.in_(user_ids))
 
-    expiry_rows = list((await db.execute(expiry_stmt)).scalars().all())
+    alert_rows = list((await db.execute(alert_stmt)).scalars().all())
     accounts: dict[str, dict] = {}
-    for q in expiry_rows:
+    for q in alert_rows:
         account = _quotation_account_name(q)
         amount = float(q.total_amount or 0.0)
         no_follow_up = q.next_follow_up_date is None
+        overdue = q.next_follow_up_date is not None and q.next_follow_up_date < today
         if account not in accounts:
             accounts[account] = {
                 "account_name": account,
                 "expiring_value": 0.0,
                 "no_follow_up_logged": False,
+                "has_overdue": False,
             }
         accounts[account]["expiring_value"] += amount
         if no_follow_up:
             accounts[account]["no_follow_up_logged"] = True
+        if overdue:
+            accounts[account]["has_overdue"] = True
 
     account_breakdown = sorted(
         [
@@ -634,12 +638,16 @@ async def get_action_queues(
                 "account_name": row["account_name"],
                 "expiring_value": round(row["expiring_value"], 2),
                 "no_follow_up_logged": row["no_follow_up_logged"],
+                "has_overdue": row["has_overdue"],
             }
             for row in accounts.values()
         ],
-        key=lambda x: -x["expiring_value"],
+        key=lambda x: (
+            0 if x["no_follow_up_logged"] else (1 if x["has_overdue"] else 2),
+            -x["expiring_value"],
+        ),
     )
-    expiring_total = round(sum(a["expiring_value"] for a in account_breakdown), 2)
+    alert_total = round(sum(a["expiring_value"] for a in account_breakdown), 2)
 
     follow_pipeline_total = round(sum(x["deal_value"] for x in follow_items), 2)
 
@@ -654,9 +662,9 @@ async def get_action_queues(
             "items": follow_items,
         },
         "quote_expiry": {
-            "has_expiring_quotes": expiring_total > 0,
-            "expiring_value": expiring_total,
-            "timeframe_days": 7,
+            "has_expiring_quotes": alert_total > 0,
+            "expiring_value": alert_total,
+            "timeframe_days": 2,
             "accounts": account_breakdown,
         },
     }

@@ -20,7 +20,7 @@ function toInputValue(iso: string | null | undefined): string {
   return iso.slice(0, 10)
 }
 
-type ListingDateField = 'validity_date' | 'next_follow_up_date'
+type ListingDateField = 'next_follow_up_date'
 
 export default function QuotationListDateEditor({
   quotationId,
@@ -45,10 +45,7 @@ export default function QuotationListDateEditor({
   const persist = async (next: string) => {
     setBusy(true)
     try {
-      const payload =
-        field === 'validity_date'
-          ? { validity_date: next || null }
-          : { next_follow_up_date: next || null }
+      const payload = { next_follow_up_date: next || null }
       await quotationsApi.updateListingDates(quotationId, payload)
       await queryClient.invalidateQueries({ queryKey: ['quotations'] })
     } catch (e: unknown) {
@@ -62,7 +59,17 @@ export default function QuotationListDateEditor({
   const display = formatQuotationListDate(localValue ? `${localValue}T12:00:00` : null)
 
   if (!canEdit) {
-    return <span className={cn('text-[13px] text-gray-900', className)}>{display}</span>
+    return (
+      <span
+        className={cn(
+          'text-[13px]',
+          !localValue ? 'font-medium text-red-600' : 'text-gray-900',
+          className,
+        )}
+      >
+        {display}
+      </span>
+    )
   }
 
   return (
@@ -73,7 +80,14 @@ export default function QuotationListDateEditor({
         className,
       )}
     >
-      <span className={cn('text-[13px] text-gray-900', !localValue && 'text-surface-muted')}>{display}</span>
+      <span
+        className={cn(
+          'text-[13px]',
+          !localValue ? 'font-medium text-red-600' : 'text-gray-900',
+        )}
+      >
+        {display}
+      </span>
       <input
         type="date"
         value={localValue}
