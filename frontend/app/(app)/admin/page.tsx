@@ -238,7 +238,7 @@ export default function AdminPage() {
     },
   })
 
-  function initMbAccessFromDefaults(t: 'member' | 'admin') {
+  function initMbAccessFromDefaults(t: 'member' | 'admin' | 'indiamart') {
     const next: Record<string, MbToggle> = {}
     for (const m of mailboxList as Array<{ id: string }>) {
       next[m.id] = {

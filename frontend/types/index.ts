@@ -690,7 +690,6 @@ export interface IndiaMartQueryItem {
   created_at: string | null
   /** @deprecated use can_pickup */
   can_create_inquiry?: boolean
-  created_at: string | null
 }
 
 export interface IndiaMartPickupResponse {

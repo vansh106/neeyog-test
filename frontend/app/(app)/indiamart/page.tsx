@@ -117,7 +117,7 @@ export default function IndiaMartPage() {
   return (
     <PageShell
       title="IndiaMart Leads"
-      description="Open leads sit in the bucket until someone picks them up and creates an enquiry."
+      subtitle="Open leads sit in the bucket until someone picks them up and creates an enquiry."
       actions={
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-[12px] text-surface-muted">{relSyncTime(data?.last_sync_at ?? null)}</span>

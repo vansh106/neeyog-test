@@ -346,12 +346,9 @@ export default function EnquiryDetailPage() {
 
   const isIndiaMartEnquiry = useMemo(() => {
     const inputType = (ext?.input_type || '').toLowerCase()
-    const src =
-      (typeof parsed?.enquiry_source === 'string' && parsed.enquiry_source) ||
-      (typeof ext?.source === 'string' && ext.source) ||
-      ''
+    const src = typeof parsed?.enquiry_source === 'string' ? parsed.enquiry_source : ''
     return inputType === 'indiamart' || src === 'indiamart'
-  }, [ext?.input_type, ext?.source, parsed?.enquiry_source])
+  }, [ext?.input_type, parsed?.enquiry_source])
 
   const requiresEmailApproval = useMemo(() => {
     if (isIndiaMartEnquiry) return false
@@ -586,15 +583,12 @@ export default function EnquiryDetailPage() {
 
   const emailLikeSource = useMemo(() => {
     const inputType = (ext?.input_type || '').toLowerCase()
-    const src =
-      (typeof parsed?.enquiry_source === 'string' && parsed.enquiry_source) ||
-      (typeof ext?.source === 'string' && ext.source) ||
-      ''
+    const src = typeof parsed?.enquiry_source === 'string' ? parsed.enquiry_source : ''
     if (inputType === 'indiamart' || src === 'indiamart') return true
     const raw = (ext?.raw_input || '').trim()
     if (!raw) return false
     return raw.toLowerCase().includes('from:') || raw.toLowerCase().includes('subject:')
-  }, [ext?.input_type, ext?.raw_input, ext?.source, parsed?.enquiry_source])
+  }, [ext?.input_type, ext?.raw_input, parsed?.enquiry_source])
 
   const matcherCompleteness =
     matcher && typeof matcher.product_completeness === 'string' ? matcher.product_completeness : null
