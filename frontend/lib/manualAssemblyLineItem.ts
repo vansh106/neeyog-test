@@ -13,8 +13,11 @@ import { isPositivePrice } from '@/lib/utils'
 import { isTemporaryAccessory } from '@/lib/accessoriesNav'
 import {
   isHoseCatalogCategory,
+  isFittingCatalogCategory,
   isOthersCatalogCategory,
   isTemporaryCatalogCategory,
+  isTemporaryFittingSelection,
+  fittingCategoryLabel,
 } from '@/lib/configuratorProductFlow'
 import {
   damperDisplayTitle,
@@ -99,6 +102,14 @@ function assemblyProductTitle(p: AssembledProduct): string {
     }
     return parts.join(' — ') || 'Hose'
   }
+  if (isFittingCatalogCategory(v.catalog_category)) {
+    const parts = [
+      fittingCategoryLabel(v.catalog_category),
+      v.variant_type,
+      v.size_mm,
+    ].filter(Boolean)
+    return parts.join(' — ') || 'Hose fitting'
+  }
   return [v.type, v.construction, v.valve_size].filter(Boolean).join(' — ') || 'Product'
 }
 
@@ -146,6 +157,52 @@ export function valveCatalogTable(v: ValveProduct | null | undefined): string | 
   return valveTypeToLegacyCatalogTable(v?.type)
 }
 
+type AssemblyComponentPricingEntry = {
+  enabled?: boolean
+  supplier_id?: string | null
+  supplier_name?: string | null
+  final_price?: number | null
+  temp_price?: number | null
+}
+
+/** Hose fitting ingested as free-text (priced manually on review). */
+export function isManualPricedAssemblyComponent(
+  key: string,
+  p: AssembledProduct,
+): boolean {
+  if (key !== 'fitting_end_1' && key !== 'fitting_end_2') return false
+  const fit = key === 'fitting_end_1' ? (p.fitting_end_1 ?? p.fitting) : p.fitting_end_2
+  return fit != null && isTemporaryFittingSelection(fit.catalog_category)
+}
+
+function assemblyComponentPricingReady(
+  key: string,
+  entry: AssemblyComponentPricingEntry,
+  p: AssembledProduct,
+): boolean {
+  if (!entry.enabled) return true
+  if (entry.supplier_id) return true
+  if (isManualPricedAssemblyComponent(key, p)) {
+    return isPositivePrice(entry.final_price ?? entry.temp_price)
+  }
+  return isPositivePrice(entry.final_price ?? entry.temp_price)
+}
+
+/** Whether an assembled line can proceed to quotation (supplier + pricing rules). */
+export function isAssemblyPricingReady(
+  p: AssembledProduct,
+  supplierRequired: boolean,
+): boolean {
+  if (!supplierRequired) return true
+  if (p.supplier_id) return true
+  if (!isPositivePrice(p.unit_price)) return false
+  const cp = p.component_pricing
+  if (!cp) return isPositivePrice(p.unit_price)
+  const enabled = Object.entries(cp).filter(([, c]) => c?.enabled)
+  if (enabled.length === 0) return isPositivePrice(p.unit_price)
+  return enabled.every(([key, c]) => assemblyComponentPricingReady(key, c, p))
+}
+
 /** Maps ``catalogPartsForAssembly`` label → ``component_pricing`` key. */
 export function assemblyPartComponentKey(label: string): string {
   const l = label.toLowerCase()
@@ -178,7 +235,7 @@ export function catalogPartsForAssembly(p: AssembledProduct): CatalogPart[] {
     if (ct) parts.push({ label: 'Hose', catalog_table: ct, catalog_row_id: v.id })
   }
   const f1 = p.fitting_end_1 ?? p.fitting
-  if (f1?.id && f1.catalog_category) {
+  if (f1?.id && f1.catalog_category && !isTemporaryFittingSelection(f1.catalog_category)) {
     const qty = p.fitting_end_1_qty ?? 1
     parts.push({
       label: qty === 2 ? 'Fitting (End 1 ×2)' : 'Fitting (End 1)',
@@ -187,7 +244,7 @@ export function catalogPartsForAssembly(p: AssembledProduct): CatalogPart[] {
     })
   }
   const f2 = p.fitting_end_2
-  if (f2?.id && f2.catalog_category) {
+  if (f2?.id && f2.catalog_category && !isTemporaryFittingSelection(f2.catalog_category)) {
     parts.push({
       label: 'Fitting (End 2)',
       catalog_table: f2.catalog_category,
@@ -342,6 +399,8 @@ export function assembledToLineItem(
       }
     } else if (isHoseCatalogCategory(v.catalog_category)) {
       Object.assign(cascade, productCascadeFields(v, HOSE_CASCADE_KEYS))
+    } else if (isFittingCatalogCategory(v.catalog_category)) {
+      Object.assign(cascade, productCascadeFields(v, FITTING_CASCADE_KEYS))
     } else {
       Object.assign(cascade, productCascadeFields(v, VALVE_CASCADE_KEYS))
     }
@@ -357,7 +416,11 @@ export function assembledToLineItem(
   } else {
     const fit1 = p.fitting_end_1 ?? p.fitting
     if (fit1) {
-      Object.assign(cascade, productCascadeFields(fit1, FITTING_CASCADE_KEYS, 'fitting_end_1'))
+      if (isTemporaryFittingSelection(fit1.catalog_category)) {
+        cascade.fitting_end_1 = (fit1.temporary_description ?? fit1.type).trim()
+      } else {
+        Object.assign(cascade, productCascadeFields(fit1, FITTING_CASCADE_KEYS, 'fitting_end_1'))
+      }
       if ((p.fitting_end_1_qty ?? 1) === 2) cascade.fitting_end_1_qty = '2'
     }
   }
@@ -366,7 +429,11 @@ export function assembledToLineItem(
   } else {
     const fit2 = p.fitting_end_2
     if (fit2) {
-      Object.assign(cascade, productCascadeFields(fit2, FITTING_CASCADE_KEYS, 'fitting_end_2'))
+      if (isTemporaryFittingSelection(fit2.catalog_category)) {
+        cascade.fitting_end_2 = (fit2.temporary_description ?? fit2.type).trim()
+      } else {
+        Object.assign(cascade, productCascadeFields(fit2, FITTING_CASCADE_KEYS, 'fitting_end_2'))
+      }
     }
   }
   if (p.operator_key) {

@@ -2,18 +2,24 @@
 
 import { Info } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import {
+  listingProductRowMinHeightClass,
+  pairListingProductRows,
+} from '@/lib/listingProductRows'
 import { sanitizeQuotationDescription } from '@/lib/quotationLineDisplay'
 import { cn } from '@/lib/utils'
+import type { ListingItemDescriptionLine } from '@/types'
 
-export type ListingItemDescriptionLine = {
-  short: string
-  full: string
-}
+export type { ListingItemDescriptionLine }
 
 type Props = {
   lines?: ListingItemDescriptionLine[] | null
   /** Legacy single-line fallback when API has not returned item_desc_lines yet. */
   fallbackShort?: string | null
+  /** Category rows from the same quotation — used to match row heights in the adjacent column. */
+  categoryLines?: import('@/types').ListingCategoryLine[] | null
+  category?: string | null
+  subCategory?: string | null
   className?: string
 }
 
@@ -44,32 +50,47 @@ function ItemDescriptionInfoTooltip({ full }: { full: string }) {
 export default function ListingItemDescriptionsCell({
   lines,
   fallbackShort,
+  categoryLines,
+  category,
+  subCategory,
   className,
 }: Props) {
-  const rows =
-    lines && lines.length > 0
-      ? lines
-      : fallbackShort?.trim()
-        ? [{ short: fallbackShort.trim(), full: fallbackShort.trim() }]
-        : []
+  const pairs = pairListingProductRows(categoryLines, lines, {
+    category,
+    subCategory,
+    descShort: fallbackShort,
+  })
+  const hasContent = pairs.some((pair) => pair.description)
 
-  if (rows.length === 0) {
+  if (!hasContent) {
     return <span className={cn('text-[12px] text-surface-muted', className)}>—</span>
   }
 
   return (
     <ul className={cn('space-y-1', className)}>
-      {rows.map((row, idx) => (
-        <li key={`${idx}-${row.short.slice(0, 24)}`} className="flex min-w-0 items-start gap-1">
-          <span
-            className="min-w-0 flex-1 truncate text-[12px] text-surface-muted"
-            title={row.short}
-          >
-            {row.short}
-          </span>
-          {row.full.trim() ? <ItemDescriptionInfoTooltip full={row.full} /> : null}
-        </li>
-      ))}
+      {pairs.map((pair, idx) => {
+        const rowClass = listingProductRowMinHeightClass(pair.category)
+        if (!pair.description) {
+          return (
+            <li key={`empty-desc-${idx}`} className={cn(rowClass, 'text-[12px] text-surface-muted')}>
+              —
+            </li>
+          )
+        }
+        return (
+          <li key={`${idx}-${pair.description.short.slice(0, 24)}`} className={cn(rowClass, 'flex min-w-0 items-start gap-1')}>
+            <span
+              className="min-w-0 flex-1 truncate text-[12px] text-surface-muted"
+              title={pair.description.short}
+            >
+              {pair.description.short}
+            </span>
+            {pair.description.full.trim() ? (
+              <ItemDescriptionInfoTooltip full={pair.description.full} />
+            ) : null}
+          </li>
+        )
+      })}
     </ul>
   )
 }

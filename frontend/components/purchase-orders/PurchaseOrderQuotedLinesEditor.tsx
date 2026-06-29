@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { Loader2 } from 'lucide-react'
 import {
   Dialog,
@@ -13,6 +14,7 @@ import {
 import { Button } from '@/components/ui/button'
 import PoQuotedLineNegotiationFields from '@/components/purchase-orders/PoQuotedLineNegotiationFields'
 import { purchaseOrdersApi } from '@/lib/api'
+import { invalidateQuotationCrmCaches } from '@/lib/invalidateQuotationCrmCaches'
 import {
   buildQuotedLineStateFromPo,
   quotedLineStateToPayload,
@@ -43,6 +45,7 @@ export default function PurchaseOrderQuotedLinesEditor({
   quotationLoading = false,
   onSaved,
 }: Props) {
+  const queryClient = useQueryClient()
   const quoteLines = useMemo(
     () => (quotation?.line_items ?? []) as QuotationLineItem[],
     [quotation],
@@ -75,6 +78,7 @@ export default function PurchaseOrderQuotedLinesEditor({
       const updated = await purchaseOrdersApi.update<PurchaseOrder>(po.po_id, {
         selected_lines: selectedLines,
       })
+      await invalidateQuotationCrmCaches(queryClient)
       onSaved(updated)
       onOpenChange(false)
     } catch (e: unknown) {

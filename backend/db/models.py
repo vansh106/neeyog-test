@@ -152,6 +152,14 @@ class Enquiry(Base):
     missing_fields: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     assigned_to: Mapped[str | None] = mapped_column(String(255), nullable=True)
     flow_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    #: Whether client/product details were complete at intake: ``complete`` | ``incomplete``.
+    enquiry_detail_type: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="incomplete", server_default="incomplete"
+    )
+    #: Listing quote status: ``not_quoted`` | ``quoted`` | ``partially_quoted``.
+    enquiry_quote_status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="not_quoted", server_default="not_quoted"
+    )
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     processing_started_at: Mapped[datetime | None] = mapped_column(
@@ -694,6 +702,7 @@ class PurchaseOrder(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     po_number: Mapped[str] = mapped_column(String(50), unique=True, nullable=False, index=True)
     so_number: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
+    so_date: Mapped[date | None] = mapped_column(Date, nullable=True)
 
     quotation_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),

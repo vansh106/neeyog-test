@@ -23,15 +23,22 @@ type Props = {
   onOpenChange: (open: boolean) => void
 }
 
+function toDateInputValue(iso: string | null | undefined): string {
+  if (!iso?.trim()) return ''
+  return iso.slice(0, 10)
+}
+
 export default function EnterPoSoNumberDialog({ po, open, onOpenChange }: Props) {
   const queryClient = useQueryClient()
   const [soNumber, setSoNumber] = useState('')
+  const [soDate, setSoDate] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!open || !po) return
     setSoNumber(po.so_number ?? '')
+    setSoDate(toDateInputValue(po.so_date))
     setError(null)
   }, [open, po])
 
@@ -45,7 +52,10 @@ export default function EnterPoSoNumberDialog({ po, open, onOpenChange }: Props)
     setSaving(true)
     setError(null)
     try {
-      await purchaseOrdersApi.update(po.po_id, { so_number: trimmed })
+      await purchaseOrdersApi.update(po.po_id, {
+        so_number: trimmed,
+        so_date: soDate.trim() || null,
+      })
       await queryClient.invalidateQueries({ queryKey: ['purchase-orders'] })
       onOpenChange(false)
     } catch (e: unknown) {
@@ -72,23 +82,36 @@ export default function EnterPoSoNumberDialog({ po, open, onOpenChange }: Props)
           </DialogDescription>
         </DialogHeader>
 
-        <label className="block text-[12px]">
-          <span className="text-surface-muted">SO number</span>
-          <Input
-            className="mt-1 font-mono"
-            value={soNumber}
-            onChange={(e) => setSoNumber(e.target.value)}
-            placeholder="e.g. SO-332"
-            disabled={saving || !po}
-            autoFocus
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault()
-                void handleSave()
-              }
-            }}
-          />
-        </label>
+        <div className="space-y-4">
+          <label className="block text-[12px]">
+            <span className="text-surface-muted">SO number</span>
+            <Input
+              className="mt-1 font-mono"
+              value={soNumber}
+              onChange={(e) => setSoNumber(e.target.value)}
+              placeholder="e.g. SO-332"
+              disabled={saving || !po}
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  void handleSave()
+                }
+              }}
+            />
+          </label>
+
+          <label className="block text-[12px]">
+            <span className="text-surface-muted">SO date (optional)</span>
+            <Input
+              type="date"
+              className="mt-1"
+              value={soDate}
+              onChange={(e) => setSoDate(e.target.value)}
+              disabled={saving || !po}
+            />
+          </label>
+        </div>
 
         {error && <p className="text-[13px] text-red-600">{error}</p>}
 

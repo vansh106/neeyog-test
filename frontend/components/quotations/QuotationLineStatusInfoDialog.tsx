@@ -13,6 +13,7 @@ import {
 } from '@/components/ui/dialog'
 import QuotationLostRemarksFields from '@/components/quotations/QuotationLostRemarksFields'
 import StatusBadge from '@/components/ui/StatusBadge'
+import { invalidateQuotationCrmCaches } from '@/lib/invalidateQuotationCrmCaches'
 import { quotationsApi } from '@/lib/api'
 import {
   formatLostRemarks,
@@ -95,7 +96,7 @@ export default function QuotationLineStatusInfoDialog({
         status: draft.status,
         status_remarks: remarks,
       })
-      await queryClient.invalidateQueries({ queryKey: ['quotations'] })
+      await invalidateQuotationCrmCaches(queryClient)
       onOpenChange(false)
     } catch (e: unknown) {
       window.alert(e instanceof Error ? e.message : 'Update failed')

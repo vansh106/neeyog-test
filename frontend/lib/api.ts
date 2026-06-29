@@ -260,6 +260,18 @@ export const enquiriesApi = {
     id: string,
     body: { next_follow_up_date?: string | null },
   ) => patch<T>(`/api/enquiries/${encodeURIComponent(id)}/listing-dates`, body),
+  updateProductNotes: <T = unknown>(
+    id: string,
+    body: { productNotes: import('@/types').EnquiryProductNote[] },
+  ) => patch<T>(`/api/enquiries/${encodeURIComponent(id)}/product-notes`, body),
+  updateDetailType: <T = unknown>(
+    id: string,
+    body: { enquiryDetailType: import('@/lib/enquiryDetailType').EnquiryDetailType },
+  ) => patch<T>(`/api/enquiries/${encodeURIComponent(id)}/detail-type`, body),
+  updateQuoteStatus: <T = unknown>(
+    id: string,
+    body: { enquiryQuoteStatus: import('@/lib/enquiryQuoteStatus').EnquiryQuoteStatus },
+  ) => patch<T>(`/api/enquiries/${encodeURIComponent(id)}/quote-status`, body),
   archive: <T = unknown>(id: string) =>
     post<T>(`/api/enquiries/${encodeURIComponent(id)}/archive`, {}),
   assignUser: <T = unknown>(id: string, body: { user_id: string }) =>

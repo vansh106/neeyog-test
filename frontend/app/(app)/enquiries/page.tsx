@@ -1,20 +1,22 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Archive, Inbox } from 'lucide-react'
 import PageShell from '@/components/layout/PageShell'
-import StatusBadge from '@/components/ui/StatusBadge'
 import EmptyState from '@/components/ui/EmptyState'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Button } from '@/components/ui/button'
 import ArchiveRecordDialog from '@/components/listing/ArchiveRecordDialog'
 import EnquiryListingFiltersPanel from '@/components/enquiries/EnquiryListingFilters'
+import EnquiryListDetailTypeEditor from '@/components/enquiries/EnquiryListDetailTypeEditor'
+import EnquiryListQuoteStatusEditor from '@/components/enquiries/EnquiryListQuoteStatusEditor'
 import EnquiryListDateEditor from '@/components/enquiries/EnquiryListDateEditor'
 import EnquiryListUserAssigner from '@/components/enquiries/EnquiryListUserAssigner'
 import ListingItemDescriptionsCell from '@/components/listing/ListingItemDescriptionsCell'
+import ListingPagination from '@/components/listing/ListingPagination'
 import { enquirySourceBadgeClass, formatEnquirySourceLabel } from '@/lib/enquirySource'
 import { useEnquiriesListingDataset, useTeamUsers } from '@/lib/queries'
 import { formatQuotationListDate } from '@/components/quotations/QuotationListDateEditor'
@@ -30,6 +32,7 @@ import { enquiriesApi } from '@/lib/api'
 import { Permissions } from '@/lib/permissions'
 import { useAuthStore } from '@/stores/authStore'
 import { formatRelativeTime, cn } from '@/lib/utils'
+import { listingPageSlice, listingSerialNumber } from '@/lib/listingPagination'
 import type { EnquiryListItem } from '@/types'
 
 type Pipeline = 'all' | 'complete' | 'incomplete' | 'pending' | 'failed'
@@ -38,7 +41,7 @@ const PENDING_STATUSES = ['received', 'parsing', 'matching', 'quoting'] as const
 
 /** Backend validates `limit` ≤ 500 on GET /api/enquiries/ */
 const LISTING_FETCH_LIMIT = 500
-const COL_COUNT = 11
+const COL_COUNT = 13
 
 function TableSkeletonRows() {
   return (
@@ -70,6 +73,7 @@ export default function EnquiriesPage() {
   const [archiveFilter, setArchiveFilter] = useState<ArchiveFilter>('active')
   const [archiveTarget, setArchiveTarget] = useState<EnquiryListItem | null>(null)
   const [archiveError, setArchiveError] = useState<string | null>(null)
+  const [page, setPage] = useState(1)
 
   const {
     data: scopedRows = [],
@@ -116,6 +120,12 @@ export default function EnquiriesPage() {
 
     return list
   }, [scopedRows, appliedFilters, pipeline, archiveFilter])
+
+  useEffect(() => {
+    setPage(1)
+  }, [appliedFilters, pipeline, archiveFilter, companyFilter])
+
+  const pagedRows = useMemo(() => listingPageSlice(rows, page), [rows, page])
 
   const archiveScopedRows = useMemo(
     () => scopedRows.filter((e) => matchesArchiveFilter(e.is_archived, archiveFilter)),
@@ -226,13 +236,15 @@ export default function EnquiriesPage() {
             <table className="w-full min-w-[1280px] border-collapse text-left">
               <thead>
                 <tr className="bg-[#F4F5F0] text-[11px] font-medium uppercase tracking-wide text-[#8A9488]">
+                  <th className="min-w-[44px] whitespace-nowrap px-3 py-3">S.No.</th>
                   <th className="min-w-[100px] whitespace-nowrap px-3 py-3">Enq No.</th>
                   <th className="min-w-[88px] whitespace-nowrap px-3 py-3">Source</th>
+                  <th className="min-w-[108px] whitespace-nowrap px-3 py-3">Enquiry type</th>
                   <th className="min-w-[72px] whitespace-nowrap px-3 py-3">Date</th>
                   <th className="min-w-[140px] whitespace-nowrap px-3 py-3">Client</th>
                   <th className="min-w-[160px] whitespace-nowrap px-3 py-3">Items Desc</th>
                   <th className="min-w-[72px] whitespace-nowrap px-3 py-3">Age</th>
-                  <th className="min-w-[120px] whitespace-nowrap px-3 py-3">Status</th>
+                  <th className="min-w-[140px] whitespace-nowrap px-3 py-3">Quote status</th>
                   <th className="min-w-[100px] whitespace-nowrap px-3 py-3">Quote Number</th>
                   <th className="min-w-[88px] whitespace-nowrap px-3 py-3">User</th>
                   <th className="min-w-[110px] whitespace-nowrap px-3 py-3">Next follow-up</th>
@@ -259,7 +271,7 @@ export default function EnquiriesPage() {
                 </tbody>
               ) : (
                 <tbody>
-                  {rows.map((e: EnquiryListItem) => (
+                  {pagedRows.map((e: EnquiryListItem, index) => (
                     <tr
                       key={e.enquiry_id}
                       className={cn(
@@ -267,6 +279,9 @@ export default function EnquiriesPage() {
                         archivedListingRowClass(e.is_archived),
                       )}
                     >
+                      <td className="whitespace-nowrap px-3 py-3 align-top tabular-nums text-[13px] text-surface-muted">
+                        {listingSerialNumber(page, index, undefined, rows.length)}
+                      </td>
                       <td className="px-3 py-3 align-top font-mono text-[12px]">
                         <Link
                           href={`/enquiries/${e.enquiry_id}`}
@@ -285,6 +300,13 @@ export default function EnquiriesPage() {
                           {formatEnquirySourceLabel(e.source)}
                         </span>
                       </td>
+                      <td className="px-3 py-3 align-top">
+                        <EnquiryListDetailTypeEditor
+                          enquiryId={e.enquiry_id}
+                          value={e.enquiry_detail_type}
+                          disabled={Boolean(e.is_archived)}
+                        />
+                      </td>
                       <td className="whitespace-nowrap px-3 py-3 align-top text-gray-900">
                         {formatQuotationListDate(e.created_at)}
                       </td>
@@ -301,7 +323,11 @@ export default function EnquiriesPage() {
                         <span className="block text-[13px]">{formatRelativeTime(e.created_at)}</span>
                       </td>
                       <td className="px-3 py-3 align-top">
-                        <StatusBadge status={e.status} />
+                        <EnquiryListQuoteStatusEditor
+                          enquiryId={e.enquiry_id}
+                          value={e.enquiry_quote_status}
+                          disabled={Boolean(e.is_archived)}
+                        />
                       </td>
                       <td className="px-3 py-3 align-top font-mono text-[12px]">
                         {e.quote_number && e.quotation_id ? (
@@ -356,6 +382,9 @@ export default function EnquiriesPage() {
               )}
             </table>
           </div>
+          {!isPending && rows.length > 0 ? (
+            <ListingPagination page={page} totalItems={rows.length} onPageChange={setPage} />
+          ) : null}
         </div>
       </div>
 

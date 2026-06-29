@@ -1,22 +1,24 @@
 'use client'
 
-import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
 import { CheckCircle2, ChevronRight, Download, FileText, Loader2, Mail, Sparkles, XCircle } from 'lucide-react'
 import PageShell from '@/components/layout/PageShell'
-import StatusBadge from '@/components/ui/StatusBadge'
 import EmptyState from '@/components/ui/EmptyState'
 import AIReasoningPanel from '@/components/ui/AIReasoningPanel'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Progress } from '@/components/ui/progress'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { ClientVerificationPanel } from '@/components/upload/ClientVerificationPanel'
 import ManualEntryForm from '@/components/upload/ManualEntryForm'
 import { useEnquiry } from '@/lib/queries'
-import { downloadQuotationPdf, enquiriesApi, erpExportUrl, processManualDropdown } from '@/lib/api'
+import EnquiryProductNotesPanel from '@/components/enquiries/EnquiryProductNotesPanel'
+import EnquiryManualLineItemsTable, {
+  parseManualLineItemsFromParsed,
+} from '@/components/enquiries/EnquiryManualLineItemsTable'
+import { downloadQuotationPdf, enquiriesApi, processManualDropdown } from '@/lib/api'
 import { useQueryClient } from '@tanstack/react-query'
-import { formatCurrency, formatRelativeTime, truncateId } from '@/lib/utils'
+import { truncateId } from '@/lib/utils'
 import type {
   ClientSummary,
   ClientVerificationContext,
@@ -74,209 +76,6 @@ function extractQuoteId(parsed: Record<string, unknown> | null): string | null {
   return null
 }
 
-/** Align cascade key order with quote description / masters. */
-const CASCADE_DISPLAY_ORDER: string[] = [
-  'variant_type',
-  'product_sheet',
-  'construction',
-  'valve_size',
-  'bore_type',
-  'end_connection',
-  'pressure',
-  'body',
-  'ball_disc',
-  'ball',
-  'stem',
-  'seat',
-  'fasteners',
-  'operator',
-  'operator_model',
-  'operator_size',
-  'sov',
-  'limit_switch_box',
-  'positioner',
-  'bracket_coupler',
-  'supplier',
-  'supplier_id',
-]
-
-function sortCascadeKeys(keys: string[]): string[] {
-  const rank = (k: string) => {
-    const i = CASCADE_DISPLAY_ORDER.indexOf(k)
-    return i === -1 ? 1000 : i
-  }
-  return [...keys].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b))
-}
-
-type EnquiryManualLineRow = {
-  id: string
-  category: string
-  quantity: number
-  unit: string
-  productLabel: string
-  listUnit: number | null
-  customerDiscountPct: number | null
-  netUnit: number | null
-  lineNetTotal: number | null
-  cascade: Record<string, string>
-}
-
-function parseManualLineItemsFromParsed(
-  parsed: Record<string, unknown> | null,
-): EnquiryManualLineRow[] {
-  if (!parsed) return []
-  const raw = parsed.manual_line_items
-  if (!Array.isArray(raw)) return []
-  const out: EnquiryManualLineRow[] = []
-  for (const item of raw) {
-    if (!item || typeof item !== 'object') continue
-    const o = item as Record<string, unknown>
-    const sp =
-      o.selectedProduct && typeof o.selectedProduct === 'object'
-        ? (o.selectedProduct as Record<string, unknown>)
-        : null
-    const cascade: Record<string, string> = {}
-    if (o.cascadeSelections && typeof o.cascadeSelections === 'object') {
-      for (const [k, v] of Object.entries(o.cascadeSelections as Record<string, unknown>)) {
-        if (v == null || String(v).trim() === '') continue
-        cascade[k] = String(v)
-      }
-    }
-    const baseRaw = sp?.base_price
-    const listUnit =
-      typeof baseRaw === 'number' && Number.isFinite(baseRaw)
-        ? baseRaw
-        : baseRaw != null && String(baseRaw).trim() !== ''
-          ? Number(baseRaw)
-          : null
-    const listOk = listUnit != null && Number.isFinite(listUnit)
-    const discRaw = o.customer_discount_pct
-    const customerDiscountPct =
-      typeof discRaw === 'number' && Number.isFinite(discRaw)
-        ? Math.min(100, Math.max(0, discRaw))
-        : discRaw != null && String(discRaw).trim() !== ''
-          ? Math.min(100, Math.max(0, Number(discRaw)))
-          : null
-    const pct = customerDiscountPct ?? 0
-    const netUnit = listOk ? (listUnit as number) * (1 - pct / 100) : null
-    const qty = typeof o.quantity === 'number' ? o.quantity : Number(o.quantity) || 0
-    const unit = sp && typeof sp.unit === 'string' && sp.unit.trim() ? sp.unit : 'Nos'
-    const productLabel =
-      (sp && typeof sp.display_label === 'string' && sp.display_label.trim() && sp.display_label) ||
-      (sp && typeof sp.name === 'string' && sp.name.trim() && sp.name) ||
-      '—'
-    const lineNetTotal = netUnit != null && qty > 0 ? netUnit * qty : null
-    out.push({
-      id: typeof o.id === 'string' ? o.id : String(o.id ?? ''),
-      category: typeof o.category === 'string' ? o.category : '—',
-      quantity: qty,
-      unit,
-      productLabel,
-      listUnit: listOk ? (listUnit as number) : null,
-      customerDiscountPct,
-      netUnit,
-      lineNetTotal,
-      cascade,
-    })
-  }
-  return out
-}
-
-const cellBorder = 'border border-[#D4D9CF] px-2.5 py-2 align-top'
-const headBorder =
-  'border border-[#D4D9CF] bg-[#EEF0EA] px-2.5 py-2 text-left text-[11px] font-semibold uppercase tracking-wide text-[#5C6658]'
-
-function ManualLineItemsTable({ rows }: { rows: EnquiryManualLineRow[] }) {
-  if (rows.length === 0) return null
-  const colCount = 9
-  return (
-    <div className="mt-6 min-w-0">
-      <h3 className="text-[12px] font-semibold uppercase tracking-wide text-[#8A9488]">
-        Manual line items
-      </h3>
-      <div className="mt-3 w-full rounded-lg border-2 border-[#C5CBBF] bg-white">
-        <table className="w-full border-collapse text-left text-[12px]">
-          <thead>
-            <tr>
-              <th className={`${headBorder} w-[3rem] text-center`}>#</th>
-              <th className={`${headBorder} min-w-0`}>Product</th>
-              <th className={`${headBorder} w-[7.5rem]`}>Category</th>
-              <th className={`${headBorder} w-[3.25rem] text-right`}>Qty</th>
-              <th className={`${headBorder} w-[4rem]`}>Unit</th>
-              <th className={`${headBorder} w-[5.5rem] text-right whitespace-nowrap`}>List (unit)</th>
-              <th className={`${headBorder} w-[4.25rem] text-right`}>Disc %</th>
-              <th className={`${headBorder} w-[5.5rem] text-right whitespace-nowrap`}>Net (unit)</th>
-              <th className={`${headBorder} w-[5.75rem] text-right whitespace-nowrap`}>Line net</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row, idx) => (
-              <Fragment key={row.id || `line-${idx}`}>
-                <tr className="bg-white">
-                  <td className={`${cellBorder} text-center font-mono text-surface-muted`}>{idx + 1}</td>
-                  <td className={`${cellBorder} min-w-0 font-medium text-gray-900 break-words`}>
-                    {row.productLabel}
-                  </td>
-                  <td className={`${cellBorder} break-all text-surface-muted`}>{row.category}</td>
-                  <td className={`${cellBorder} text-right font-mono tabular-nums`}>{row.quantity}</td>
-                  <td className={`${cellBorder} text-surface-muted`}>{row.unit}</td>
-                  <td className={`${cellBorder} text-right font-mono tabular-nums`}>
-                    {row.listUnit != null ? formatCurrency(row.listUnit) : '—'}
-                  </td>
-                  <td className={`${cellBorder} text-right font-mono tabular-nums`}>
-                    {row.customerDiscountPct != null ? `${row.customerDiscountPct}%` : '—'}
-                  </td>
-                  <td className={`${cellBorder} text-right font-mono tabular-nums`}>
-                    {row.netUnit != null ? formatCurrency(row.netUnit) : '—'}
-                  </td>
-                  <td className={`${cellBorder} text-right font-mono font-semibold tabular-nums text-brand-green-700`}>
-                    {row.lineNetTotal != null ? formatCurrency(row.lineNetTotal) : '—'}
-                  </td>
-                </tr>
-                <tr className="bg-[#F7F8F4]">
-                  <td colSpan={colCount} className="border border-[#D4D9CF] p-0 align-top">
-                    <div className="flex items-stretch border-b border-[#D4D9CF] bg-[#E8EAE4] px-3 py-1.5">
-                      <span className="text-[11px] font-semibold uppercase tracking-wide text-[#5C6658]">
-                        Specifications — line {idx + 1}
-                      </span>
-                    </div>
-                    {Object.keys(row.cascade).length === 0 ? (
-                      <div className="px-3 py-3 text-surface-muted">—</div>
-                    ) : (
-                      <table className="w-full border-collapse text-[12px]">
-                        <thead>
-                          <tr className="bg-[#F0F2EC]">
-                            <th className="w-[24%] border border-[#D4D9CF] bg-[#F0F2EC] px-2.5 py-2 text-left text-[11px] font-semibold uppercase tracking-wide text-[#5C6658]">
-                              Field
-                            </th>
-                            <th className="border border-[#D4D9CF] bg-[#F0F2EC] px-2.5 py-2 text-left text-[11px] font-semibold uppercase tracking-wide text-[#5C6658]">
-                              Value
-                            </th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {sortCascadeKeys(Object.keys(row.cascade)).map((k) => (
-                            <tr key={k} className="bg-white">
-                              <td className={`${cellBorder} w-[24%] font-medium text-[#5C6658] break-words`}>
-                                {formatLabelKey(k)}
-                              </td>
-                              <td className={`${cellBorder} break-words text-gray-900`}>{row.cascade[k]}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    )}
-                  </td>
-                </tr>
-              </Fragment>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  )
-}
-
 function clarificationHint(err: string | null): boolean {
   if (!err) return false
   const e = err.toLowerCase()
@@ -320,8 +119,6 @@ export default function EnquiryDetailPage() {
   const reasoningSteps = useMemo(() => toReasoningSteps(ext?.ai_reasoning ?? null), [ext?.ai_reasoning])
 
   const [clientContext, setClientContext] = useState<ClientVerificationContext | null>(null)
-  const [exportBusy, setExportBusy] = useState(false)
-  const [exportError, setExportError] = useState<string | null>(null)
   const [pdfDownloadBusy, setPdfDownloadBusy] = useState(false)
 
   const [showManualCompletion, setShowManualCompletion] = useState(false)
@@ -361,32 +158,6 @@ export default function EnquiryDetailPage() {
 
   const isEmailRejected = (ext?.status || '').toLowerCase() === 'email_rejected'
 
-  const downloadErpExport = useCallback(async () => {
-    if (!id || exportBusy) return
-    setExportBusy(true)
-    setExportError(null)
-    try {
-      const url = erpExportUrl(id)
-      const resp = await fetch(url, { cache: 'no-store' })
-      if (!resp.ok) {
-        if (resp.status === 404) throw new Error('ERP export not available for this enquiry yet.')
-        throw new Error(`Download failed (${resp.status})`)
-      }
-      const blob = await resp.blob()
-      const a = document.createElement('a')
-      a.href = URL.createObjectURL(blob)
-      a.download = `EnquiryList_${id.slice(0, 8).toUpperCase()}.xlsx`
-      document.body.appendChild(a)
-      a.click()
-      a.remove()
-      URL.revokeObjectURL(a.href)
-    } catch (e) {
-      setExportError(e instanceof Error ? e.message : 'Download failed')
-    } finally {
-      setExportBusy(false)
-    }
-  }, [exportBusy, id])
-
   useEffect(() => {
     async function loadClientContext() {
       if (!ext) return
@@ -423,12 +194,6 @@ export default function EnquiryDetailPage() {
 
     loadClientContext().catch(() => setClientContext(null))
   }, [ext])
-
-  const gridEntries = useMemo(() => {
-    if (!parsed) return []
-    const skip = new Set(['products_requested', 'matcher', 'manual_line_items'])
-    return Object.entries(parsed).filter(([k]) => !skip.has(k))
-  }, [parsed])
 
   const manualLineRows = useMemo(() => parseManualLineItemsFromParsed(parsed), [parsed])
 
@@ -472,6 +237,21 @@ export default function EnquiryDetailPage() {
     }
     return { catalogKey: matcherCatalogKey, filledCascade: matcherFilled }
   }, [fullManualOverride, matcherCatalogKey, matcher?.line_items, matcherFilled])
+
+  const initialSelectedBranchId = useMemo(() => {
+    if (!parsed) return null
+    const mc = parsed.manual_client
+    if (mc && typeof mc === 'object') {
+      const m = mc as Record<string, unknown>
+      if (m.mode === 'existing' && typeof m.selected_client_id === 'string' && m.selected_client_id.trim()) {
+        return m.selected_client_id.trim()
+      }
+    }
+    if (typeof parsed.branch_id === 'string' && parsed.branch_id.trim()) {
+      return parsed.branch_id.trim()
+    }
+    return null
+  }, [parsed])
 
   const manualClientHint = useMemo(() => {
     if (!parsed) return null
@@ -589,17 +369,6 @@ export default function EnquiryDetailPage() {
     if (!raw) return false
     return raw.toLowerCase().includes('from:') || raw.toLowerCase().includes('subject:')
   }, [ext?.input_type, ext?.raw_input, parsed?.enquiry_source])
-
-  const matcherCompleteness =
-    matcher && typeof matcher.product_completeness === 'string' ? matcher.product_completeness : null
-
-  const matcherConfidencePct = useMemo(() => {
-    const mc = matcher?.confidence
-    if (typeof mc === 'number' && Number.isFinite(mc)) {
-      return Math.round(mc <= 1 ? mc * 100 : mc)
-    }
-    return null
-  }, [matcher])
 
   const showMatcherRail =
     !!matcher &&
@@ -721,12 +490,6 @@ export default function EnquiryDetailPage() {
       </PageShell>
     )
   }
-
-  const confidencePct =
-    matcherConfidencePct ??
-    (ext.confidence_score != null
-      ? Math.round(ext.confidence_score <= 1 ? ext.confidence_score * 100 : ext.confidence_score)
-      : null)
 
   const clientEmailForMailto =
     typeof parsed?.client_email === 'string' && parsed.client_email.includes('@')
@@ -872,13 +635,14 @@ export default function EnquiryDetailPage() {
                   matcherClientHint={manualClientHint}
                   clientSummaryLabel={clientSummaryLabel}
                   initialClientEmployeeId={initialClientEmployeeId}
+                  initialSelectedBranchId={initialSelectedBranchId}
                   matcherSeedVersion={0}
                 />
               </div>
             </section>
           )}
 
-          {emailLikeSource && (
+          {emailLikeSource && !quoteId && (
             <section className="rounded-xl border border-surface-border bg-white p-5 shadow-sm">
               <h2 className="text-[15px] font-semibold text-gray-900">Source message</h2>
               <pre
@@ -890,82 +654,16 @@ export default function EnquiryDetailPage() {
             </section>
           )}
 
-          <section className="rounded-xl border border-surface-border bg-white p-5 shadow-sm">
-            {!parsed ? (
-              <p className="text-[14px] text-surface-muted">No structured fields yet.</p>
-            ) : (
-              <>
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  {gridEntries.map(([key, value]) => (
-                    <div key={key} className="min-w-0">
-                      <div className="text-[10px] font-medium uppercase tracking-wide text-[#8A9488]">
-                        {formatLabelKey(key)}
-                      </div>
-                      <div className="mt-1 text-[14px] font-semibold text-gray-900 break-words">
-                        {stringifyValue(value)}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                <ManualLineItemsTable rows={manualLineRows} />
-              </>
-            )}
-          </section>
+          {manualLineRows.length > 0 && (
+            <section className="rounded-xl border border-surface-border bg-white p-5 shadow-sm">
+              <EnquiryManualLineItemsTable rows={manualLineRows} />
+            </section>
+          )}
 
           {reasoningSteps.length > 0 && <AIReasoningPanel reasoning={reasoningSteps} />}
         </div>
 
         <div className="space-y-6 lg:col-span-3 min-w-0">
-          <section className="rounded-xl border border-surface-border bg-white p-5 shadow-sm">
-            <div className="flex flex-col items-center gap-4">
-              <StatusBadge status={ext.status} className="scale-110 px-4 py-1 text-[12px]" />
-              {matcherCompleteness && (
-                <p className="text-center text-[12px] text-surface-muted">
-                  Product:{' '}
-                  <span className="font-medium text-gray-800">
-                    {matcherCompleteness === 'complete' ? 'Complete' : 'Incomplete'}
-                  </span>
-                  {typeof matcher?.product_label === 'string' && matcher.product_label ? (
-                    <>
-                      {' · '}
-                      <span className="text-gray-700">{matcher.product_label as string}</span>
-                    </>
-                  ) : null}
-                </p>
-              )}
-              {confidencePct != null && (
-                <div className="flex w-full max-w-[200px] flex-col items-center gap-2">
-                  <div className="relative flex h-24 w-24 items-center justify-center">
-                    <div
-                      className="absolute inset-0 rounded-full"
-                      style={{
-                        background: `conic-gradient(rgb(42 107 60) ${confidencePct * 3.6}deg, #E2E6DC 0deg)`,
-                      }}
-                      aria-hidden
-                    />
-                    <div className="absolute inset-2 flex items-center justify-center rounded-full bg-white">
-                      <span className="text-[15px] font-semibold tabular-nums text-gray-900">
-                        {confidencePct}%
-                      </span>
-                    </div>
-                  </div>
-                  <span className="text-[11px] font-medium uppercase tracking-wide text-[#8A9488]">
-                    Confidence
-                  </span>
-                  <Progress
-                    value={confidencePct}
-                    className="w-full max-w-[200px] [&_[data-slot=progress-track]]:h-2 [&_[data-slot=progress-track]]:rounded-full [&_[data-slot=progress-indicator]]:rounded-full [&_[data-slot=progress-indicator]]:bg-brand-green-500"
-                  />
-                </div>
-              )}
-              {ext.created_at && (
-                <p className="text-center text-[13px] text-surface-muted">
-                  Created {formatRelativeTime(ext.created_at)}
-                </p>
-              )}
-            </div>
-          </section>
-
           {showMatcherRail && (
             <section className="rounded-xl border border-violet-200 bg-gradient-to-b from-violet-50/80 to-white p-5 shadow-sm">
               <div className="flex items-start gap-2">
@@ -1050,31 +748,14 @@ export default function EnquiryDetailPage() {
                 }
                 targetEnquiryId={id}
                 matcherSeed={matcherSeedForForm}
-                matcherClientHint={matcherClientHint}
+                matcherClientHint={manualClientHint}
+                initialSelectedBranchId={initialSelectedBranchId}
                 matcherSeedVersion={matcherSeedVersion}
               />
             </section>
           )}
 
-          <section className="rounded-xl border border-surface-border bg-white p-5 shadow-sm">
-            <h2 className="text-[14px] font-semibold text-gray-900">Exports</h2>
-            <div className="mt-4 flex flex-col gap-2">
-              <button
-                type="button"
-                onClick={downloadErpExport}
-                disabled={exportBusy}
-                className={buttonVariants({
-                  variant: 'secondary',
-                  size: 'sm',
-                  className: 'gap-1.5 justify-center',
-                })}
-              >
-                <Download className="size-3.5" />
-                {exportBusy ? 'Preparing…' : 'Download ERP Enquiry List'}
-              </button>
-              {exportError && <p className="text-[12px] text-red-700">{exportError}</p>}
-            </div>
-          </section>
+          <EnquiryProductNotesPanel enquiryId={id} parsed={parsed} />
 
           {quoteId && (
             <section className="rounded-xl border border-surface-border bg-white p-5 shadow-sm">

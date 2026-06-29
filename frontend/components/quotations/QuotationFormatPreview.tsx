@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo } from 'react'
+import { useMemo, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Info } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -50,6 +50,15 @@ function MetaColumn({ rows }: { rows: { label: string; value: string }[] }) {
           <span className="font-semibold text-right text-gray-900">{row.value}</span>
         </div>
       ))}
+    </div>
+  )
+}
+
+function CustomerKvRow({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex text-[11px] leading-snug">
+      <span className="w-[4.5rem] shrink-0 text-[#6b7280]">{label}</span>
+      <span className="min-w-0 flex-1 text-[#1f2733]">{children}</span>
     </div>
   )
 }
@@ -203,7 +212,7 @@ export default function QuotationFormatPreview({
               ) : null}
             </div>
           </div>
-          <p className="shrink-0 text-[22px] font-extrabold tracking-wide text-[#1f2733] sm:text-[26px]">
+          <p className="shrink-0 whitespace-nowrap text-[18px] font-extrabold tracking-wide text-[#1f2733] sm:text-[20px]">
             QUOTATION
           </p>
         </div>
@@ -238,21 +247,15 @@ export default function QuotationFormatPreview({
                 </p>
               ))}
             </div>
-            <div className="w-full shrink-0 space-y-1 text-right sm:max-w-[48%]">
+            <div className="w-full shrink-0 space-y-1 sm:max-w-[48%]">
               {concernDisplay ? (
-                <p>
-                  <span className="text-[#6b7280]">Kind Attn.</span> {concernDisplay}
-                </p>
+                <CustomerKvRow label="Kind Attn.">{concernDisplay}</CustomerKvRow>
               ) : null}
               {quotation.client_phone ? (
-                <p>
-                  <span className="text-[#6b7280]">Contact</span> {quotation.client_phone}
-                </p>
+                <CustomerKvRow label="Contact">{quotation.client_phone}</CustomerKvRow>
               ) : null}
               {quotation.client_email ? (
-                <p>
-                  <span className="text-[#6b7280]">Email</span> {quotation.client_email}
-                </p>
+                <CustomerKvRow label="Email">{quotation.client_email}</CustomerKvRow>
               ) : null}
             </div>
           </div>

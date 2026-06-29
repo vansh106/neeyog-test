@@ -13,7 +13,10 @@ from controllers.enquiry_controller import (
     EmailInboxItem,
     EnquiryAssignUserBody,
     EnquiryListItem,
+    EnquiryDetailTypeBody,
     EnquiryListingDatesBody,
+    EnquiryProductNotesBody,
+    EnquiryQuoteStatusBody,
     EnquiryResponse,
     ManualDropdownProcessRequest,
     ManualEnquiryCreateRequest,
@@ -115,6 +118,39 @@ async def patch_enquiry_listing_dates_route(
 ):
     """Next follow-up date on the enquiry list."""
     return await enquiry_controller.handle_patch_enquiry_listing_dates(enquiry_id, body, db, user)
+
+
+@router.patch("/{enquiry_id}/product-notes")
+async def patch_enquiry_product_notes_route(
+    enquiry_id: str,
+    body: EnquiryProductNotesBody,
+    user: CurrentUser = Depends(require_permission(Permission.VIEW_QUOTATIONS)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update structured product notes on an enquiry."""
+    return await enquiry_controller.handle_patch_enquiry_product_notes(enquiry_id, body, db, user)
+
+
+@router.patch("/{enquiry_id}/detail-type")
+async def patch_enquiry_detail_type_route(
+    enquiry_id: str,
+    body: EnquiryDetailTypeBody,
+    user: CurrentUser = Depends(require_permission(Permission.VIEW_QUOTATIONS)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update whether client/product details were complete at intake."""
+    return await enquiry_controller.handle_patch_enquiry_detail_type(enquiry_id, body, db, user)
+
+
+@router.patch("/{enquiry_id}/quote-status")
+async def patch_enquiry_quote_status_route(
+    enquiry_id: str,
+    body: EnquiryQuoteStatusBody,
+    user: CurrentUser = Depends(require_permission(Permission.VIEW_QUOTATIONS)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update enquiry listing quote status (Not Quoted / Quoted / Partially Quoted)."""
+    return await enquiry_controller.handle_patch_enquiry_quote_status(enquiry_id, body, db, user)
 
 
 @router.patch("/{enquiry_id}/assign-user")

@@ -39,8 +39,8 @@ def masters_listing_labels(
 
 
 def listing_category_lines_from_lines(lines: list[dict]) -> list[dict[str, str | None]]:
+    """One category row per quotation line item (same order as item_desc_lines)."""
     out: list[dict[str, str | None]] = []
-    seen: set[tuple[str, str | None]] = set()
     for li in lines:
         if not isinstance(li, dict):
             continue
@@ -49,10 +49,6 @@ def listing_category_lines_from_lines(lines: list[dict]) -> list[dict[str, str |
             continue
         vt = str(li.get("variant_type") or "").strip() or None
         category, sub_category = masters_listing_labels(ct, vt)
-        sig = (category, sub_category)
-        if sig in seen:
-            continue
-        seen.add(sig)
         out.append({"category": category, "sub_category": sub_category})
     return out
 

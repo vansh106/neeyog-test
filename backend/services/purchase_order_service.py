@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,11 +13,37 @@ from core.exceptions import ProductNotFoundError
 from db.models import PurchaseOrder, Quotation
 from services import enquiry_service as enquiry_svc
 from services.fiscal_numbering import allocate_po_number
-from services.quotation_service import compute_financial_summary_from_config
+from services.quotation_service import (
+    compute_financial_summary_from_config,
+    sync_quotation_po_received_from_purchase_orders,
+)
 
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _parse_optional_so_date(body: dict, *keys: str) -> date | None | object:
+    """Return parsed date, None to clear, or _UNSET if key absent."""
+    for key in keys:
+        if key not in body:
+            continue
+        raw = body.get(key)
+        if raw is None or raw == "":
+            return None
+        if isinstance(raw, date):
+            return raw
+        s = str(raw).strip()
+        if not s:
+            return None
+        try:
+            return date.fromisoformat(s[:10])
+        except ValueError as exc:
+            raise ValueError("Invalid SO date") from exc
+    return _UNSET
+
+
+_UNSET = object()
 
 
 def _primary_category_from_lines(lines: list[dict]) -> str:
@@ -277,11 +303,14 @@ async def create_purchase_order(
     so_number = str(so_raw).strip() if so_raw else None
     if so_number == "":
         so_number = None
+    so_date_raw = _parse_optional_so_date(body, "so_date", "soDate")
+    so_date = None if so_date_raw is _UNSET else so_date_raw
 
     po_number = await allocate_po_number(db)
     po = PurchaseOrder(
         po_number=po_number,
         so_number=so_number,
+        so_date=so_date,
         quotation_id=uuid.UUID(str(quotation_id_raw)) if quotation_id_raw else None,
         quote_number=quote_number,
         client_name=client_name,
@@ -309,6 +338,15 @@ async def create_purchase_order(
         created_by_name=(user_name or "").strip() or None,
     )
     db.add(po)
+    if quotation_id_raw:
+        await db.flush()
+        await sync_quotation_po_received_from_purchase_orders(
+            uuid.UUID(str(quotation_id_raw)),
+            db,
+            performed_by=user_email or "system",
+            performed_by_name=user_name,
+            source_po_id=po.id,
+        )
     await db.commit()
     await db.refresh(po)
 
@@ -358,6 +396,9 @@ async def update_purchase_order(
     db: AsyncSession,
     po_id: str,
     body: dict,
+    *,
+    user_email: str | None = None,
+    user_name: str | None = None,
 ) -> PurchaseOrder:
     po = await get_purchase_order(db, po_id)
     is_quoted = po.quotation_id is not None
@@ -425,6 +466,10 @@ async def update_purchase_order(
         so_number = str(so_raw).strip() if so_raw else None
         po.so_number = so_number or None
 
+    so_date_raw = _parse_optional_so_date(body, "so_date", "soDate")
+    if so_date_raw is not _UNSET:
+        po.so_date = so_date_raw
+
     if "notes" in body:
         notes_raw = body.get("notes")
         po.notes = str(notes_raw).strip() if notes_raw else None
@@ -440,14 +485,39 @@ async def update_purchase_order(
     )
     _apply_computed_financials(po, lines, fin_body)
 
+    if po.quotation_id is not None:
+        await db.flush()
+        await sync_quotation_po_received_from_purchase_orders(
+            po.quotation_id,
+            db,
+            performed_by=user_email or "system",
+            performed_by_name=user_name,
+            source_po_id=po.id,
+        )
+
     await db.commit()
     await db.refresh(po)
     return await get_purchase_order(db, str(po.id))
 
 
-async def delete_purchase_order(db: AsyncSession, po_id: str) -> str:
+async def delete_purchase_order(
+    db: AsyncSession,
+    po_id: str,
+    *,
+    user_email: str | None = None,
+    user_name: str | None = None,
+) -> str:
     po = await get_purchase_order(db, po_id)
     deleted_id = str(po.id)
+    quotation_id = po.quotation_id
     await db.delete(po)
+    if quotation_id is not None:
+        await db.flush()
+        await sync_quotation_po_received_from_purchase_orders(
+            quotation_id,
+            db,
+            performed_by=user_email or "system",
+            performed_by_name=user_name,
+        )
     await db.commit()
     return deleted_id

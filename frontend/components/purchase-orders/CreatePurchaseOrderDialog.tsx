@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { useQueryClient } from '@tanstack/react-query'
 import { Eye, Plus } from 'lucide-react'
 import {
   Dialog,
@@ -21,6 +22,7 @@ import PurchaseOrderFinancialPanel, {
 import QuotationPreviewDialog from '@/components/purchase-orders/QuotationPreviewDialog'
 import ManualClientDetailsSection from '@/components/clients/ManualClientDetailsSection'
 import { purchaseOrdersApi, suppliersApi } from '@/lib/api'
+import { invalidateQuotationCrmCaches } from '@/lib/invalidateQuotationCrmCaches'
 import { useManualClientPicker } from '@/lib/manualClientPicker'
 import { useQuotationsListingDataset, useQuotation } from '@/lib/queries'
 import {
@@ -67,6 +69,7 @@ export default function CreatePurchaseOrderDialog({
   onCreated,
 }: Props) {
   const router = useRouter()
+  const queryClient = useQueryClient()
   const [step, setStep] = useState<Step>(fixedQuotationId ? 'quoted_lines' : 'link')
   const [linkToQuote, setLinkToQuote] = useState<boolean | null>(fixedQuotationId ? true : null)
   const [selectedQuotationId, setSelectedQuotationId] = useState<string | null>(
@@ -234,6 +237,9 @@ export default function CreatePurchaseOrderDialog({
         }
       }
       const po = await purchaseOrdersApi.create<PurchaseOrder>(payload)
+      if (linkToQuote) {
+        await invalidateQuotationCrmCaches(queryClient)
+      }
       onCreated?.(po)
       resetAndClose()
       router.push(`/purchase-orders/${po.po_id}`)

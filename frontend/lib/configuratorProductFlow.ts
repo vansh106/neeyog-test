@@ -44,6 +44,8 @@ export function configuratorLeafLabel(
 ): string {
   if (isOthersCatalogCategory(key) && opts?.displayLabel) return opts.displayLabel
   if (isDamperCatalogCategory(key)) return damperSheetLabel(key)
+  const fitting = FITTING_CATALOG_OPTIONS.find((c) => c.key === key)
+  if (fitting) return fitting.label
   const leaves = flattenMasterNavLeaves(CONFIGURATOR_STEP1_PRODUCT_NAV)
   if (opts?.navSlug) {
     const bySlug = leaves.find((l) => l.navSlug === opts.navSlug)
@@ -134,6 +136,9 @@ export const HOSE_CATEGORIES_WITH_FITTINGS = new Set([
 /** Sentinel — hose end with no fitting (manual upload only). */
 export const BARE_FITTING_CATALOG_KEY = '__bare_fitting__'
 
+/** Sentinel — free-text hose fitting not in catalog (manual upload step 2). */
+export const TEMPORARY_FITTING_CATALOG_KEY = '__temporary_fitting__'
+
 /** Sentinel — free-text product not in catalog (manual upload only). */
 export const TEMPORARY_PRODUCT_CATALOG_KEY = '__temporary_product__'
 
@@ -151,6 +156,10 @@ export const FITTING_CATALOG_OPTIONS: { key: string; label: string }[] = [
 
 export function isBareFittingSelection(catalogCategory: string | null | undefined): boolean {
   return catalogCategory === BARE_FITTING_CATALOG_KEY
+}
+
+export function isTemporaryFittingSelection(catalogCategory: string | null | undefined): boolean {
+  return catalogCategory === TEMPORARY_FITTING_CATALOG_KEY
 }
 
 export function hoseRequiresFittings(catalogCategory: string | null | undefined): boolean {
@@ -190,6 +199,7 @@ export function hoseFittingsSelectionComplete(
 export function fittingCategoryLabel(catalogCategory: string | null | undefined): string {
   if (!catalogCategory) return ''
   if (isBareFittingSelection(catalogCategory)) return 'Bare fitting'
+  if (isTemporaryFittingSelection(catalogCategory)) return 'Temporary fitting'
   return (
     FITTING_CATALOG_OPTIONS.find((c) => c.key === catalogCategory)?.label ?? catalogCategory
   )

@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Trash2, Eye, Plus, Search, ClipboardList } from 'lucide-react'
 import PageShell from '@/components/layout/PageShell'
@@ -12,16 +12,29 @@ import { Input } from '@/components/ui/input'
 import CreatePurchaseOrderDialog from '@/components/purchase-orders/CreatePurchaseOrderDialog'
 import DeletePurchaseOrderDialog from '@/components/purchase-orders/DeletePurchaseOrderDialog'
 import EnterPoSoNumberDialog from '@/components/purchase-orders/EnterPoSoNumberDialog'
+import ListingPagination from '@/components/listing/ListingPagination'
 import { usePurchaseOrdersListingDataset } from '@/lib/queries'
 import { purchaseOrdersApi } from '@/lib/api'
+import { invalidateQuotationCrmCaches } from '@/lib/invalidateQuotationCrmCaches'
 import { Permissions } from '@/lib/permissions'
 import { useAuthStore } from '@/stores/authStore'
 import { cn, formatCurrency } from '@/lib/utils'
+import { listingPageSlice, listingSerialNumber } from '@/lib/listingPagination'
 import type { PurchaseOrderListItem } from '@/types'
+
+const PO_LIST_COL_COUNT = 10
 
 function formatPoDate(iso: string): string {
   if (!iso) return '—'
   return new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })
+}
+
+function formatSoDate(iso: string | null | undefined): string | null {
+  if (!iso?.trim()) return null
+  const d = iso.slice(0, 10)
+  const parsed = new Date(`${d}T12:00:00`)
+  if (Number.isNaN(parsed.getTime())) return null
+  return parsed.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
 }
 
 const SO_ENTRY_DEADLINE_MS = 24 * 60 * 60 * 1000
@@ -48,6 +61,7 @@ export default function PurchaseOrdersPage() {
   const [typeFilter, setTypeFilter] = useState('')
   const [deleteTarget, setDeleteTarget] = useState<PurchaseOrderListItem | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [page, setPage] = useState(1)
 
   const { data, isPending } = usePurchaseOrdersListingDataset(2000)
   const rows = data ?? []
@@ -56,6 +70,9 @@ export default function PurchaseOrdersPage() {
     mutationFn: (poId: string) => purchaseOrdersApi.delete<{ po_id: string; deleted: boolean }>(poId),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['purchase-orders'] })
+      if (deleteTarget?.quotation_id) {
+        await invalidateQuotationCrmCaches(queryClient)
+      }
       setDeleteTarget(null)
       setDeleteError(null)
     },
@@ -77,6 +94,12 @@ export default function PurchaseOrdersPage() {
       return true
     })
   }, [rows, search, clientFilter, typeFilter])
+
+  useEffect(() => {
+    setPage(1)
+  }, [search, clientFilter, typeFilter])
+
+  const pagedList = useMemo(() => listingPageSlice(list, page), [list, page])
 
   const totalValue = list.reduce((sum, po) => sum + po.total_amount, 0)
 
@@ -128,6 +151,7 @@ export default function PurchaseOrdersPage() {
         <table className="w-full min-w-[960px] text-left text-[13px]">
           <thead className="bg-[#FAFAF8] text-[11px] uppercase tracking-wide text-[#8A9488]">
             <tr>
+              <th className="px-4 py-3">S.No.</th>
               <th className="px-4 py-3">PO no / date</th>
               <th className="px-4 py-3">Customer</th>
               <th className="px-4 py-3">Type / quote ref</th>
@@ -143,14 +167,14 @@ export default function PurchaseOrdersPage() {
             {isPending &&
               Array.from({ length: 5 }).map((_, i) => (
                 <tr key={i} className="border-t border-[#E2E6DC]">
-                  <td colSpan={9} className="px-4 py-3">
+                  <td colSpan={PO_LIST_COL_COUNT} className="px-4 py-3">
                     <Skeleton className="h-4 w-full" />
                   </td>
                 </tr>
               ))}
             {!isPending && list.length === 0 && (
               <tr>
-                <td colSpan={9}>
+                <td colSpan={PO_LIST_COL_COUNT}>
                   <EmptyState
                     icon={ClipboardList}
                     title="No purchase orders"
@@ -159,10 +183,11 @@ export default function PurchaseOrdersPage() {
                 </td>
               </tr>
             )}
-            {list.map((po) => (
+            {pagedList.map((po, index) => (
               <PoRow
                 key={po.po_id}
                 po={po}
+                serialNumber={listingSerialNumber(page, index, undefined, list.length)}
                 canDelete={canDelete}
                 canEnterSo={canCreate}
                 onEnterSo={() => setSoEntryTarget(po)}
@@ -174,6 +199,9 @@ export default function PurchaseOrdersPage() {
             ))}
           </tbody>
         </table>
+        {!isPending && list.length > 0 ? (
+          <ListingPagination page={page} totalItems={list.length} onPageChange={setPage} />
+        ) : null}
       </div>
 
       <CreatePurchaseOrderDialog open={createOpen} onOpenChange={setCreateOpen} />
@@ -208,12 +236,14 @@ export default function PurchaseOrdersPage() {
 
 function PoRow({
   po,
+  serialNumber,
   canDelete,
   canEnterSo,
   onEnterSo,
   onDelete,
 }: {
   po: PurchaseOrderListItem
+  serialNumber: number
   canDelete: boolean
   canEnterSo: boolean
   onEnterSo: () => void
@@ -221,9 +251,11 @@ function PoRow({
 }) {
   const soMissing = isSoMissing(po.so_number)
   const soOverdue = isSoEntryOverdue(po.created_at, po.so_number)
+  const soDateLabel = formatSoDate(po.so_date)
 
   return (
     <tr className="border-t border-[#E2E6DC] hover:bg-[#FAFAF8]/80">
+      <td className="whitespace-nowrap px-4 py-3 tabular-nums text-surface-muted">{serialNumber}</td>
       <td className="px-4 py-3">
         <Link href={`/purchase-orders/${po.po_id}`} className="font-medium text-brand-navy-700 hover:underline">
           {po.po_number}
@@ -260,6 +292,9 @@ function PoRow({
         <p className="font-mono text-[12px] text-gray-900">
           {po.so_number || <span className="text-surface-muted">—</span>}
         </p>
+        {soDateLabel && (
+          <p className="mt-0.5 text-[11px] text-surface-muted">{soDateLabel}</p>
+        )}
         {soMissing &&
           (canEnterSo ? (
             <button

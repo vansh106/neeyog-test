@@ -1067,10 +1067,29 @@ async def create_manual_enquiry(
     cb_name = cb_raw[:255] if cb_raw else None
 
     notes = str(body.get("notes") or "").strip()
+    product_notes_raw = body.get("product_notes") or body.get("productNotes") or []
+    product_notes: list[dict] = []
+    if isinstance(product_notes_raw, list):
+        for item in product_notes_raw:
+            if not isinstance(item, dict):
+                continue
+            entry = {
+                "family": str(item.get("family") or "").strip(),
+                "category": str(item.get("category") or "").strip(),
+                "sub_category": str(
+                    item.get("sub_category") or item.get("subCategory") or ""
+                ).strip(),
+                "details": str(item.get("details") or "").strip(),
+            }
+            if any(entry.values()):
+                product_notes.append(entry)
     priority = str(body.get("priority") or "Normal").strip()
     enquiry_source = str(body.get("source") or "manual").strip().lower() or "manual"
     if enquiry_source not in ("email", "indiamart", "manual", "referral"):
         raise EnquiryParseError("source must be one of: email, indiamart, manual, referral")
+    enquiry_detail_type = normalize_enquiry_detail_type(
+        body.get("enquiry_detail_type") or body.get("enquiryDetailType")
+    )
 
     resolved = await _resolve_manual_client_identity(body, db)
     client_name = resolved["client_name"]
@@ -1111,6 +1130,8 @@ async def create_manual_enquiry(
         "client_employee_id": str(employee_for_quote.id) if employee_for_quote else None,
         "enquiry_source": enquiry_source,
     }
+    if product_notes:
+        parsed_data["product_notes"] = product_notes
 
     raw_payload = {
         "source": "manual_dropdown",
@@ -1135,6 +1156,7 @@ async def create_manual_enquiry(
         input_type="manual_dropdown",
         status="received",
         flow_type="manual",
+        enquiry_detail_type=enquiry_detail_type,
         parsed_data=parsed_data,
         matched_products=[],
         created_by_user_id=cb_uid,
@@ -1370,6 +1392,26 @@ async def process_manual_dropdown(
     employee_for_quote = resolved["employee_for_quote"]
     selected_client_id = resolved["selected_client_id"]
 
+    if branch_id_uuid is None and getattr(existing_enquiry, "branch_id", None) is not None:
+        branch_id_uuid = existing_enquiry.branch_id
+        if company_id_uuid is None and getattr(existing_enquiry, "company_id", None) is not None:
+            company_id_uuid = existing_enquiry.company_id
+        if client_obj is None:
+            client_obj = await client_for_export(str(branch_id_uuid), db)
+            if client_obj is not None:
+                co = str(getattr(client_obj, "company_name", "") or "").strip()
+                if co:
+                    client_company = co
+                cn = str(getattr(client_obj, "contact_name", "") or "").strip()
+                if cn:
+                    client_name = cn
+                em = str(getattr(client_obj, "email", "") or "").strip()
+                if em:
+                    client_email = em
+                ph = str(getattr(client_obj, "phone", "") or "").strip()
+                if ph:
+                    client_phone = ph
+
     enquiry_id = enquiry_uuid
 
     parsed_products, matched_products, quote_line_items, history_rows = expand_manual_line_items_to_quote_parts(
@@ -1494,6 +1536,7 @@ async def process_manual_dropdown(
     enquiry.matched_products = matched_products
     enquiry.status = "approved"
     enquiry.flow_type = "complete"
+    enquiry.enquiry_quote_status = "quoted"
     enquiry.company_id = company_id_uuid
     enquiry.branch_id = branch_id_uuid
     enquiry.raw_input = json.dumps(raw_payload, ensure_ascii=False)
@@ -1945,6 +1988,154 @@ async def assign_enquiry_user(
                 "from_user_name": old_user_name,
                 "to_user_id": str(assignee.id),
                 "to_user_name": new_name,
+            },
+        )
+    )
+    await db.commit()
+    await db.refresh(e)
+    return e
+
+
+def _normalize_product_notes_raw(product_notes_raw: list | None) -> list[dict]:
+    product_notes: list[dict] = []
+    if not isinstance(product_notes_raw, list):
+        return product_notes
+    for item in product_notes_raw:
+        if not isinstance(item, dict):
+            continue
+        entry = {
+            "family": str(item.get("family") or "").strip(),
+            "category": str(item.get("category") or "").strip(),
+            "sub_category": str(
+                item.get("sub_category") or item.get("subCategory") or ""
+            ).strip(),
+            "details": str(item.get("details") or "").strip(),
+        }
+        if any(entry.values()):
+            product_notes.append(entry)
+    return product_notes
+
+
+def _format_product_notes_text(product_notes: list[dict]) -> str:
+    blocks: list[str] = []
+    for idx, entry in enumerate(product_notes):
+        lines = [f"--- Product note {idx + 1} ---"]
+        if entry.get("family"):
+            lines.append(f"Family: {entry['family']}")
+        if entry.get("category"):
+            lines.append(f"Category: {entry['category']}")
+        if entry.get("sub_category"):
+            lines.append(f"Sub-category: {entry['sub_category']}")
+        if entry.get("details"):
+            lines.append(f"Details: {entry['details']}")
+        blocks.append("\n".join(lines))
+    return "\n\n".join(blocks)
+
+
+async def update_enquiry_product_notes(
+    enquiry_id: str,
+    product_notes_raw: list | None,
+    db: AsyncSession,
+    *,
+    performed_by: str = "user",
+    performed_by_name: str | None = None,
+) -> Enquiry:
+    e = await get_enquiry(enquiry_id, db)
+    product_notes = _normalize_product_notes_raw(product_notes_raw)
+    pd = dict(e.parsed_data or {})
+    pd["product_notes"] = product_notes
+    pd["notes"] = _format_product_notes_text(product_notes)
+    e.parsed_data = pd
+    db.add(
+        AuditLog(
+            id=uuid.uuid4(),
+            entity_type="enquiry",
+            entity_id=e.id,
+            action="enquiry_product_notes_updated",
+            performed_by=performed_by or "user",
+            details={
+                "performed_by_name": performed_by_name,
+                "enquiry_id": str(e.id),
+                "enquiry_number": e.enquiry_number,
+                "product_note_count": len(product_notes),
+            },
+        )
+    )
+    await db.commit()
+    await db.refresh(e)
+    return e
+
+
+ENQUIRY_DETAIL_TYPE_VALUES = frozenset({"complete", "incomplete"})
+
+
+def normalize_enquiry_detail_type(raw: object) -> str:
+    v = str(raw or "").strip().lower()
+    return v if v in ENQUIRY_DETAIL_TYPE_VALUES else "incomplete"
+
+
+ENQUIRY_QUOTE_STATUS_VALUES = frozenset({"not_quoted", "quoted", "partially_quoted"})
+
+
+def normalize_enquiry_quote_status(raw: object) -> str:
+    v = str(raw or "").strip().lower()
+    return v if v in ENQUIRY_QUOTE_STATUS_VALUES else "not_quoted"
+
+
+async def update_enquiry_quote_status(
+    enquiry_id: str,
+    quote_status: str,
+    db: AsyncSession,
+    *,
+    performed_by: str = "user",
+    performed_by_name: str | None = None,
+) -> Enquiry:
+    normalized = normalize_enquiry_quote_status(quote_status)
+    e = await get_enquiry(enquiry_id, db)
+    e.enquiry_quote_status = normalized
+    db.add(
+        AuditLog(
+            id=uuid.uuid4(),
+            entity_type="enquiry",
+            entity_id=e.id,
+            action="enquiry_quote_status_updated",
+            performed_by=performed_by or "user",
+            details={
+                "performed_by_name": performed_by_name,
+                "enquiry_id": str(e.id),
+                "enquiry_number": e.enquiry_number,
+                "enquiry_quote_status": normalized,
+            },
+        )
+    )
+    await db.commit()
+    await db.refresh(e)
+    return e
+
+
+async def update_enquiry_detail_type(
+    enquiry_id: str,
+    detail_type: str,
+    db: AsyncSession,
+    *,
+    performed_by: str = "user",
+    performed_by_name: str | None = None,
+) -> Enquiry:
+    normalized = normalize_enquiry_detail_type(detail_type)
+    e = await get_enquiry(enquiry_id, db)
+    e.enquiry_detail_type = normalized
+    db.add(
+        AuditLog(
+            id=uuid.uuid4(),
+            entity_type="enquiry",
+            entity_id=e.id,
+            action="enquiry_detail_type_updated",
+            performed_by=performed_by or "user",
+            details={
+                "performed_by_name": performed_by_name,
+                "enquiry_id": str(e.id),
+                "enquiry_number": e.enquiry_number,
+                "enquiry_detail_type": normalized,
             },
         )
     )

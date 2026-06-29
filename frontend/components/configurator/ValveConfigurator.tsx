@@ -51,8 +51,10 @@ import {
   isHoseCatalogCategory,
   isOthersCatalogCategory,
   isTemporaryCatalogCategory,
+  isTemporaryFittingSelection,
   operatorValveTypeForCategory,
   supportsOperatorAccessoryFlowCategory,
+  TEMPORARY_FITTING_CATALOG_KEY,
   TEMPORARY_PRODUCT_CATALOG_KEY,
 } from '@/lib/configuratorProductFlow'
 import {
@@ -227,6 +229,8 @@ type Props = {
   /** When set without ``initialProduct``, pre-selects catalog sheet and cascade picks (matcher / re-entry). */
   initialSpecSeed?: SpecSeed | null
   suppliers?: SupplierResponse[]
+  /** When true, block review/finish until the parent has loaded suppliers (avoids null supplier_id). */
+  suppliersLoading?: boolean
 }
 
 type ComponentPricingEntry = {
@@ -269,9 +273,27 @@ function inferCatalogCategoryFromValve(v: ValveProduct): string | null {
   return null
 }
 
+function fittingEndDisplayLabel(fit: ValveProduct | null | undefined): string {
+  if (!fit) return ''
+  if (isTemporaryFittingSelection(fit.catalog_category)) {
+    return (fit.temporary_description ?? fit.type).trim() || 'Temporary fitting'
+  }
+  return [fit.variant_type, fit.size_mm].filter(Boolean).join(' — ')
+}
+
 /** Rehydrate cascade state from a saved catalog row (legacy rows may omit ``catalog_category``). */
 function valveProductToSpecs(v: ValveProduct): ValveSpecSelections {
   const catalog_category = v.catalog_category ?? inferCatalogCategoryFromValve(v)
+  if (isTemporaryFittingSelection(catalog_category)) {
+    return {
+      catalog_category: TEMPORARY_FITTING_CATALOG_KEY,
+      catalog_variant_type: null,
+      catalog_nav_slug: null,
+      field_values: {
+        temporary_description: (v.temporary_description ?? v.type ?? '').trim(),
+      },
+    }
+  }
   if (catalog_category && isDamperCatalogCategory(catalog_category)) {
     return {
       catalog_category,
@@ -455,12 +477,7 @@ export function CompletedProductCard({
             Fitting (End 1):{' '}
             {product.fitting_end_1_bare
               ? 'Bare fitting'
-              : [
-                  (product.fitting_end_1 ?? product.fitting)?.variant_type,
-                  (product.fitting_end_1 ?? product.fitting)?.size_mm,
-                ]
-                  .filter(Boolean)
-                  .join(' — ')}
+              : fittingEndDisplayLabel(product.fitting_end_1 ?? product.fitting)}
             {(product.fitting_end_1_qty ?? 1) === 2 ? ' ×2' : ''}
           </p>
         )}
@@ -469,9 +486,7 @@ export function CompletedProductCard({
             Fitting (End 2):{' '}
             {product.fitting_end_2_bare
               ? 'Bare fitting'
-              : [product.fitting_end_2?.variant_type, product.fitting_end_2?.size_mm]
-                  .filter(Boolean)
-                  .join(' — ')}
+              : fittingEndDisplayLabel(product.fitting_end_2)}
           </p>
         )}
         {product.hose_length != null && (
@@ -514,6 +529,7 @@ export function ValveConfigurator({
   initialProduct,
   initialSpecSeed,
   suppliers = [],
+  suppliersLoading = false,
 }: Props) {
   const [stage, setStage] = useState<Stage>('valve_specs')
   const [isTemporaryProduct, setIsTemporaryProduct] = useState(
@@ -989,7 +1005,7 @@ export function ValveConfigurator({
     setComponentPricing((prev) => {
       const mk = (key: SupplierPriceComponentKey, enabled: boolean): ComponentPricingEntry => {
         const p = prev[key]
-        const defaultSupplier = defaultSupplierForComponentKey(
+        let defaultSupplier = defaultSupplierForComponentKey(
           key,
           activeSuppliers,
           sheetDefaultSuppliers,
@@ -997,6 +1013,19 @@ export function ValveConfigurator({
           fittingEnd1Specs,
           fittingEnd2Specs,
         )
+        if (
+          !defaultSupplier &&
+          enabled &&
+          (key === 'fitting_end_1' || key === 'fitting_end_2')
+        ) {
+          const fitSpecs = key === 'fitting_end_1' ? fittingEnd1Specs : fittingEnd2Specs
+          if (isTemporaryFittingSelection(fitSpecs.catalog_category)) {
+            const valveSid = prev.valve?.supplier_id ?? supplierId
+            if (valveSid) {
+              defaultSupplier = activeSuppliers.find((s) => s.id === valveSid) ?? null
+            }
+          }
+        }
         return {
           enabled,
           supplier_id: p?.supplier_id ?? defaultSupplier?.id ?? null,
@@ -1040,6 +1069,7 @@ export function ValveConfigurator({
     fittingEnd1Specs.catalog_nav_slug,
     fittingEnd2Specs.catalog_category,
     fittingEnd2Specs.catalog_nav_slug,
+    supplierId,
   ])
 
   useEffect(() => {
@@ -1153,12 +1183,11 @@ export function ValveConfigurator({
     if (resolvedFittingEnd1) {
       const unit = componentListPrice('fitting_end_1', resolvedFittingEnd1.base_price)
       const linePrice = unit != null ? unit * fittingEnd1Qty : null
-      const fitLabel = [
-        fittingCategoryLabel(resolvedFittingEnd1.catalog_category),
-        resolvedFittingEnd1.size_mm,
-      ]
-        .filter(Boolean)
-        .join(' ')
+      const fitLabel = isTemporaryFittingSelection(resolvedFittingEnd1.catalog_category)
+        ? fittingEndDisplayLabel(resolvedFittingEnd1)
+        : [fittingCategoryLabel(resolvedFittingEnd1.catalog_category), resolvedFittingEnd1.size_mm]
+            .filter(Boolean)
+            .join(' ')
       push(
         `Fitting End 1${fittingEnd1Qty === 2 ? ' (×2)' : ''}${fitLabel ? `: ${fitLabel}` : ''}`,
         linePrice,
@@ -1166,12 +1195,11 @@ export function ValveConfigurator({
       )
     }
     if (fittingEnd1Qty === 1 && resolvedFittingEnd2) {
-      const fitLabel = [
-        fittingCategoryLabel(resolvedFittingEnd2.catalog_category),
-        resolvedFittingEnd2.size_mm,
-      ]
-        .filter(Boolean)
-        .join(' ')
+      const fitLabel = isTemporaryFittingSelection(resolvedFittingEnd2.catalog_category)
+        ? fittingEndDisplayLabel(resolvedFittingEnd2)
+        : [fittingCategoryLabel(resolvedFittingEnd2.catalog_category), resolvedFittingEnd2.size_mm]
+            .filter(Boolean)
+            .join(' ')
       push(
         `Fitting End 2${fitLabel ? `: ${fitLabel}` : ''}`,
         componentListPrice('fitting_end_2', resolvedFittingEnd2.base_price),
@@ -1515,7 +1543,25 @@ export function ValveConfigurator({
     price_breakdown: priceInfo.breakdown,
   })
 
+  const componentMissingSupplier = (
+    key: string,
+    entry: ComponentPricingEntry,
+  ): boolean => {
+    if (!entry.enabled || (suppliers ?? []).length === 0) return false
+    if (entry.supplier_id) return false
+    if (key === 'fitting_end_1' && isTemporaryFittingSelection(fittingEnd1Specs.catalog_category)) {
+      const temp = Number((entry.temp_price || '').trim())
+      return !(Number.isFinite(temp) && temp > 0)
+    }
+    if (key === 'fitting_end_2' && isTemporaryFittingSelection(fittingEnd2Specs.catalog_category)) {
+      const temp = Number((entry.temp_price || '').trim())
+      return !(Number.isFinite(temp) && temp > 0)
+    }
+    return true
+  }
+
   const finishAndEmit = () => {
+    if (suppliersLoading) return
     if (isTemporaryProduct || isDamperSelection) {
       if (isTemporaryProduct && !temporaryDescription.trim()) return
       if (!resolvedValve || priceInfo.has_unknown_prices) return
@@ -1525,8 +1571,8 @@ export function ValveConfigurator({
     }
     if (requiresFittingsAddon && !fittingsComplete) return
     if (!hoseLengthValid) return
-    const requiredMissing = Object.values(componentPricing).some(
-      (entry) => entry.enabled && (suppliers ?? []).length > 0 && !entry.supplier_id,
+    const requiredMissing = Object.entries(componentPricing).some(([key, entry]) =>
+      componentMissingSupplier(key, entry),
     )
     if (requiredMissing) return
     onProductComplete(buildAssembled())
@@ -2205,11 +2251,14 @@ export function ValveConfigurator({
             Review total and add this assembled product to quotation.
           </p>
 
+          {suppliersLoading && (
+            <p className="text-[12px] text-surface-muted">Loading suppliers…</p>
+          )}
           {!isTemporaryProduct &&
             !isDamperSelection &&
-            (suppliers ?? []).length > 0 &&
+            !suppliersLoading &&
             Object.entries(componentPricing)
-              .filter(([, cfg]) => cfg.enabled && !cfg.supplier_id)
+              .filter(([k, cfg]) => componentMissingSupplier(k, cfg))
               .map(([k]) => (
                 <p key={k} className="text-[12px] text-red-600">
                   Missing supplier for {k}.
@@ -2242,14 +2291,14 @@ export function ValveConfigurator({
               type="button"
               onClick={finishAndEmit}
               disabled={
-                isTemporaryProduct || isDamperSelection
+                suppliersLoading ||
+                (isTemporaryProduct || isDamperSelection
                   ? (isTemporaryProduct && !temporaryDescription.trim()) ||
                     !resolvedValve ||
                     priceInfo.has_unknown_prices
-                  : (suppliers ?? []).length > 0 &&
-                    Object.values(componentPricing).some(
-                      (entry) => entry.enabled && !entry.supplier_id,
-                    )
+                  : Object.entries(componentPricing).some(([key, entry]) =>
+                      componentMissingSupplier(key, entry),
+                    ))
               }
               className="bg-brand-green-500 text-white hover:bg-brand-green-600 disabled:opacity-50"
             >

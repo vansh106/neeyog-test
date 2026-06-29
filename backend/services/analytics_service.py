@@ -18,6 +18,12 @@ from db.models import ClientBranch, Enquiry, PurchaseOrder, Quotation, User, Use
 from services.enquiry_service import item_desc_short_from_enquiry
 from services.fiscal_numbering import fiscal_year_code
 from services.masters_service import CATEGORY_LABEL_BY_KEY, _category_label
+from services.damper_schema import (
+    BUTTERFLY_DAMPER_KEY,
+    MULTI_LOUVER_DAMPER_KEY,
+    damper_sheet_label,
+    is_damper_catalog_key,
+)
 from services.quotation_service import default_validity_date, listing_fields_from_quotation
 from services.quotation_service import item_desc_short_from_lines
 
@@ -673,9 +679,10 @@ async def get_action_queues(
 ENQUIRY_SOURCE_VALUES = frozenset({"email", "indiamart", "manual", "referral"})
 
 LOST_REASON_RULES: list[tuple[str, list[str]]] = [
-    ("Price", ["price", "pricing", "cost", "expensive", "costly", "budget", "cheaper"]),
+    ("Price", ["price", "pricing", "cost", "expensive", "costly", "budget", "cheaper", "high price"]),
     ("Delivery time", ["delivery", "lead time", "lead-time", "timeline", "dispatch", "freight"]),
     ("No response", ["no response", "ghost", "silent", "unresponsive", "did not reply", "no reply"]),
+    ("Locally purchased", ["locally purchased", "local purchase", "bought locally", "local vendor"]),
     ("Specification", ["spec", "technical", "dimension", "material", "compatibility"]),
 ]
 
@@ -775,6 +782,14 @@ def _normalize_category_key(raw: str) -> str:
         return snake
     if snake in ("ball_valve", "ball_valves"):
         return "legacy:ball_valve"
+    if snake in ("butterfly_damper",):
+        return BUTTERFLY_DAMPER_KEY
+    if snake in ("multi_louver_damper", "multi_louver"):
+        return MULTI_LOUVER_DAMPER_KEY
+    if is_damper_catalog_key(snake):
+        return snake
+    if snake in ("fp_damper", "dampers", "damper"):
+        return "coarse:dampers"
     if snake in ("valve", "valves"):
         return "coarse:valves"
     if "hose" in snake and not snake.startswith("fp_"):
@@ -791,6 +806,8 @@ def _normalize_category_key(raw: str) -> str:
 def _category_metric_label(key: str) -> str:
     if key == "others":
         return "Others"
+    if is_damper_catalog_key(key):
+        return damper_sheet_label(key)
     if key.startswith("coarse:"):
         return key.split(":", 1)[1].replace("_", " ").title()
     if key.startswith("legacy:"):

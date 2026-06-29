@@ -20,6 +20,10 @@ export interface EnquiryListItem {
   input_type: string
   /** Business source: email, indiamart, manual, referral */
   source?: EnquirySource | string
+  /** Whether client/product details were complete at intake. */
+  enquiry_detail_type?: import('@/lib/enquiryDetailType').EnquiryDetailType | string
+  /** Listing quote status: not_quoted | quoted | partially_quoted. */
+  enquiry_quote_status?: import('@/lib/enquiryQuoteStatus').EnquiryQuoteStatus | string
   item_desc_short?: string
   item_desc_lines?: ListingItemDescriptionLine[]
   quotation_id?: string | null
@@ -349,6 +353,7 @@ export interface PurchaseOrderListItem {
   item_desc_short: string
   total_amount: number
   so_number?: string | null
+  so_date?: string | null
   created_by_name?: string | null
 }
 
@@ -356,6 +361,7 @@ export interface PurchaseOrder {
   po_id: string
   po_number: string
   so_number?: string | null
+  so_date?: string | null
   quotation_id?: string | null
   quote_number?: string | null
   po_type: 'quoted' | 'non_quoted'
@@ -400,6 +406,7 @@ export interface PurchaseOrderCreatePayload {
   client_phone?: string
   client_employee_id?: string
   so_number?: string
+  so_date?: string | null
   notes?: string
   pf_applicable?: boolean
   pf_mode?: 'percent' | 'amount'
@@ -649,6 +656,13 @@ export interface ManualLineItem {
 }
 
 /** Step 1 — client details only (no line items). */
+export interface EnquiryProductNote {
+  family: string
+  category: string
+  subCategory: string
+  details: string
+}
+
 export interface ManualEnquiryCreateForm {
   clientMode: 'existing' | 'new'
   selectedClientId: string | null
@@ -657,6 +671,8 @@ export interface ManualEnquiryCreateForm {
   newClient: ManualEnquiryForm['newClient']
   priority: 'Normal' | 'High' | 'Urgent'
   notes: string
+  productNotes?: EnquiryProductNote[]
+  enquiryDetailType: import('@/lib/enquiryDetailType').EnquiryDetailType
   source: EnquirySource
   /** Links enquiry to IndiaMart query (one active enquiry per query until archived). */
   indiamartQueryId?: string | null

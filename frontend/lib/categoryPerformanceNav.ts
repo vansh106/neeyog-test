@@ -16,6 +16,9 @@ export type HierarchicalCategoryRow = CategoryMetric & {
 /** Dashboard matrix: family (depth 0) and category (depth 1) only — no sub-categories or SKUs. */
 const CATEGORY_PERF_MAX_DEPTH = 1
 
+/** Top-level product families always listed (even with zero activity this month). */
+export const CATEGORY_PERF_ROOT_FAMILIES = ['Valves', 'Hoses', 'Dampers'] as const
+
 /** Extra metric keys rolled into specific masters nav groups. */
 const GROUP_EXTRA_KEYS: Record<string, string[]> = {
   Valves: ['coarse:valves'],
@@ -23,6 +26,36 @@ const GROUP_EXTRA_KEYS: Record<string, string[]> = {
   Dampers: ['coarse:dampers'],
   'Hose Fittings': ['coarse:fittings'],
   'Ball Valve': ['legacy:ball_valve'],
+}
+
+/** Legacy / mis-keyed analytics rows → masters catalog keys. */
+function canonicalCategoryKey(key: string): string {
+  if (key.startsWith('unknown:fp_damper_')) return key.slice('unknown:'.length)
+  if (key === 'unknown:fp_damper') return 'coarse:dampers'
+  return key
+}
+
+function mergeMetricsByCanonicalKey(metrics: CategoryMetric[]): CategoryMetric[] {
+  const merged = new Map<string, CategoryMetric>()
+  for (const metric of metrics) {
+    const key = canonicalCategoryKey(metric.category_key)
+    const existing = merged.get(key)
+    if (!existing) {
+      merged.set(key, key === metric.category_key ? metric : { ...metric, category_key: key })
+      continue
+    }
+    const won_value = existing.won_value + metric.won_value
+    const quoted_value = existing.quoted_value + metric.quoted_value
+    const po_count = existing.po_count + metric.po_count
+    merged.set(key, {
+      ...existing,
+      won_value,
+      quoted_value,
+      po_count,
+      win_rate_pct: winRatePct(won_value, quoted_value),
+    })
+  }
+  return [...merged.values()]
 }
 
 function collectLeafCatalogKeys(node: MasterNavNode): string[] {
@@ -102,9 +135,15 @@ function walkNav(
   maxWon: number,
   medianRate: number,
   out: HierarchicalCategoryRow[],
+  forceInclude = false,
 ) {
   for (const node of nodes) {
-    if (!hasActivity(node, byKey)) continue
+    const isPinnedFamily =
+      depth === 0 &&
+      node.kind === 'group' &&
+      (CATEGORY_PERF_ROOT_FAMILIES as readonly string[]).includes(node.label)
+    const include = forceInclude || isPinnedFamily || hasActivity(node, byKey)
+    if (!include) continue
 
     const rollup = metricsForNode(node, byKey)
     const label = node.label
@@ -126,7 +165,10 @@ function walkNav(
     })
 
     if (node.kind === 'group' && !collapseChildren(node) && depth < CATEGORY_PERF_MAX_DEPTH) {
-      walkNav(node.children, byKey, depth + 1, maxWon, medianRate, out)
+      const forceChildren =
+        forceInclude ||
+        (depth === 0 && (CATEGORY_PERF_ROOT_FAMILIES as readonly string[]).includes(node.label))
+      walkNav(node.children, byKey, depth + 1, maxWon, medianRate, out, forceChildren)
     }
   }
 }
@@ -145,24 +187,31 @@ function coveredCatalogKeys(): Set<string> {
 export function buildHierarchicalCategoryRows(
   metrics: CategoryMetric[],
 ): HierarchicalCategoryRow[] {
-  if (metrics.length === 0) return []
-
-  const byKey = new Map(metrics.map((metric) => [metric.category_key, metric]))
+  const normalized = mergeMetricsByCanonicalKey(metrics)
+  const byKey = new Map(normalized.map((metric) => [metric.category_key, metric]))
   const covered = coveredCatalogKeys()
 
-  const orphanMetrics = metrics.filter(
+  const orphanMetrics = normalized.filter(
     (metric) =>
       !covered.has(metric.category_key) &&
       (metric.won_value > 0 || metric.quoted_value > 0),
   )
 
   const navRollups: Pick<CategoryMetric, 'won_value' | 'quoted_value'>[] = []
-  function collectRollups(nodes: MasterNavNode[], depth = 0) {
+  function collectRollups(nodes: MasterNavNode[], depth = 0, forceInclude = false) {
     for (const node of nodes) {
-      if (!hasActivity(node, byKey)) continue
+      const isPinnedFamily =
+        depth === 0 &&
+        node.kind === 'group' &&
+        (CATEGORY_PERF_ROOT_FAMILIES as readonly string[]).includes(node.label)
+      const include = forceInclude || isPinnedFamily || hasActivity(node, byKey)
+      if (!include) continue
       navRollups.push(metricsForNode(node, byKey))
       if (node.kind === 'group' && depth < CATEGORY_PERF_MAX_DEPTH) {
-        collectRollups(node.children, depth + 1)
+        const forceChildren =
+          forceInclude ||
+          (depth === 0 && (CATEGORY_PERF_ROOT_FAMILIES as readonly string[]).includes(node.label))
+        collectRollups(node.children, depth + 1, forceChildren)
       }
     }
   }
@@ -218,6 +267,32 @@ export function buildHierarchicalCategoryRows(
   }
 
   return rows
+}
+
+export type CategoryPerformanceFamilyBlock = {
+  family: HierarchicalCategoryRow
+  children: HierarchicalCategoryRow[]
+}
+
+/** Group flat hierarchical rows into family blocks for accordion UI. */
+export function groupCategoryPerformanceFamilies(
+  rows: HierarchicalCategoryRow[],
+): CategoryPerformanceFamilyBlock[] {
+  const blocks: CategoryPerformanceFamilyBlock[] = []
+  let current: CategoryPerformanceFamilyBlock | null = null
+
+  for (const row of rows) {
+    if (row.depth === 0) {
+      current = { family: row, children: [] }
+      blocks.push(current)
+      continue
+    }
+    if (current && row.depth === 1) {
+      current.children.push(row)
+    }
+  }
+
+  return blocks
 }
 
 export function categoryPerformanceInsight(rows: HierarchicalCategoryRow[]): {

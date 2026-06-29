@@ -722,6 +722,8 @@ FINAL_PRODUCT_LABEL_BY_KEY: dict[str, str] = {
     "fp_ball_valve_unison_3_piece_3_way_l_port": "Ball valve — Unison 3-piece (3-way L-port)",
     "fp_fbv_ball_type": "FBV — Ball Type",
     "fp_fbv_y_type": "FBV — Y Type",
+    "fp_damper_butterfly": "Butterfly Damper",
+    "fp_damper_multi_louver": "Multi-Louver Damper",
 }
 
 FINAL_PRODUCT_CASCADE_STEPS: dict[str, list[str]] = {

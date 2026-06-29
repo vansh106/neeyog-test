@@ -1,12 +1,14 @@
 'use client'
 
-import { useMemo } from 'react'
-import { Lightbulb } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import { ChevronDown, ChevronRight, Lightbulb } from 'lucide-react'
 
 import { formatCompactINR } from '@/lib/formatCompactINR'
 import {
   buildHierarchicalCategoryRows,
   categoryPerformanceInsight,
+  groupCategoryPerformanceFamilies,
+  type HierarchicalCategoryRow,
 } from '@/lib/categoryPerformanceNav'
 import { cn } from '@/lib/utils'
 import type { DashboardChartsResponse } from '@/lib/api'
@@ -37,15 +39,55 @@ function renderInsight(text: string, highlight: string | null) {
   )
 }
 
+function MetricCells({ row }: { row: HierarchicalCategoryRow }) {
+  return (
+    <>
+      <td className="py-2.5 pr-3">
+        <div className="relative min-w-[120px]">
+          <div
+            className="absolute inset-y-0 left-0 rounded bg-[#2A6B3C]/10"
+            style={{ width: `${Math.max(row.bar_width_pct, row.won_value > 0 ? 6 : 0)}%` }}
+            aria-hidden
+          />
+          <span className="relative font-semibold tabular-nums text-gray-900">
+            {formatCompactINR(row.won_value)}
+          </span>
+        </div>
+      </td>
+      <td className="py-2.5">
+        <span
+          className={cn(
+            'inline-flex rounded-md border px-2 py-0.5 text-[12px] font-semibold tabular-nums',
+            winRateClass(row.win_rate_tier),
+          )}
+        >
+          {row.win_rate_pct}%
+        </span>
+      </td>
+    </>
+  )
+}
+
 export default function CategoryPerformanceMatrix({ data, className }: Props) {
   const rows = useMemo(
     () => buildHierarchicalCategoryRows(data.categories),
     [data.categories],
   )
+  const familyBlocks = useMemo(() => groupCategoryPerformanceFamilies(rows), [rows])
   const { insight, highlight_token } = useMemo(
     () => categoryPerformanceInsight(rows),
     [rows],
   )
+  const [expandedFamilies, setExpandedFamilies] = useState<Set<string>>(() => new Set())
+
+  function toggleFamily(key: string) {
+    setExpandedFamilies((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
 
   return (
     <div
@@ -58,7 +100,7 @@ export default function CategoryPerformanceMatrix({ data, className }: Props) {
         Category performance — won value vs win rate
       </h3>
 
-      {rows.length === 0 ? (
+      {familyBlocks.length === 0 ? (
         <p className="mt-6 text-[13px] text-surface-muted">No category data this month.</p>
       ) : (
         <>
@@ -72,41 +114,21 @@ export default function CategoryPerformanceMatrix({ data, className }: Props) {
                 </tr>
               </thead>
               <tbody>
-                {rows.map((row) => (
-                  <tr key={row.category_key} className="border-b border-[#F3F4F0] last:border-0">
-                    <td
-                      className={cn(
-                        'py-2.5 pr-3 font-medium text-gray-900',
-                        row.is_group && row.depth === 0 && 'font-semibold',
-                      )}
-                      style={{ paddingLeft: `${12 + row.depth * 16}px` }}
-                    >
-                      {row.category_label}
-                    </td>
-                    <td className="py-2.5 pr-3">
-                      <div className="relative min-w-[120px]">
-                        <div
-                          className="absolute inset-y-0 left-0 rounded bg-[#2A6B3C]/10"
-                          style={{ width: `${Math.max(row.bar_width_pct, 6)}%` }}
-                          aria-hidden
-                        />
-                        <span className="relative font-semibold tabular-nums text-gray-900">
-                          {formatCompactINR(row.won_value)}
-                        </span>
-                      </div>
-                    </td>
-                    <td className="py-2.5">
-                      <span
-                        className={cn(
-                          'inline-flex rounded-md border px-2 py-0.5 text-[12px] font-semibold tabular-nums',
-                          winRateClass(row.win_rate_tier),
-                        )}
-                      >
-                        {row.win_rate_pct}%
-                      </span>
-                    </td>
-                  </tr>
-                ))}
+                {familyBlocks.map(({ family, children: childRows }) => {
+                  const isExpanded = expandedFamilies.has(family.category_key)
+                  const canExpand = childRows.length > 0
+
+                  return (
+                    <FamilyRows
+                      key={family.category_key}
+                      family={family}
+                      childRows={childRows}
+                      isExpanded={isExpanded}
+                      canExpand={canExpand}
+                      onToggle={() => toggleFamily(family.category_key)}
+                    />
+                  )
+                })}
               </tbody>
             </table>
           </div>
@@ -122,5 +144,53 @@ export default function CategoryPerformanceMatrix({ data, className }: Props) {
         </>
       )}
     </div>
+  )
+}
+
+function FamilyRows({
+  family,
+  childRows,
+  isExpanded,
+  canExpand,
+  onToggle,
+}: {
+  family: HierarchicalCategoryRow
+  childRows: HierarchicalCategoryRow[]
+  isExpanded: boolean
+  canExpand: boolean
+  onToggle: () => void
+}) {
+  return (
+    <>
+      <tr className="border-b border-[#F3F4F0]">
+        <td className="py-2.5 pr-3 font-semibold text-gray-900">
+          {canExpand ? (
+            <button
+              type="button"
+              onClick={onToggle}
+              className="flex w-full items-center gap-1.5 rounded-md px-1 py-0.5 text-left hover:bg-[#F4F5F0]"
+              aria-expanded={isExpanded}
+            >
+              {isExpanded ? (
+                <ChevronDown className="size-4 shrink-0 text-surface-muted" aria-hidden />
+              ) : (
+                <ChevronRight className="size-4 shrink-0 text-surface-muted" aria-hidden />
+              )}
+              <span>{family.category_label}</span>
+            </button>
+          ) : (
+            <span className="pl-5">{family.category_label}</span>
+          )}
+        </td>
+        <MetricCells row={family} />
+      </tr>
+      {isExpanded &&
+        childRows.map((child) => (
+          <tr key={child.category_key} className="border-b border-[#F3F4F0] last:border-0">
+            <td className="py-2.5 pr-3 pl-9 font-medium text-gray-800">{child.category_label}</td>
+            <MetricCells row={child} />
+          </tr>
+        ))}
+    </>
   )
 }

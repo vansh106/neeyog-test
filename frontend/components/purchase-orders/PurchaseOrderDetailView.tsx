@@ -145,6 +145,10 @@ export default function PurchaseOrderDetailView({
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <Field label="PO number" value={<span className="font-mono">{po.po_number}</span>} />
           <Field label="SO number" value={po.so_number ? <span className="font-mono">{po.so_number}</span> : '—'} />
+          <Field
+            label="SO date"
+            value={po.so_date ? formatPoDate(`${po.so_date.slice(0, 10)}T12:00:00`) : '—'}
+          />
           <Field label="Date" value={formatPoDate(po.created_at)} />
           <Field label="Type" value={po.po_type === 'quoted' ? 'Quoted' : 'Non-quoted'} />
           <Field

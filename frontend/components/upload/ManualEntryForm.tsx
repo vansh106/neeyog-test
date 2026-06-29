@@ -10,6 +10,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { cn, formatCurrency, formatPriceOrTbd, isPositivePrice, PRICE_TBD_LABEL } from '@/lib/utils'
 import { useWarmupMatcherCatalog } from '@/hooks/useValveCatalog'
 import { clientsApi, suppliersApi } from '@/lib/api'
+import { useSheetDefaultSuppliers } from '@/lib/queries'
+import { resolveSupplierFromSheetDefaults } from '@/lib/sheetDefaultSupplier'
+import { isTemporaryCatalogCategory } from '@/lib/configuratorProductFlow'
 import { ValveConfigurator, CompletedProductCard } from '@/components/configurator/ValveConfigurator'
 import {
   assemblyLabel,
@@ -17,6 +20,8 @@ import {
   assemblyPartUnitMultiplier,
   assembledToLineItem,
   catalogPartsForAssembly,
+  isAssemblyPricingReady,
+  isManualPricedAssemblyComponent,
   operatorLabel,
   uuidv4,
 } from '@/lib/manualAssemblyLineItem'
@@ -39,9 +44,15 @@ import type {
 import EnquiryNotesField from '@/components/enquiries/EnquiryNotesField'
 import { ENQUIRY_SOURCE_OPTIONS } from '@/lib/enquirySource'
 import {
-  buildEnquiryNotes,
-  EMPTY_MASTER_NOTES_SELECTIONS,
-  type MasterNotesSelections,
+  ENQUIRY_DETAIL_TYPE_LABELS,
+  ENQUIRY_DETAIL_TYPES,
+  type EnquiryDetailType,
+} from '@/lib/enquiryDetailType'
+import {
+  buildEnquiryNotesFromProductNotes,
+  initProductNotesFromPrefill,
+  serializeProductNotes,
+  type ProductNoteEntry,
 } from '@/lib/enquiryMasterNotes'
 import { CLIENT_INDUSTRY_OPTIONS, type EnquirySource } from '@/types'
 
@@ -94,6 +105,8 @@ type Props = {
   clientSummaryLabel?: string | null
   /** Pre-select quote contact from enquiry ``parsed_data``. */
   initialClientEmployeeId?: string | null
+  /** Branch id from enquiry ``parsed_data`` when client picker is hidden. */
+  initialSelectedBranchId?: string | null
 }
 
 const SELECT_EMPTY = '__none__'
@@ -592,19 +605,20 @@ export default function ManualEntryForm({
   clientStageSubmitLabel,
   clientSummaryLabel,
   initialClientEmployeeId,
+  initialSelectedBranchId,
 }: Props) {
   const showClientSection = stage !== 'products'
   const showProductsSection = stage !== 'client'
   useWarmupMatcherCatalog(matcherSeed?.catalogKey ?? null)
 
   const [enquirySource, setEnquirySource] = useState<EnquirySource>(initialEnquirySource ?? 'manual')
-  const [masterNoteSelections, setMasterNoteSelections] = useState<MasterNotesSelections>(
-    EMPTY_MASTER_NOTES_SELECTIONS,
+  const [enquiryDetailType, setEnquiryDetailType] = useState<EnquiryDetailType>('incomplete')
+  const [productNotes, setProductNotes] = useState<ProductNoteEntry[]>(() =>
+    initProductNotesFromPrefill(prefillNotesFromEnquiry),
   )
-  const [additionalNotes, setAdditionalNotes] = useState(() => (prefillNotesFromEnquiry || '').trim())
   const enquiryNotes = useMemo(
-    () => buildEnquiryNotes(masterNoteSelections, additionalNotes),
-    [masterNoteSelections, additionalNotes],
+    () => buildEnquiryNotesFromProductNotes(productNotes),
+    [productNotes],
   )
   const [clientMode, setClientMode] = useState<'existing' | 'new'>('existing')
   const [newClient, setNewClient] = useState({
@@ -627,11 +641,11 @@ export default function ManualEntryForm({
     if (!matcherClientHint) return
     if (matcherClientHint.mode === 'existing' && matcherClientHint.selectedClientId) {
       setClientMode('existing')
+      setSelectedBranchId(matcherClientHint.selectedClientId)
       for (const co of dummyCompaniesForSearch()) {
         const br = (co.branches || []).find((b) => b.id === matcherClientHint.selectedClientId)
         if (br) {
           setSelectedCompany(co)
-          setSelectedBranchId(br.id)
           setCompanyQuery(co.company_name)
           break
         }
@@ -656,11 +670,17 @@ export default function ManualEntryForm({
   }, [matcherClientHint])
 
   useEffect(() => {
+    if (!initialSelectedBranchId?.trim()) return
+    setClientMode('existing')
+    setSelectedBranchId(initialSelectedBranchId.trim())
+  }, [initialSelectedBranchId])
+
+  useEffect(() => {
     if (initialEnquirySource) setEnquirySource(initialEnquirySource)
   }, [initialEnquirySource])
 
   useEffect(() => {
-    setAdditionalNotes((prefillNotesFromEnquiry || '').trim())
+    setProductNotes(initProductNotesFromPrefill(prefillNotesFromEnquiry))
   }, [prefillNotesFromEnquiry])
 
   useEffect(() => {
@@ -723,6 +743,8 @@ export default function ManualEntryForm({
   const [newClientQuoteEmployeeDesignation, setNewClientQuoteEmployeeDesignation] = useState('')
 
   const [suppliers, setSuppliers] = useState<SupplierResponse[]>([])
+  const [suppliersLoading, setSuppliersLoading] = useState(true)
+  const { data: sheetDefaultSuppliers = [] } = useSheetDefaultSuppliers()
   const [productCalcs, setProductCalcs] = useState<ProductPricingCalc[]>([])
   const [pricingLoading, setPricingLoading] = useState(false)
   const [tempQuoteUnitByProduct, setTempQuoteUnitByProduct] = useState<Record<string, string>>({})
@@ -826,6 +848,7 @@ export default function ManualEntryForm({
 
   useEffect(() => {
     let cancelled = false
+    setSuppliersLoading(true)
     ;(async () => {
       try {
         const [sList] = await Promise.all([
@@ -837,6 +860,8 @@ export default function ManualEntryForm({
         if (!cancelled) {
           setSuppliers([])
         }
+      } finally {
+        if (!cancelled) setSuppliersLoading(false)
       }
     })()
     return () => {
@@ -844,10 +869,48 @@ export default function ManualEntryForm({
     }
   }, [])
 
+  /** Backfill supplier on products added before the suppliers list finished loading. */
+  useEffect(() => {
+    if (suppliersLoading || suppliers.length === 0) return
+    setAssembledProducts((prev) => {
+      let changed = false
+      const next = prev.map((p) => {
+        if (p.supplier_id) return p
+        const valveCat = p.valve?.catalog_category
+        if (!valveCat || isTemporaryCatalogCategory(valveCat)) return p
+        const sid = resolveSupplierFromSheetDefaults(
+          sheetDefaultSuppliers,
+          valveCat,
+          null,
+          suppliers,
+        )
+        if (!sid) return p
+        const sname = suppliers.find((s) => s.id === sid)?.name ?? null
+        const cp = { ...(p.component_pricing ?? {}) }
+        for (const [key, entry] of Object.entries(cp)) {
+          if (!entry?.enabled || entry.supplier_id) continue
+          cp[key] = { ...entry, supplier_id: sid, supplier_name: sname }
+        }
+        changed = true
+        return { ...p, supplier_id: sid, supplier_name: sname, component_pricing: cp }
+      })
+      return changed ? next : prev
+    })
+  }, [suppliersLoading, suppliers, sheetDefaultSuppliers])
+
   const selectedBranch = useMemo((): BranchResponse | null => {
     if (!selectedCompany || !selectedBranchId) return null
     return (selectedCompany.branches || []).find((b) => b.id === selectedBranchId) ?? null
   }, [selectedCompany, selectedBranchId])
+
+  const effectiveBranchId = useMemo((): string | null => {
+    if (selectedBranchId) return selectedBranchId
+    if (matcherClientHint?.mode === 'existing' && matcherClientHint.selectedClientId) {
+      return matcherClientHint.selectedClientId
+    }
+    if (initialSelectedBranchId?.trim()) return initialSelectedBranchId.trim()
+    return null
+  }, [selectedBranchId, matcherClientHint, initialSelectedBranchId])
 
   const defaultClientDiscount = useMemo(() => {
     if (clientMode !== 'existing') return null
@@ -910,7 +973,9 @@ export default function ManualEntryForm({
         const parts = catalogPartsForAssembly(p)
         const missing: string[] = []
         if (parts.length === 0) missing.push('Valve configuration')
-        if (suppliers.length > 0 && !supplierId) missing.push('Supplier selection')
+        if (suppliers.length > 0 && !isAssemblyPricingReady(p, true) && !supplierId) {
+          missing.push('Supplier selection')
+        }
         const rows: Array<{ component: string; calc: PriceCalculationResult; unitMult?: number }> = []
         if (supplierId || p.component_pricing) {
           for (const part of parts) {
@@ -942,6 +1007,35 @@ export default function ManualEntryForm({
             const unitMult = assemblyPartUnitMultiplier(part.label, p)
             rows.push({ component: part.label, calc, unitMult })
           }
+        }
+        for (const key of ['fitting_end_1', 'fitting_end_2'] as const) {
+          if (!isManualPricedAssemblyComponent(key, p)) continue
+          const entry = p.component_pricing?.[key]
+          if (!entry?.enabled) continue
+          const manualUnit = entry.final_price ?? entry.temp_price
+          if (!isPositivePrice(manualUnit)) {
+            missing.push(key === 'fitting_end_1' ? 'Fitting (End 1)' : 'Fitting (End 2)')
+            continue
+          }
+          const unitMult =
+            key === 'fitting_end_1' && (p.fitting_end_1_qty ?? 1) === 2 ? 2 : 1
+          const unitPrice = Number(manualUnit)
+          rows.push({
+            component: key === 'fitting_end_1' ? 'Fitting (End 1)' : 'Fitting (End 2)',
+            calc: {
+              list_price: unitPrice,
+              supplier_discount_pct: 0,
+              cost_to_parth: unitPrice,
+              margin_multiplier: 1,
+              parth_selling_price: unitPrice,
+              customer_discount_pct: 0,
+              customer_discount_amount: 0,
+              final_unit_price: unitPrice,
+              quantity: p.quantity,
+              line_total: unitPrice * unitMult * p.quantity,
+            },
+            unitMult,
+          })
         }
         const ok = parts.length > 0 && missing.length === 0
         const assemblyUnit = ok
@@ -1031,9 +1125,9 @@ export default function ManualEntryForm({
   const supplierRequired = suppliers.length > 0
   const pricingReady = useMemo(() => {
     if (assembledProducts.length === 0) return false
-    if (!supplierRequired) return true
-    return assembledProducts.every((p) => Boolean(p.supplier_id))
-  }, [assembledProducts, supplierRequired])
+    if (suppliersLoading) return false
+    return assembledProducts.every((p) => isAssemblyPricingReady(p, supplierRequired))
+  }, [assembledProducts, supplierRequired, suppliersLoading])
 
   /** Subtotal = Σ (quoted unit × qty); taxes match quotation rules (GST 18%, P&amp;F 3% on subtotal). */
   const netOrderTotals = useMemo(() => {
@@ -1123,8 +1217,13 @@ export default function ManualEntryForm({
     }
     if (showProductsSection) {
       if (stage === 'products') {
-        if (clientMode === 'existing' && !selectedBranchId) {
+        const branchId = effectiveBranchId
+        if (clientMode === 'existing' && !branchId && !targetEnquiryId) {
           e.client = 'Client could not be loaded — refresh the enquiry page'
+        }
+        if (clientMode === 'existing' && !branchId && targetEnquiryId) {
+          e.client =
+            'Client branch is missing on this enquiry — re-link the client on the enquiry or upload flow'
         }
         if (clientMode === 'new' && (newClient.company_name || '').trim().length < 2) {
           e.client = 'Client could not be loaded — refresh the enquiry page'
@@ -1134,8 +1233,12 @@ export default function ManualEntryForm({
         e.products = 'Please complete at least one valve configurator'
       }
       if (supplierRequired) {
-        const missingSupplier = assembledProducts.some((p) => !p.supplier_id)
-        if (missingSupplier) e.supplier = 'Please select a supplier for each product'
+        const missingPricing = assembledProducts.some(
+          (p) => !isAssemblyPricingReady(p, supplierRequired),
+        )
+        if (missingPricing) {
+          e.supplier = 'Complete supplier and pricing for each product before generating the quotation'
+        }
       }
     }
     setErrors(e)
@@ -1183,20 +1286,22 @@ export default function ManualEntryForm({
   function buildClientPayload() {
     const base = {
       clientMode,
-      selectedClientId: selectedBranchId,
+      selectedClientId: effectiveBranchId,
       newClient: {
         ...newClient,
         address: newClient.address_line1 || newClient.address,
       },
       priority: 'Normal' as const,
       notes: enquiryNotes,
+      productNotes: serializeProductNotes(productNotes),
+      enquiryDetailType,
       source: enquirySource,
       ...(indiamartQueryId ? { indiamartQueryId } : {}),
     }
     if (
       clientMode === 'existing' &&
-      selectedBranchId &&
-      !selectedBranchId.startsWith('dummy-') &&
+      effectiveBranchId &&
+      !effectiveBranchId.startsWith('dummy-') &&
       selectedClientEmployeeId
     ) {
       return { ...base, clientEmployeeId: selectedClientEmployeeId }
@@ -1218,8 +1323,8 @@ export default function ManualEntryForm({
     const inlineEmpName = inlineNewEmployeeName.trim()
     if (
       clientMode === 'existing' &&
-      selectedBranchId &&
-      !selectedBranchId.startsWith('dummy-') &&
+      effectiveBranchId &&
+      !effectiveBranchId.startsWith('dummy-') &&
       inlineEmpName &&
       !selectedClientEmployeeId
     ) {
@@ -1247,7 +1352,7 @@ export default function ManualEntryForm({
     const form: ManualEnquiryForm = {
       ...(targetEnquiryId ? { targetEnquiryId } : {}),
       clientMode,
-      selectedClientId: selectedBranchId,
+      selectedClientId: effectiveBranchId,
       newClient: {
         ...newClient,
         address: newClient.address_line1 || newClient.address,
@@ -1288,8 +1393,8 @@ export default function ManualEntryForm({
     }
     if (
       clientMode === 'existing' &&
-      selectedBranchId &&
-      !selectedBranchId.startsWith('dummy-') &&
+      effectiveBranchId &&
+      !effectiveBranchId.startsWith('dummy-') &&
       selectedClientEmployeeId
     ) {
       form.clientEmployeeId = selectedClientEmployeeId
@@ -1308,8 +1413,8 @@ export default function ManualEntryForm({
     const inlineEmpName = inlineNewEmployeeName.trim()
     if (
       clientMode === 'existing' &&
-      selectedBranchId &&
-      !selectedBranchId.startsWith('dummy-') &&
+      effectiveBranchId &&
+      !effectiveBranchId.startsWith('dummy-') &&
       inlineEmpName &&
       !selectedClientEmployeeId
     ) {
@@ -1361,6 +1466,7 @@ export default function ManualEntryForm({
       ) : null}
 
       {stage === 'client' ? (
+        <>
         <section className="rounded-xl border border-surface-border bg-white p-5 shadow-sm">
           <div className="text-[10px] font-medium uppercase tracking-wide text-[#8A9488]">Source</div>
           <p className="mt-1 text-[12px] text-surface-muted">
@@ -1382,6 +1488,32 @@ export default function ManualEntryForm({
             </SelectContent>
           </Select>
         </section>
+
+        <section className="rounded-xl border border-surface-border bg-white p-5 shadow-sm">
+          <div className="text-[10px] font-medium uppercase tracking-wide text-[#8A9488]">
+            Enquiry type
+          </div>
+          <p className="mt-1 text-[12px] text-surface-muted">
+            Does this enquiry from the client include complete details, or is more information still
+            needed?
+          </p>
+          <Select
+            value={enquiryDetailType}
+            onValueChange={(v) => setEnquiryDetailType((v as EnquiryDetailType) || 'incomplete')}
+          >
+            <SelectTrigger className="mt-3 h-10 w-full border-surface-border bg-white text-[13px]">
+              <SelectValue placeholder="Select enquiry type" />
+            </SelectTrigger>
+            <SelectContent>
+              {ENQUIRY_DETAIL_TYPES.map((type) => (
+                <SelectItem key={type} value={type}>
+                  {ENQUIRY_DETAIL_TYPE_LABELS[type]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </section>
+        </>
       ) : null}
 
       {/* ── Client Details ─────────────────────────────────────────── */}
@@ -1995,10 +2127,8 @@ export default function ManualEntryForm({
       </section>
 
       <EnquiryNotesField
-        selections={masterNoteSelections}
-        onSelectionsChange={setMasterNoteSelections}
-        additionalNotes={additionalNotes}
-        onAdditionalNotesChange={setAdditionalNotes}
+        productNotes={productNotes}
+        onProductNotesChange={setProductNotes}
         className="mt-4"
       />
       </>
@@ -2018,6 +2148,7 @@ export default function ManualEntryForm({
                 productIndex={idx}
                 initialProduct={p}
                 suppliers={suppliers}
+                suppliersLoading={suppliersLoading}
                 onProductComplete={(updated) => {
                   setAssembledProducts((prev) =>
                     prev.map((x) => (x.id === p.id ? updated : x)),
@@ -2066,6 +2197,7 @@ export default function ManualEntryForm({
                 key={`${cid}-${matcherSeedVersion}`}
                 productIndex={assembledProducts.length + idx}
                 suppliers={suppliers}
+                suppliersLoading={suppliersLoading}
                 initialSpecSeed={initialSpecSeed}
                 onProductComplete={handleProductComplete(cid)}
                 onProductRemove={
@@ -2390,12 +2522,36 @@ export default function ManualEntryForm({
       ) : null}
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <p className="text-[13px] text-surface-muted">{summaryText}</p>
+        <div className="min-w-0">
+          <p className="text-[13px] text-surface-muted">{summaryText}</p>
+          {showProductsSection &&
+            assembledProducts.length > 0 &&
+            !pricingReady &&
+            !suppliersLoading && (
+              <p className="mt-1 text-[12px] text-red-600">
+                {errors.supplier ||
+                  'Complete supplier and pricing for each product before generating the quotation.'}
+              </p>
+            )}
+          {suppliersLoading && assembledProducts.length > 0 && (
+            <p className="mt-1 text-[12px] text-surface-muted">Loading suppliers…</p>
+          )}
+          {Object.keys(errors).length > 0 && (
+            <div className="mt-1 space-y-0.5">
+              {Object.values(errors).map((msg) => (
+                <p key={msg} className="text-[12px] text-red-600">
+                  {msg}
+                </p>
+              ))}
+            </div>
+          )}
+        </div>
         <Button
           type="button"
           onClick={submit}
           disabled={
             isProcessing ||
+            suppliersLoading ||
             (showProductsSection && supplierRequired && !pricingReady) ||
             (stage === 'client' && !onCreateEnquiry)
           }

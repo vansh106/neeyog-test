@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Archive, FileText, Search } from 'lucide-react'
 import PageShell from '@/components/layout/PageShell'
@@ -13,6 +13,7 @@ import ArchiveRecordDialog from '@/components/listing/ArchiveRecordDialog'
 import QuotationLineStatusColumn from '@/components/quotations/QuotationLineStatusColumn'
 import ListingItemDescriptionsCell from '@/components/listing/ListingItemDescriptionsCell'
 import ListingCategoryCell from '@/components/listing/ListingCategoryCell'
+import ListingPagination from '@/components/listing/ListingPagination'
 import QuotationListDateEditor, {
   formatQuotationListDate,
 } from '@/components/quotations/QuotationListDateEditor'
@@ -28,9 +29,10 @@ import { quotationsApi } from '@/lib/api'
 import { Permissions } from '@/lib/permissions'
 import { useAuthStore } from '@/stores/authStore'
 import { formatCurrency, cn } from '@/lib/utils'
+import { listingPageSlice, listingSerialNumber } from '@/lib/listingPagination'
 import type { QuotationListItem } from '@/types'
 
-const COL_COUNT = 11
+const COL_COUNT = 12
 
 function TableSkeletonRows() {
   return (
@@ -61,6 +63,7 @@ export default function QuotationsPage() {
   const [archiveFilter, setArchiveFilter] = useState<ArchiveFilter>('active')
   const [archiveTarget, setArchiveTarget] = useState<QuotationListItem | null>(null)
   const [archiveError, setArchiveError] = useState<string | null>(null)
+  const [page, setPage] = useState(1)
 
   const { data: quotations, isPending } = useQuotationsListingDataset(LISTING_FETCH_LIMIT)
   const allRows: QuotationListItem[] = quotations ?? []
@@ -90,6 +93,12 @@ export default function QuotationsPage() {
       }),
     [allRows, searchInput, clientFilter, statusFilter, dateFrom, dateTo, archiveFilter],
   )
+
+  useEffect(() => {
+    setPage(1)
+  }, [searchInput, clientFilter, statusFilter, dateFrom, dateTo, archiveFilter])
+
+  const pagedList = useMemo(() => listingPageSlice(list, page), [list, page])
   const totalValue = list.reduce((sum, q) => sum + (q.subtotal ?? q.total_amount), 0)
 
   const clearFilters = () => {
@@ -207,6 +216,7 @@ export default function QuotationsPage() {
           <table className="w-full min-w-[1420px] border-collapse text-left">
             <thead>
               <tr className="bg-[#F4F5F0] text-[11px] font-medium uppercase tracking-wide text-[#8A9488]">
+                <th className="min-w-[44px] whitespace-nowrap px-3 py-3">S.No.</th>
                 <th className="min-w-[120px] whitespace-nowrap px-3 py-3">Quote / Enq</th>
                 <th className="min-w-[72px] whitespace-nowrap px-3 py-3">Date</th>
                 <th className="min-w-[140px] whitespace-nowrap px-3 py-3">Client</th>
@@ -240,7 +250,7 @@ export default function QuotationsPage() {
               </tbody>
             ) : (
               <tbody>
-                {list.map((q) => (
+                {pagedList.map((q, index) => (
                   <tr
                     key={q.quotation_id}
                     className={cn(
@@ -248,6 +258,9 @@ export default function QuotationsPage() {
                       archivedListingRowClass(q.is_archived),
                     )}
                   >
+                    <td className="whitespace-nowrap px-3 py-3 align-top tabular-nums text-[13px] text-surface-muted">
+                      {listingSerialNumber(page, index, undefined, list.length)}
+                    </td>
                     <td className="px-3 py-3 align-top">
                       <Link
                         href={`/quotations/${q.quotation_id}`}
@@ -278,12 +291,17 @@ export default function QuotationsPage() {
                         lines={q.category_lines}
                         category={q.category_label || q.primary_category}
                         subCategory={q.sub_category}
+                        descriptionLines={q.item_desc_lines}
+                        fallbackDescShort={q.item_desc_short}
                       />
                     </td>
                     <td className="max-w-[220px] px-3 py-3 align-top">
                       <ListingItemDescriptionsCell
                         lines={q.item_desc_lines}
                         fallbackShort={q.item_desc_short}
+                        categoryLines={q.category_lines}
+                        category={q.category_label || q.primary_category}
+                        subCategory={q.sub_category}
                       />
                     </td>
                     <td className="whitespace-nowrap px-3 py-3 align-top text-right font-mono text-brand-green-600">
@@ -334,20 +352,28 @@ export default function QuotationsPage() {
           </table>
         </div>
         {!isPending && allRows.length > 0 && (
-          <div className="border-t border-[#E2E6DC] bg-[#F9FAF7] px-4 py-3">
+          <div className="border-t border-[#E2E6DC] bg-[#F9FAF7]">
             {list.length === 0 ? (
-              <p className="text-[13px] text-surface-muted">
+              <p className="px-4 py-3 text-[13px] text-surface-muted">
                 No rows match your filters ({allRows.length} quotation{allRows.length === 1 ? '' : 's'} loaded).
               </p>
             ) : (
-              <p className="font-mono text-[13px] text-brand-green-600">
-                Showing {list.length}
-                {list.length !== allRows.length ? ` of ${allRows.length}` : ''} quotation{list.length === 1 ? '' : 's'} —
-                Total value: {formatCurrency(totalValue)}
+              <p className="border-b border-[#ECEEE8] px-4 py-3 font-mono text-[13px] text-brand-green-600">
+                {list.length} quotation{list.length === 1 ? '' : 's'}
+                {list.length !== allRows.length ? ` of ${allRows.length} loaded` : ''} — Total value:{' '}
+                {formatCurrency(totalValue)}
               </p>
             )}
+            {list.length > 0 ? (
+              <ListingPagination
+                page={page}
+                totalItems={list.length}
+                onPageChange={setPage}
+                className="border-t-0 bg-transparent"
+              />
+            ) : null}
             {allRows.length >= LISTING_FETCH_LIMIT && (
-              <p className="mt-1 text-[11px] text-surface-muted">
+              <p className="px-4 pb-3 text-[11px] text-surface-muted">
                 Search and filters run instantly on the {LISTING_FETCH_LIMIT} most recent quotations.
               </p>
             )}

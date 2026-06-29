@@ -18,6 +18,7 @@ from core.auth_middleware import CurrentUser
 from core.exceptions import EnquiryParseError, ProductNotFoundError
 from db.models import Enquiry
 from services import enquiry_service
+from services.enquiry_service import normalize_enquiry_detail_type, normalize_enquiry_quote_status
 from services.quotation_description_sanitize import supplier_names_for_client
 from services.email_display_infer import infer_company_from_email_raw
 
@@ -72,10 +73,34 @@ class EnquiryListItem(BaseModel):
     series: str | None = None
     is_sales_enquiry: bool = False
     is_archived: bool = False
+    enquiry_detail_type: str = "incomplete"
+    enquiry_quote_status: str = "not_quoted"
 
 
 class EnquiryListingDatesBody(BaseModel):
     next_follow_up_date: date | None = None
+
+
+class EnquiryDetailTypeBody(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    enquiry_detail_type: str = Field(..., alias="enquiryDetailType")
+
+    @model_validator(mode="after")
+    def validate_detail_type(self):
+        self.enquiry_detail_type = normalize_enquiry_detail_type(self.enquiry_detail_type)
+        return self
+
+
+class EnquiryQuoteStatusBody(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    enquiry_quote_status: str = Field(..., alias="enquiryQuoteStatus")
+
+    @model_validator(mode="after")
+    def validate_quote_status(self):
+        self.enquiry_quote_status = normalize_enquiry_quote_status(self.enquiry_quote_status)
+        return self
 
 
 class EnquiryAssignUserBody(BaseModel):
@@ -160,6 +185,21 @@ class ManualNewClientEmployeeRequest(BaseModel):
 ENQUIRY_SOURCE_VALUES = frozenset({"email", "indiamart", "manual", "referral"})
 
 
+class EnquiryProductNoteRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    family: str = ""
+    category: str = ""
+    sub_category: str = Field("", alias="subCategory")
+    details: str = ""
+
+
+class EnquiryProductNotesBody(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    product_notes: list[EnquiryProductNoteRequest] = Field(default_factory=list, alias="productNotes")
+
+
 class ManualEnquiryCreateRequest(BaseModel):
     """Step 1 of manual flow — client only; products are added on the enquiry detail page."""
 
@@ -170,6 +210,8 @@ class ManualEnquiryCreateRequest(BaseModel):
     newClient: ManualNewClientRequest | None = None
     priority: str = "Normal"
     notes: str = ""
+    product_notes: list[EnquiryProductNoteRequest] | None = Field(None, alias="productNotes")
+    enquiry_detail_type: str = Field("incomplete", alias="enquiryDetailType")
     source: str = "manual"
     client_employee_id: str | None = Field(None, alias="clientEmployeeId")
     new_client_employee: ManualNewClientEmployeeRequest | None = Field(None, alias="newClientEmployee")
@@ -188,6 +230,8 @@ class ManualEnquiryCreateRequest(BaseModel):
         if src not in ENQUIRY_SOURCE_VALUES:
             raise ValueError("source must be one of: email, indiamart, manual, referral")
         self.source = src
+        detail = normalize_enquiry_detail_type(self.enquiry_detail_type)
+        self.enquiry_detail_type = detail
         return self
 
 
@@ -557,6 +601,12 @@ async def handle_list_enquiries(
                 series=_enquiry_series(e),
                 is_sales_enquiry=_enquiry_is_sales(e),
                 is_archived=bool(getattr(e, "is_archived", False)),
+                enquiry_detail_type=normalize_enquiry_detail_type(
+                    getattr(e, "enquiry_detail_type", None)
+                ),
+                enquiry_quote_status=normalize_enquiry_quote_status(
+                    getattr(e, "enquiry_quote_status", None)
+                ),
             )
             for e in enquiries
         ]
@@ -585,6 +635,87 @@ async def handle_patch_enquiry_listing_dates(
         return {"enquiry_id": str(e.id), "next_follow_up_date": (
             e.next_follow_up_date.isoformat() if getattr(e, "next_follow_up_date", None) else None
         )}
+    except ProductNotFoundError:
+        raise HTTPException(status_code=404, detail="Enquiry not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+async def handle_patch_enquiry_product_notes(
+    enquiry_id: str,
+    body: EnquiryProductNotesBody,
+    db: AsyncSession,
+    user: CurrentUser,
+) -> dict:
+    try:
+        current = await enquiry_service.get_enquiry(enquiry_id, db)
+        _ensure_enquiry_access(current, user)
+        notes_payload = [n.model_dump(by_alias=True) for n in (body.product_notes or [])]
+        e = await enquiry_service.update_enquiry_product_notes(
+            enquiry_id,
+            notes_payload,
+            db,
+            performed_by=user.email,
+            performed_by_name=user.full_name or None,
+        )
+        pd = e.parsed_data if isinstance(e.parsed_data, dict) else {}
+        return {
+            "enquiry_id": str(e.id),
+            "notes": str(pd.get("notes") or ""),
+            "product_notes": pd.get("product_notes") or [],
+        }
+    except ProductNotFoundError:
+        raise HTTPException(status_code=404, detail="Enquiry not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+async def handle_patch_enquiry_detail_type(
+    enquiry_id: str,
+    body: EnquiryDetailTypeBody,
+    db: AsyncSession,
+    user: CurrentUser,
+) -> dict:
+    try:
+        current = await enquiry_service.get_enquiry(enquiry_id, db)
+        _ensure_enquiry_access(current, user)
+        e = await enquiry_service.update_enquiry_detail_type(
+            enquiry_id,
+            body.enquiry_detail_type,
+            db,
+            performed_by=user.email,
+            performed_by_name=user.full_name or None,
+        )
+        return {
+            "enquiry_id": str(e.id),
+            "enquiry_detail_type": normalize_enquiry_detail_type(e.enquiry_detail_type),
+        }
+    except ProductNotFoundError:
+        raise HTTPException(status_code=404, detail="Enquiry not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+async def handle_patch_enquiry_quote_status(
+    enquiry_id: str,
+    body: EnquiryQuoteStatusBody,
+    db: AsyncSession,
+    user: CurrentUser,
+) -> dict:
+    try:
+        current = await enquiry_service.get_enquiry(enquiry_id, db)
+        _ensure_enquiry_access(current, user)
+        e = await enquiry_service.update_enquiry_quote_status(
+            enquiry_id,
+            body.enquiry_quote_status,
+            db,
+            performed_by=user.email,
+            performed_by_name=user.full_name or None,
+        )
+        return {
+            "enquiry_id": str(e.id),
+            "enquiry_quote_status": normalize_enquiry_quote_status(e.enquiry_quote_status),
+        }
     except ProductNotFoundError:
         raise HTTPException(status_code=404, detail="Enquiry not found")
     except Exception as e:

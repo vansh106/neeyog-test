@@ -215,13 +215,10 @@ def _bank_details_rows(client_config: dict) -> list[tuple[str, str]]:
 
 
 def _meta_value_paragraph_html(value: str) -> str:
-    """Format meta-strip values; break emails so they stay inside the column."""
+    """Format meta-strip values on a single line when they fit."""
     v = str(value or "").strip()
     if not v:
         return "<b>—</b>"
-    if "@" in v and " " not in v:
-        local, _, domain = v.partition("@")
-        return f"<b>{escape(local)}<br/>@{escape(domain)}</b>"
     return f"<b>{escape(v)}</b>"
 
 
@@ -257,6 +254,42 @@ def _build_meta_col_table(
             [
                 ("VALIGN", (0, 0), (-1, -1), "TOP"),
                 ("ALIGN", (1, 0), (1, -1), "RIGHT"),
+                ("TOPPADDING", (0, 0), (-1, -1), 1.5),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5),
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 2),
+            ]
+        )
+    )
+    return tbl
+
+
+def _build_customer_kv_table(
+    items: list[tuple[str, str]],
+    col_width: float,
+    label_style: ParagraphStyle,
+    value_style: ParagraphStyle,
+) -> Table:
+    """Label column + value column so Contact/Email labels and values align."""
+    label_w = 54
+    value_w = max(col_width - label_w - 8, 40)
+    rows = [
+        [
+            Paragraph(f'<font color="#6b7280">{escape(label)}</font>', label_style),
+            Paragraph(value, value_style),
+        ]
+        for label, value in items
+        if label or value
+    ]
+    if not rows:
+        rows = [[Paragraph("—", label_style), Paragraph("—", value_style)]]
+    tbl = Table(rows, colWidths=[label_w, value_w])
+    tbl.setStyle(
+        TableStyle(
+            [
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("ALIGN", (0, 0), (0, -1), "LEFT"),
+                ("ALIGN", (1, 0), (1, -1), "LEFT"),
                 ("TOPPADDING", (0, 0), (-1, -1), 1.5),
                 ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5),
                 ("LEFTPADDING", (0, 0), (-1, -1), 0),
@@ -368,8 +401,8 @@ async def generate_quotation_pdf(
             "QuotTitle",
             parent=s_normal,
             fontName="Helvetica-Bold",
-            fontSize=26,
-            leading=28,
+            fontSize=20,
+            leading=22,
             textColor=_TEXT,
             spaceBefore=0,
             spaceAfter=0,
@@ -393,10 +426,10 @@ async def generate_quotation_pdf(
             leading=12,
             textColor=_TEXT,
         )
-        s_cust_right = ParagraphStyle(
-            "CustRight",
+        s_cust_kv_val = ParagraphStyle(
+            "CustKvVal",
             parent=s_addr,
-            alignment=TA_RIGHT,
+            alignment=TA_LEFT,
             wordWrap="CJK",
         )
         s_meta_l = ParagraphStyle("MetaL", parent=s_normal, fontSize=7.9, textColor=_MUTED, alignment=TA_LEFT)
@@ -597,41 +630,30 @@ async def generate_quotation_pdf(
                             )
                         )
 
-        cust_right_lines: list = []
+        cust_right_items: list[tuple[str, str]] = []
         if concern_text:
-            cust_right_lines.append(
-                Paragraph(f'<font color="#6b7280">Kind Attn.</font> {concern_text}', s_cust_right)
-            )
+            cust_right_items.append(("Kind Attn.", concern_text))
         if client_phone:
-            cust_right_lines.append(
-                Paragraph(
-                    f'<font color="#6b7280">Contact</font> {escape(str(client_phone))}',
-                    s_cust_right,
-                )
-            )
+            cust_right_items.append(("Contact", escape(str(client_phone))))
         if client_email:
-            email_val = str(client_email).strip()
-            if "@" in email_val and " " not in email_val:
-                local, _, domain = email_val.partition("@")
-                email_html = f"{escape(local)}<br/>@{escape(domain)}"
-            else:
-                email_html = escape(email_val)
-            cust_right_lines.append(
-                Paragraph(
-                    f'<font color="#6b7280">Email</font> {email_html}',
-                    s_cust_right,
-                )
-            )
+            cust_right_items.append(("Email", escape(str(client_email).strip())))
+
+        right_col_w = _table_col_widths(page_content_w, [0.52, 0.48])[1]
+        cust_right_block: list = (
+            [_build_customer_kv_table(cust_right_items, right_col_w - 14, s_meta_l, s_cust_kv_val)]
+            if cust_right_items
+            else []
+        )
 
         cust_body = Table(
-            [[cust_left_lines, cust_right_lines]],
+            [[cust_left_lines, cust_right_block]],
             colWidths=_table_col_widths(page_content_w, [0.52, 0.48]),
         )
         cust_body.setStyle(
             TableStyle(
                 [
                     ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                    ("ALIGN", (1, 0), (1, 0), "RIGHT"),
+                    ("ALIGN", (1, 0), (1, 0), "LEFT"),
                     ("LEFTPADDING", (0, 0), (0, 0), 10),
                     ("RIGHTPADDING", (1, 0), (1, 0), 10),
                     ("LEFTPADDING", (1, 0), (1, 0), 4),

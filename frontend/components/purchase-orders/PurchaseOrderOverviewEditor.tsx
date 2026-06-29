@@ -25,6 +25,7 @@ type Props = {
 
 export default function PurchaseOrderOverviewEditor({ open, onOpenChange, po, onSaved }: Props) {
   const [soNumber, setSoNumber] = useState(po.so_number ?? '')
+  const [soDate, setSoDate] = useState('')
   const [notes, setNotes] = useState(po.notes ?? '')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -32,6 +33,7 @@ export default function PurchaseOrderOverviewEditor({ open, onOpenChange, po, on
   useEffect(() => {
     if (!open) return
     setSoNumber(po.so_number ?? '')
+    setSoDate(po.so_date?.slice(0, 10) ?? '')
     setNotes(po.notes ?? '')
     setError(null)
   }, [open, po])
@@ -42,6 +44,7 @@ export default function PurchaseOrderOverviewEditor({ open, onOpenChange, po, on
     try {
       const updated = await purchaseOrdersApi.update<PurchaseOrder>(po.po_id, {
         so_number: soNumber.trim() || undefined,
+        so_date: soDate.trim() || null,
         notes: notes.trim() || undefined,
       })
       onSaved(updated)
@@ -58,7 +61,7 @@ export default function PurchaseOrderOverviewEditor({ open, onOpenChange, po, on
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Edit order details</DialogTitle>
-          <DialogDescription>Update SO number and internal notes for this purchase order.</DialogDescription>
+          <DialogDescription>Update SO number, SO date, and internal notes for this purchase order.</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
@@ -69,6 +72,16 @@ export default function PurchaseOrderOverviewEditor({ open, onOpenChange, po, on
               value={soNumber}
               onChange={(e) => setSoNumber(e.target.value)}
               placeholder="e.g. SO-332"
+              disabled={saving}
+            />
+          </label>
+          <label className="block text-[12px]">
+            <span className="text-surface-muted">SO date (optional)</span>
+            <Input
+              type="date"
+              className="mt-1"
+              value={soDate}
+              onChange={(e) => setSoDate(e.target.value)}
               disabled={saving}
             />
           </label>

@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Check, Loader2 } from 'lucide-react'
 
 import {
@@ -10,6 +10,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { Textarea } from '@/components/ui/textarea'
 import { cn, formatCurrency, isPositivePrice } from '@/lib/utils'
 import { computeDistinctOptions, useValveCatalog, type CatalogRow } from '@/hooks/useValveCatalog'
 import { mastersApi } from '@/lib/api'
@@ -20,7 +21,9 @@ import {
   fittingCategoryLabel,
   HOSE_FITTING_SIZE_FIELD,
   isBareFittingSelection,
+  isTemporaryFittingSelection,
   matchHoseSizeToFittingOption,
+  TEMPORARY_FITTING_CATALOG_KEY,
 } from '@/lib/configuratorProductFlow'
 import type { CascadeStep, ValveProduct, ValveSpecSelections } from '@/types'
 
@@ -113,6 +116,7 @@ export function HoseFittingEndPicker({
   onQuantityChange,
   listUnitPrice,
 }: Props) {
+  const temporaryFittingIdRef = useRef(`temporary_fitting:${crypto.randomUUID()}`)
   const [cascadeSteps, setCascadeSteps] = useState<CascadeStep[]>([])
   const visibleCascadeSteps = useMemo(
     () => filterFittingCascadeSteps(cascadeSteps),
@@ -128,12 +132,16 @@ export function HoseFittingEndPicker({
     resolve,
     rowCount,
   } = useValveCatalog(
-    specs.catalog_category && !isBareFittingSelection(specs.catalog_category)
+    specs.catalog_category &&
+      !isBareFittingSelection(specs.catalog_category) &&
+      !isTemporaryFittingSelection(specs.catalog_category)
       ? specs.catalog_category
       : null,
   )
 
   const bareSelected = isBareFittingSelection(specs.catalog_category)
+  const temporarySelected = isTemporaryFittingSelection(specs.catalog_category)
+  const temporaryDescription = String(specs.field_values.temporary_description ?? '').trim()
 
   const categoryLabel = useMemo(
     () => fittingCategoryLabel(specs.catalog_category),
@@ -143,7 +151,7 @@ export function HoseFittingEndPicker({
   useEffect(() => {
     let cancelled = false
     const cat = specs.catalog_category
-    if (!cat || isBareFittingSelection(cat)) {
+    if (!cat || isBareFittingSelection(cat) || isTemporaryFittingSelection(cat)) {
       setCascadeSteps([])
       return
     }
@@ -161,7 +169,13 @@ export function HoseFittingEndPicker({
   }, [specs.catalog_category])
 
   useEffect(() => {
-    if (!specs.catalog_category || isBareFittingSelection(specs.catalog_category)) return
+    if (
+      !specs.catalog_category ||
+      isBareFittingSelection(specs.catalog_category) ||
+      isTemporaryFittingSelection(specs.catalog_category)
+    ) {
+      return
+    }
     void loadCatalog(specs.catalog_category)
   }, [specs.catalog_category, loadCatalog])
 
@@ -184,6 +198,26 @@ export function HoseFittingEndPicker({
   }, [specs, catalog, getOptions, visibleCascadeSteps])
 
   const resolved = useMemo((): ValveProduct | null => {
+    if (isTemporaryFittingSelection(specs.catalog_category)) {
+      if (!temporaryDescription) return null
+      return {
+        id: temporaryFittingIdRef.current,
+        type: temporaryDescription,
+        catalog_category: TEMPORARY_FITTING_CATALOG_KEY,
+        temporary_description: temporaryDescription,
+        construction: null,
+        valve_size: null,
+        bore_type: null,
+        end_connection: null,
+        pressure: null,
+        body: null,
+        stem: null,
+        seat: null,
+        fasteners: null,
+        base_price: null,
+        has_price: false,
+      }
+    }
     if (
       !specs.catalog_category ||
       isBareFittingSelection(specs.catalog_category) ||
@@ -205,7 +239,7 @@ export function HoseFittingEndPicker({
       categoryLabel || specs.catalog_category,
       specs.catalog_category,
     )
-  }, [specs, catalog, resolve, visibleCascadeSteps, categoryLabel])
+  }, [specs, catalog, resolve, visibleCascadeSteps, categoryLabel, temporaryDescription])
 
   useEffect(() => {
     onResolvedChange(resolved)
@@ -244,6 +278,7 @@ export function HoseFittingEndPicker({
       catalogLoading ||
       !specs.catalog_category ||
       isBareFittingSelection(specs.catalog_category) ||
+      isTemporaryFittingSelection(specs.catalog_category) ||
       catalog.length === 0 ||
       visibleCascadeSteps.length === 0
     ) {
@@ -286,6 +321,20 @@ export function HoseFittingEndPicker({
 
   const pickBareFitting = () => {
     onSpecsChange({ catalog_category: BARE_FITTING_CATALOG_KEY, field_values: {} })
+  }
+
+  const pickTemporaryFitting = () => {
+    onSpecsChange({
+      catalog_category: TEMPORARY_FITTING_CATALOG_KEY,
+      field_values: { temporary_description: '' },
+    })
+  }
+
+  const setTemporaryDescription = (value: string) => {
+    onSpecsChange({
+      ...specs,
+      field_values: { ...specs.field_values, temporary_description: value },
+    })
   }
 
   const pickSpec = (field: string, value: string) => {
@@ -364,7 +413,49 @@ export function HoseFittingEndPicker({
           <p className="text-[13px] font-semibold text-gray-900 leading-snug">Bare Fitting</p>
           <p className="mt-0.5 text-[11px] text-surface-muted">No fitting on this hose end</p>
         </button>
+        <button
+          type="button"
+          onClick={pickTemporaryFitting}
+          className={cn(
+            'rounded-xl border p-3 text-left transition',
+            temporarySelected
+              ? 'border-2 border-brand-gold-500 bg-brand-gold-50'
+              : 'border-surface-border bg-white hover:bg-surface-page',
+          )}
+        >
+          <p className="text-[13px] font-semibold text-gray-900 leading-snug">Ingest temporary product</p>
+          <p className="mt-0.5 text-[11px] text-surface-muted">Free-text description — price on review step</p>
+        </button>
       </div>
+
+      {temporarySelected && (
+        <div className="space-y-1.5">
+          <label className="text-[10px] font-medium uppercase tracking-wide text-[#8A9488]">
+            Fitting description
+          </label>
+          <Textarea
+            value={String(specs.field_values.temporary_description ?? '')}
+            onChange={(e) => setTemporaryDescription(e.target.value)}
+            placeholder="Describe the hose fitting (type, size, end connections, material, etc.)"
+            rows={3}
+            className="min-h-[72px] resize-y"
+          />
+        </div>
+      )}
+
+      {temporarySelected && resolved && (
+        <div className="rounded-xl border border-brand-gold-200 bg-brand-gold-50 p-4">
+          <p className="text-[13px] font-semibold text-brand-gold-800">
+            <Check className="mr-1 inline size-4" />
+            Temporary fitting
+            {showQuantity && quantity === 2 ? ' (×2, both hose ends)' : ''}
+          </p>
+          <p className="mt-1 text-[12px] text-brand-gold-900">{temporaryDescription}</p>
+          <p className="mt-2 font-mono text-[13px] text-brand-gold-800">
+            Unit price: {unitPrice != null ? formatCurrency(unitPrice) : '₹TBD — enter on review step'}
+          </p>
+        </div>
+      )}
 
       {bareSelected && (
         <div className="rounded-xl border border-brand-green-200 bg-brand-green-50 p-4">
@@ -376,11 +467,11 @@ export function HoseFittingEndPicker({
         </div>
       )}
 
-      {specs.catalog_category && !bareSelected && catalogError && (
+      {specs.catalog_category && !bareSelected && !temporarySelected && catalogError && (
         <p className="text-[12px] text-red-600">{catalogError}</p>
       )}
 
-      {specs.catalog_category && !bareSelected && catalogLoading && (
+      {specs.catalog_category && !bareSelected && !temporarySelected && catalogLoading && (
         <div className="flex items-center gap-2 text-[12px] text-surface-muted">
           <Loader2 className="size-4 animate-spin" />
           Loading {categoryLabel || specs.catalog_category} catalog
@@ -388,7 +479,7 @@ export function HoseFittingEndPicker({
         </div>
       )}
 
-      {specs.catalog_category && !bareSelected && !catalogLoading && visibleCascadeSteps.length > 0 && (
+      {specs.catalog_category && !bareSelected && !temporarySelected && !catalogLoading && visibleCascadeSteps.length > 0 && (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           {visibleCascadeSteps.map((step, idx) => {
             const field = step.key
@@ -435,7 +526,7 @@ export function HoseFittingEndPicker({
         </div>
       )}
 
-      {resolved && (
+      {resolved && !temporarySelected && (
         <div className="rounded-xl border border-brand-green-200 bg-brand-green-50 p-4">
           <p className="text-[13px] font-semibold text-brand-green-700">
             <Check className="mr-1 inline size-4" />

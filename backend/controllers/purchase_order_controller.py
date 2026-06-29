@@ -19,6 +19,7 @@ def _po_api_dict(po: PurchaseOrder) -> dict:
         "po_id": str(po.id),
         "po_number": po.po_number,
         "so_number": po.so_number,
+        "so_date": po.so_date.isoformat() if po.so_date else None,
         "quotation_id": str(po.quotation_id) if po.quotation_id else None,
         "quote_number": po.quote_number,
         "po_type": po_type,
@@ -76,6 +77,7 @@ class PurchaseOrderListItem(BaseModel):
     item_desc_short: str
     total_amount: float
     so_number: str | None = None
+    so_date: str | None = None
     created_by_name: str | None = None
 
 
@@ -99,6 +101,7 @@ class PurchaseOrderCreateBody(BaseModel):
     client_phone: str | None = Field(None, alias="clientPhone")
     client_employee_id: str | None = Field(None, alias="clientEmployeeId")
     so_number: str | None = Field(None, alias="soNumber")
+    so_date: date | None = Field(None, alias="soDate")
     notes: str | None = None
     freight_note: str | None = Field(None, alias="freightNote")
     pf_applicable: bool = Field(True, alias="pfApplicable")
@@ -129,6 +132,7 @@ class PurchaseOrderUpdateBody(BaseModel):
     client_phone: str | None = Field(None, alias="clientPhone")
     client_employee_id: str | None = Field(None, alias="clientEmployeeId")
     so_number: str | None = Field(None, alias="soNumber")
+    so_date: date | None = Field(None, alias="soDate")
     notes: str | None = None
     freight_note: str | None = Field(None, alias="freightNote")
     pf_applicable: bool | None = Field(None, alias="pfApplicable")
@@ -188,6 +192,7 @@ async def handle_list_purchase_orders(
             "item_desc_short": po.item_desc_short,
             "total_amount": po.total_amount,
             "so_number": po.so_number,
+            "so_date": po.so_date.isoformat() if po.so_date else None,
             "created_by_name": po.created_by_name,
         }
         for po in rows
@@ -255,7 +260,13 @@ async def handle_update_purchase_order(
     _ensure_po_access(current, user)
     payload = body.model_dump(exclude_unset=True)
     try:
-        po = await purchase_order_service.update_purchase_order(db, po_id, payload)
+        po = await purchase_order_service.update_purchase_order(
+            db,
+            po_id,
+            payload,
+            user_email=user.email,
+            user_name=user.full_name or user.email,
+        )
     except ProductNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
@@ -267,7 +278,12 @@ async def handle_delete_purchase_order(db: AsyncSession, po_id: str, user: Curre
     try:
         current = await purchase_order_service.get_purchase_order(db, po_id)
         _ensure_po_access(current, user)
-        deleted_id = await purchase_order_service.delete_purchase_order(db, po_id)
+        deleted_id = await purchase_order_service.delete_purchase_order(
+            db,
+            po_id,
+            user_email=user.email,
+            user_name=user.full_name or user.email,
+        )
     except ProductNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return {"po_id": deleted_id, "deleted": True}

@@ -974,6 +974,100 @@ async def update_quotation_crm_status(
     return q
 
 
+def _quotation_line_indices_covered_by_pos(pos: list[PurchaseOrder]) -> set[int]:
+    covered: set[int] = set()
+    for po in pos:
+        items = po.line_items if isinstance(po.line_items, list) else []
+        for li in items:
+            if not isinstance(li, dict):
+                continue
+            raw_idx = li.get("quotation_line_index")
+            if raw_idx is None:
+                continue
+            try:
+                covered.add(int(raw_idx))
+            except (TypeError, ValueError):
+                continue
+    return covered
+
+
+async def sync_quotation_po_received_from_purchase_orders(
+    quotation_id: uuid.UUID,
+    db: AsyncSession,
+    *,
+    performed_by: str = "system",
+    performed_by_name: str | None = None,
+    source_po_id: uuid.UUID | None = None,
+) -> Quotation | None:
+    """Align quotation line CRM statuses with linked POs (covered lines → po_received)."""
+    q = await get_quotation(str(quotation_id), db)
+    res = await db.execute(
+        select(PurchaseOrder).where(PurchaseOrder.quotation_id == quotation_id)
+    )
+    pos = list(res.scalars().all())
+    covered = _quotation_line_indices_covered_by_pos(pos)
+
+    lines = copy.deepcopy(q.line_items) if isinstance(q.line_items, list) else []
+    if not lines:
+        return q
+
+    changed_indices: list[int] = []
+    for i, li in enumerate(lines):
+        if not isinstance(li, dict):
+            continue
+        current = _normalize_line_crm_status(li.get("crm_status"))
+        if current == "lost":
+            continue
+        if i in covered:
+            if current != "po_received":
+                row = dict(li)
+                row["crm_status"] = "po_received"
+                row["crm_status_remarks"] = None
+                lines[i] = row
+                changed_indices.append(i)
+        elif current == "po_received":
+            row = dict(li)
+            row["crm_status"] = "ongoing"
+            row["crm_status_remarks"] = None
+            lines[i] = row
+            changed_indices.append(i)
+
+    if not changed_indices:
+        return q
+
+    q.line_items = lines
+    flag_modified(q, "line_items")
+    q.status = derive_quotation_status_from_lines(lines)
+    q.status_remarks = None
+
+    for idx in changed_indices:
+        row = lines[idx]
+        if not isinstance(row, dict):
+            continue
+        db.add(
+            AuditLog(
+                id=uuid.uuid4(),
+                entity_type="quotation",
+                entity_id=q.id,
+                action="quotation_line_crm_status",
+                performed_by=performed_by or "system",
+                details={
+                    "performed_by_name": performed_by_name,
+                    "quotation_id": str(q.id),
+                    "quote_number": q.quote_number,
+                    "line_index": idx,
+                    "line_label": _short_label(row),
+                    "status": _normalize_line_crm_status(row.get("crm_status")),
+                    "status_remarks": row.get("crm_status_remarks"),
+                    "auto_from_purchase_order": True,
+                    "source_po_id": str(source_po_id) if source_po_id else None,
+                },
+            )
+        )
+
+    return q
+
+
 async def update_line_crm_status(
     quotation_id: str,
     line_index: int,
