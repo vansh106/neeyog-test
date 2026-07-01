@@ -1,10 +1,13 @@
 'use client'
 
 import { Plus, Trash2 } from 'lucide-react'
+import { useQuery } from '@tanstack/react-query'
 
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
+import { mastersApi } from '@/lib/api'
 import { cn } from '@/lib/utils'
+import type { OthersCategory } from '@/types'
 import {
   buildEnquiryNotesFromProductNotes,
   createEmptyProductNote,
@@ -21,17 +24,19 @@ function ProductNoteCard({
   entry,
   index,
   canRemove,
+  othersTree,
   onChange,
   onRemove,
 }: {
   entry: ProductNoteEntry
   index: number
   canRemove: boolean
+  othersTree: OthersCategory[]
   onChange: (next: ProductNoteEntry) => void
   onRemove: () => void
 }) {
-  const categories = getMasterNotesCategories(entry.family)
-  const subCategories = getMasterNotesSubCategories(entry.family, entry.category)
+  const categories = getMasterNotesCategories(entry.family, othersTree)
+  const subCategories = getMasterNotesSubCategories(entry.family, entry.category, othersTree)
   const hasSubCategories = subCategories.length > 0
 
   return (
@@ -149,6 +154,12 @@ export default function ProductNotesEditor({
   showPreview = false,
   className,
 }: Props) {
+  const { data: othersData } = useQuery({
+    queryKey: ['othersMastersTree'],
+    queryFn: () => mastersApi.getOthersTree<{ items: OthersCategory[] }>(),
+    staleTime: 60_000,
+  })
+  const othersTree = othersData?.items ?? []
   const combinedPreview = buildEnquiryNotesFromProductNotes(productNotes)
 
   function updateEntry(id: string, next: ProductNoteEntry) {
@@ -186,6 +197,7 @@ export default function ProductNotesEditor({
             entry={entry}
             index={index}
             canRemove={productNotes.length > 1}
+            othersTree={othersTree}
             onChange={(next) => updateEntry(entry.id, next)}
             onRemove={() => removeEntry(entry.id)}
           />

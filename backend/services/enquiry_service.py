@@ -1090,6 +1090,13 @@ async def create_manual_enquiry(
     enquiry_detail_type = normalize_enquiry_detail_type(
         body.get("enquiry_detail_type") or body.get("enquiryDetailType")
     )
+    from services.follow_up_service import apply_follow_up_fields, require_follow_up_date
+
+    next_follow_up = require_follow_up_date(
+        body.get("next_follow_up_date") or body.get("nextFollowUpDate"),
+        field_label="nextFollowUpDate",
+    )
+    next_follow_up_note = str(body.get("next_follow_up_note") or body.get("nextFollowUpNote") or "").strip() or None
 
     resolved = await _resolve_manual_client_identity(body, db)
     client_name = resolved["client_name"]
@@ -1162,6 +1169,13 @@ async def create_manual_enquiry(
         created_by_user_id=cb_uid,
         created_by_name=cb_name,
         enquiry_number=enquiry_no,
+    )
+    apply_follow_up_fields(
+        enquiry,
+        new_date=next_follow_up,
+        new_note=next_follow_up_note,
+        performed_by_name=cb_name,
+        archive_on_date_change=False,
     )
     if company_id_uuid is not None:
         enquiry.company_id = company_id_uuid
@@ -1361,6 +1375,15 @@ async def process_manual_dropdown(
     notes = str(body.get("notes") or "").strip()
     priority = str(body.get("priority") or "Normal").strip()
     target_raw = str(body.get("targetEnquiryId") or body.get("target_enquiry_id") or "").strip()
+    from services.follow_up_service import apply_follow_up_fields, require_follow_up_date
+
+    quote_follow_up = require_follow_up_date(
+        body.get("next_follow_up_date") or body.get("nextFollowUpDate"),
+        field_label="nextFollowUpDate",
+    )
+    quote_follow_up_note = str(
+        body.get("next_follow_up_note") or body.get("nextFollowUpNote") or ""
+    ).strip() or None
 
     if not target_raw:
         raise EnquiryParseError(
@@ -1612,6 +1635,13 @@ async def process_manual_dropdown(
         created_by_name=cb_name,
         created_by_phone=prepared_by_phone,
         is_archived=False,
+    )
+    apply_follow_up_fields(
+        quotation,
+        new_date=quote_follow_up,
+        new_note=quote_follow_up_note,
+        performed_by_name=cb_name,
+        archive_on_date_change=False,
     )
     db.add(quotation)
     await db.commit()
@@ -2041,6 +2071,8 @@ async def update_enquiry_product_notes(
     performed_by_name: str | None = None,
 ) -> Enquiry:
     e = await get_enquiry(enquiry_id, db)
+    if normalize_enquiry_detail_type(e.enquiry_detail_type) == "complete":
+        raise ValueError("Product notes cannot be edited when enquiry type is complete")
     product_notes = _normalize_product_notes_raw(product_notes_raw)
     pd = dict(e.parsed_data or {})
     pd["product_notes"] = product_notes
@@ -2066,7 +2098,7 @@ async def update_enquiry_product_notes(
     return e
 
 
-ENQUIRY_DETAIL_TYPE_VALUES = frozenset({"complete", "incomplete"})
+ENQUIRY_DETAIL_TYPE_VALUES = frozenset({"complete", "incomplete", "partially_complete"})
 
 
 def normalize_enquiry_detail_type(raw: object) -> str:
@@ -2123,6 +2155,9 @@ async def update_enquiry_detail_type(
 ) -> Enquiry:
     normalized = normalize_enquiry_detail_type(detail_type)
     e = await get_enquiry(enquiry_id, db)
+    current = normalize_enquiry_detail_type(e.enquiry_detail_type)
+    if current == "complete" and normalized != "complete":
+        raise ValueError("Enquiry type is locked to complete and cannot be changed")
     e.enquiry_detail_type = normalized
     db.add(
         AuditLog(
@@ -2149,14 +2184,29 @@ async def update_enquiry_listing_dates(
     db: AsyncSession,
     *,
     next_follow_up_date: date | None,
+    next_follow_up_note: str | None = None,
     set_follow_up: bool,
+    set_follow_up_note: bool = False,
     performed_by: str = "user",
     performed_by_name: str | None = None,
 ) -> Enquiry:
+    from services.follow_up_service import apply_follow_up_fields, parse_follow_up_note
+
     e = await get_enquiry(enquiry_id, db)
-    if not set_follow_up:
+    if not set_follow_up and not set_follow_up_note:
         return e
-    e.next_follow_up_date = next_follow_up_date
+    if set_follow_up:
+        if next_follow_up_date is None:
+            raise ValueError("next_follow_up_date is required")
+        note = parse_follow_up_note(next_follow_up_note) if set_follow_up_note else e.next_follow_up_note
+        apply_follow_up_fields(
+            e,
+            new_date=next_follow_up_date,
+            new_note=note,
+            performed_by_name=performed_by_name,
+        )
+    elif set_follow_up_note:
+        e.next_follow_up_note = parse_follow_up_note(next_follow_up_note)
     db.add(
         AuditLog(
             id=uuid.uuid4(),
@@ -2169,8 +2219,9 @@ async def update_enquiry_listing_dates(
                 "enquiry_id": str(e.id),
                 "enquiry_number": e.enquiry_number,
                 "next_follow_up_date": (
-                    next_follow_up_date.isoformat() if next_follow_up_date else None
+                    e.next_follow_up_date.isoformat() if e.next_follow_up_date else None
                 ),
+                "next_follow_up_note": e.next_follow_up_note,
             },
         )
     )

@@ -8,7 +8,7 @@ import uuid
 from datetime import date
 
 from fastapi import HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.auth_middleware import CurrentUser
@@ -16,6 +16,7 @@ from core.exceptions import ProductNotFoundError, QuotationBuildError
 from db.models import Quotation
 from services import quotation_service
 from services import quotation_terms_service
+from services.follow_up_service import follow_up_history_payload
 from services.quotation_description_sanitize import supplier_names_for_client
 
 
@@ -75,6 +76,8 @@ def _quotation_api_dict(q: Quotation) -> dict:
         "next_follow_up_date": (
             q.next_follow_up_date.isoformat() if getattr(q, "next_follow_up_date", None) else None
         ),
+        "next_follow_up_note": getattr(q, "next_follow_up_note", None),
+        "follow_up_history": follow_up_history_payload(getattr(q, "follow_up_history", None)),
         "status": q.status,
         "status_remarks": q.status_remarks,
         "pdf_path": q.pdf_path,
@@ -97,6 +100,14 @@ def _quotation_api_dict(q: Quotation) -> dict:
             or None
         ),
     }
+
+
+async def _quotation_api_payload(q: Quotation, db: AsyncSession) -> dict:
+    po_totals = await quotation_service.po_totals_by_quotation_ids(db, [q.id])
+    payload = _quotation_api_dict(q)
+    po_total = po_totals.get(str(q.id))
+    payload["po_total_amount"] = po_total if po_total is not None else None
+    return payload
 
 
 # ── Pydantic response models ────────────────────────────────
@@ -136,6 +147,8 @@ class QuotationListItem(BaseModel):
     status_remarks: str | None = None
     line_status_summaries: dict[str, QuotationLineStatusSummary]
     next_follow_up_date: str | None = None
+    next_follow_up_note: str | None = None
+    follow_up_history: list[dict] = Field(default_factory=list)
     created_at: str
     created_by_name: str | None = None
     is_archived: bool = False
@@ -214,8 +227,11 @@ class QuotationLineCrmStatusBody(BaseModel):
 class QuotationListingDatesBody(BaseModel):
     """Editable CRM dates on the quotation list."""
 
+    model_config = ConfigDict(populate_by_name=True)
+
     validity_date: date | None = None
     next_follow_up_date: date | None = None
+    next_follow_up_note: str | None = Field(None, alias="nextFollowUpNote")
 
 
 class QuotationAuditItem(BaseModel):
@@ -250,7 +266,7 @@ async def handle_patch_quotation_line_items(
             performed_by=user.email,
             performed_by_name=user.full_name or None,
         )
-        return _quotation_api_dict(q)
+        return await _quotation_api_payload(q, db)
     except ProductNotFoundError:
         raise HTTPException(status_code=404, detail="Quotation not found")
     except ValueError as e:
@@ -327,7 +343,7 @@ async def handle_get_quotation(
     try:
         q = await quotation_service.get_quotation(quotation_id, db)
         _ensure_quotation_access(q, user)
-        return _quotation_api_dict(q)
+        return await _quotation_api_payload(q, db)
     except ProductNotFoundError:
         raise HTTPException(status_code=404, detail="Quotation not found")
     except Exception as e:
@@ -350,7 +366,7 @@ async def handle_patch_quotation_pdf_display(
             performed_by=user.email,
             performed_by_name=user.full_name or None,
         )
-        return _quotation_api_dict(q)
+        return await _quotation_api_payload(q, db)
     except ProductNotFoundError:
         raise HTTPException(status_code=404, detail="Quotation not found")
     except ValueError as e:
@@ -455,6 +471,8 @@ async def handle_list_quotations(
                     status_remarks=q.status_remarks,
                     line_status_summaries=summaries,
                     next_follow_up_date=follow_up.isoformat() if follow_up else None,
+                    next_follow_up_note=getattr(q, "next_follow_up_note", None),
+                    follow_up_history=follow_up_history_payload(getattr(q, "follow_up_history", None)),
                     created_at=q.created_at.isoformat() if q.created_at else "",
                     created_by_name=(q.created_by_name or "").strip() or None,
                     is_archived=bool(getattr(q, "is_archived", False)),
@@ -482,7 +500,7 @@ async def handle_patch_quotation_crm_status(
             performed_by=user.email,
             performed_by_name=user.full_name or None,
         )
-        return _quotation_api_dict(q)
+        return await _quotation_api_payload(q, db)
     except ProductNotFoundError:
         raise HTTPException(status_code=404, detail="Quotation not found")
     except ValueError as e:
@@ -510,7 +528,7 @@ async def handle_patch_line_crm_status(
             performed_by=user.email,
             performed_by_name=user.full_name or None,
         )
-        return _quotation_api_dict(q)
+        return await _quotation_api_payload(q, db)
     except ProductNotFoundError:
         raise HTTPException(status_code=404, detail="Quotation not found")
     except ValueError as e:
@@ -534,14 +552,18 @@ async def handle_patch_quotation_listing_dates(
             db,
             validity_date=body.validity_date,
             next_follow_up_date=body.next_follow_up_date,
+            next_follow_up_note=body.next_follow_up_note,
             set_validity="validity_date" in fields_set,
             set_follow_up="next_follow_up_date" in fields_set,
+            set_follow_up_note="next_follow_up_note" in fields_set,
             performed_by=user.email,
             performed_by_name=user.full_name or None,
         )
-        return _quotation_api_dict(q)
+        return await _quotation_api_payload(q, db)
     except ProductNotFoundError:
         raise HTTPException(status_code=404, detail="Quotation not found")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -658,7 +680,7 @@ async def handle_patch_quotation_financial_summary(
             performed_by=user.email,
             performed_by_name=user.full_name or None,
         )
-        return _quotation_api_dict(q)
+        return await _quotation_api_payload(q, db)
     except ProductNotFoundError:
         raise HTTPException(status_code=404, detail="Quotation not found")
     except ValueError as e:

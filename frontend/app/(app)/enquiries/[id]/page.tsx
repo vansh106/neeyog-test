@@ -13,6 +13,7 @@ import { ClientVerificationPanel } from '@/components/upload/ClientVerificationP
 import ManualEntryForm from '@/components/upload/ManualEntryForm'
 import { useEnquiry } from '@/lib/queries'
 import EnquiryProductNotesPanel from '@/components/enquiries/EnquiryProductNotesPanel'
+import { isEnquiryDetailTypeLocked } from '@/lib/enquiryDetailType'
 import EnquiryManualLineItemsTable, {
   parseManualLineItemsFromParsed,
 } from '@/components/enquiries/EnquiryManualLineItemsTable'
@@ -117,6 +118,8 @@ export default function EnquiryDetailPage() {
   }, [parsed])
 
   const reasoningSteps = useMemo(() => toReasoningSteps(ext?.ai_reasoning ?? null), [ext?.ai_reasoning])
+
+  const notesReadOnly = isEnquiryDetailTypeLocked(ext?.enquiry_detail_type)
 
   const [clientContext, setClientContext] = useState<ClientVerificationContext | null>(null)
   const [pdfDownloadBusy, setPdfDownloadBusy] = useState(false)
@@ -636,6 +639,7 @@ export default function EnquiryDetailPage() {
                   clientSummaryLabel={clientSummaryLabel}
                   initialClientEmployeeId={initialClientEmployeeId}
                   initialSelectedBranchId={initialSelectedBranchId}
+                  initialFollowUpDate={ext?.next_follow_up_date}
                   matcherSeedVersion={0}
                 />
               </div>
@@ -750,12 +754,13 @@ export default function EnquiryDetailPage() {
                 matcherSeed={matcherSeedForForm}
                 matcherClientHint={manualClientHint}
                 initialSelectedBranchId={initialSelectedBranchId}
+                initialFollowUpDate={ext?.next_follow_up_date}
                 matcherSeedVersion={matcherSeedVersion}
               />
             </section>
           )}
 
-          <EnquiryProductNotesPanel enquiryId={id} parsed={parsed} />
+          <EnquiryProductNotesPanel enquiryId={id} parsed={parsed} readOnly={notesReadOnly} />
 
           {quoteId && (
             <section className="rounded-xl border border-surface-border bg-white p-5 shadow-sm">

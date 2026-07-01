@@ -3,6 +3,7 @@
 import ActionQueueCard from '@/components/dashboard/ActionQueueCard'
 import MonthlySalesFunnel from '@/components/dashboard/MonthlySalesFunnel'
 import QuoteExpiryAlertBanner from '@/components/dashboard/QuoteExpiryAlertBanner'
+import SoDatePendingAlertBanner from '@/components/dashboard/SoDatePendingAlertBanner'
 import { Skeleton } from '@/components/ui/skeleton'
 import type { ActionQueuesResponse, SalesFunnelResponse } from '@/lib/api'
 
@@ -20,7 +21,8 @@ export default function DashboardActionFunnelRow({
   if (isPending) {
     return (
       <section className="mt-4 space-y-4">
-        <Skeleton className="h-[120px] w-full rounded-xl" />
+        <Skeleton className="h-[88px] w-full rounded-xl" />
+        <Skeleton className="h-[88px] w-full rounded-xl" />
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           <Skeleton className="h-[320px] rounded-xl" />
           <Skeleton className="h-[320px] rounded-xl" />
@@ -33,7 +35,12 @@ export default function DashboardActionFunnelRow({
 
   return (
     <section className="mt-4 space-y-4">
-      {actionQueueData && <QuoteExpiryAlertBanner data={actionQueueData.quote_expiry} />}
+      {actionQueueData && (
+        <>
+          <QuoteExpiryAlertBanner data={actionQueueData.quote_expiry} />
+          <SoDatePendingAlertBanner data={actionQueueData.so_dates_pending} />
+        </>
+      )}
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         {actionQueueData && <ActionQueueCard data={actionQueueData} />}

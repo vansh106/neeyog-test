@@ -258,7 +258,7 @@ export const enquiriesApi = {
   ) => get<T>('/api/enquiries/', params as Record<string, unknown>),
   updateListingDates: <T = unknown>(
     id: string,
-    body: { next_follow_up_date?: string | null },
+    body: { next_follow_up_date?: string | null; nextFollowUpNote?: string | null },
   ) => patch<T>(`/api/enquiries/${encodeURIComponent(id)}/listing-dates`, body),
   updateProductNotes: <T = unknown>(
     id: string,
@@ -346,7 +346,11 @@ export const quotationsApi = {
     ),
   updateListingDates: <T = unknown>(
     id: string,
-    body: { validity_date?: string | null; next_follow_up_date?: string | null },
+    body: {
+      validity_date?: string | null
+      next_follow_up_date?: string | null
+      nextFollowUpNote?: string | null
+    },
   ) => patch<T>(`/api/quotations/${encodeURIComponent(id)}/listing-dates`, body),
   archive: <T = unknown>(id: string) =>
     post<T>(`/api/quotations/${encodeURIComponent(id)}/archive`, {}),
@@ -845,20 +849,44 @@ export type ActionQueuesResponse = {
   }
   follow_ups_due: {
     count: number
+    expired_count: number
+    due_soon_count: number
     pipeline_value: number
     items: Array<{
-      quotation_id: string
+      entity_type: 'enquiry' | 'quotation'
+      entity_id: string
+      quotation_id: string | null
       enquiry_id: string
       client_product: string
       deal_value: number
       due_label: string
       due_urgency: string
+      next_follow_up_date: string | null
       status: string
       status_label: string
     }>
   }
+  so_dates_pending: {
+    count: number
+    items: Array<{
+      po_id: string
+      po_number: string
+      client_name: string
+      quote_number: string | null
+      quotation_id: string | null
+      total_amount: number
+      hours_overdue: number
+      due_label: string
+      created_at: string | null
+    }>
+  }
   quote_expiry: {
     has_expiring_quotes: boolean
+    has_expired_follow_ups: boolean
+    expired_count: number
+    expired_value: number
+    due_soon_count: number
+    due_soon_value: number
     expiring_value: number
     timeframe_days: number
     accounts: Array<{

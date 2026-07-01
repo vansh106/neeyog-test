@@ -23,6 +23,13 @@ export function isLineCrmStatusLocked(status: string): boolean {
   return normalized === 'po_received' || normalized === 'lost'
 }
 
+/** True when at least one purchase order is linked with a non-zero total. */
+export function quotationHasPoReceived(
+  quotation: { po_total_amount?: number | null },
+): boolean {
+  return (quotation.po_total_amount ?? 0) > 0
+}
+
 export const QUOTATION_CRM_LIST_PHRASE: Record<QuotationCrmStatus, string> = {
   ongoing: 'ongoing',
   po_received: 'PO received',

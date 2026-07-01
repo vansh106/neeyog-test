@@ -354,6 +354,8 @@ export default function EnquiriesPage() {
                         <EnquiryListDateEditor
                           enquiryId={e.enquiry_id}
                           value={e.next_follow_up_date}
+                          note={e.next_follow_up_note}
+                          history={e.follow_up_history}
                         />
                       </td>
                       <td className="px-3 py-3 align-top text-right">

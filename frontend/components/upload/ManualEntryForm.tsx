@@ -107,6 +107,8 @@ type Props = {
   initialClientEmployeeId?: string | null
   /** Branch id from enquiry ``parsed_data`` when client picker is hidden. */
   initialSelectedBranchId?: string | null
+  /** Pre-fill follow-up date from enquiry when creating a quotation. */
+  initialFollowUpDate?: string | null
 }
 
 const SELECT_EMPTY = '__none__'
@@ -606,13 +608,19 @@ export default function ManualEntryForm({
   clientSummaryLabel,
   initialClientEmployeeId,
   initialSelectedBranchId,
+  initialFollowUpDate,
 }: Props) {
   const showClientSection = stage !== 'products'
   const showProductsSection = stage !== 'client'
+  const showFollowUpSection = showClientSection || (showProductsSection && Boolean(targetEnquiryId))
   useWarmupMatcherCatalog(matcherSeed?.catalogKey ?? null)
 
   const [enquirySource, setEnquirySource] = useState<EnquirySource>(initialEnquirySource ?? 'manual')
   const [enquiryDetailType, setEnquiryDetailType] = useState<EnquiryDetailType>('incomplete')
+  const [nextFollowUpDate, setNextFollowUpDate] = useState(() =>
+    initialFollowUpDate ? initialFollowUpDate.slice(0, 10) : '',
+  )
+  const [nextFollowUpNote, setNextFollowUpNote] = useState('')
   const [productNotes, setProductNotes] = useState<ProductNoteEntry[]>(() =>
     initProductNotesFromPrefill(prefillNotesFromEnquiry),
   )
@@ -674,6 +682,11 @@ export default function ManualEntryForm({
     setClientMode('existing')
     setSelectedBranchId(initialSelectedBranchId.trim())
   }, [initialSelectedBranchId])
+
+  useEffect(() => {
+    if (!initialFollowUpDate?.trim()) return
+    setNextFollowUpDate(initialFollowUpDate.slice(0, 10))
+  }, [initialFollowUpDate])
 
   useEffect(() => {
     if (initialEnquirySource) setEnquirySource(initialEnquirySource)
@@ -1241,6 +1254,9 @@ export default function ManualEntryForm({
         }
       }
     }
+    if (showFollowUpSection && !nextFollowUpDate.trim()) {
+      e.nextFollowUpDate = 'Follow-up date is required'
+    }
     setErrors(e)
     return Object.keys(e).length === 0
   }
@@ -1295,6 +1311,8 @@ export default function ManualEntryForm({
       notes: enquiryNotes,
       productNotes: serializeProductNotes(productNotes),
       enquiryDetailType,
+      nextFollowUpDate: nextFollowUpDate.trim(),
+      nextFollowUpNote: nextFollowUpNote.trim() || null,
       source: enquirySource,
       ...(indiamartQueryId ? { indiamartQueryId } : {}),
     }
@@ -1366,6 +1384,8 @@ export default function ManualEntryForm({
       ),
       priority: 'Normal',
       notes: enquiryNotes,
+      nextFollowUpDate: nextFollowUpDate.trim(),
+      nextFollowUpNote: nextFollowUpNote.trim() || null,
     }
     if (netOrderTotals?.subtotal != null) {
       const { pf, pfRate } = resolvePfAmount(
@@ -1514,6 +1534,39 @@ export default function ManualEntryForm({
           </Select>
         </section>
         </>
+      ) : null}
+
+      {showFollowUpSection ? (
+        <section className="rounded-xl border border-surface-border bg-white p-5 shadow-sm">
+          <div className="text-[10px] font-medium uppercase tracking-wide text-[#8A9488]">
+            Next follow-up
+          </div>
+          <p className="mt-1 text-[12px] text-surface-muted">
+            When should this {targetEnquiryId ? 'quotation' : 'enquiry'} be followed up?
+          </p>
+          <label className="mt-3 block text-[12px] font-medium text-gray-900">
+            Follow-up date <span className="text-red-600">*</span>
+          </label>
+          <input
+            type="date"
+            value={nextFollowUpDate}
+            onChange={(e) => setNextFollowUpDate(e.target.value)}
+            className="mt-1.5 h-10 w-full rounded-md border border-surface-border bg-white px-3 text-[13px] text-gray-900"
+          />
+          {errors.nextFollowUpDate ? (
+            <p className="mt-1 text-[12px] text-red-600">{errors.nextFollowUpDate}</p>
+          ) : null}
+          <label className="mt-3 block text-[12px] font-medium text-gray-900">
+            Follow-up note (optional)
+          </label>
+          <textarea
+            value={nextFollowUpNote}
+            onChange={(e) => setNextFollowUpNote(e.target.value)}
+            rows={2}
+            placeholder="e.g. Call client about pricing"
+            className="mt-1.5 w-full resize-y rounded-md border border-surface-border bg-white px-3 py-2 text-[13px] text-gray-900 placeholder:text-surface-muted"
+          />
+        </section>
       ) : null}
 
       {/* ── Client Details ─────────────────────────────────────────── */}

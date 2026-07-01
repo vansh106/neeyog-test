@@ -29,6 +29,8 @@ export interface EnquiryListItem {
   quotation_id?: string | null
   quote_number?: string | null
   next_follow_up_date?: string | null
+  next_follow_up_note?: string | null
+  follow_up_history?: import('@/lib/followUpTypes').FollowUpHistoryEntry[]
   created_at: string
   /** User who owns the enquiry for listing / dashboard scope. */
   created_by_user_id?: string | null
@@ -95,6 +97,10 @@ export interface EnquiryDetail {
   email_approval?: EmailApprovalInfo | null
   requires_email_approval?: boolean
   is_email_agent_enquiry?: boolean
+  enquiry_detail_type?: import('@/lib/enquiryDetailType').EnquiryDetailType | string
+  next_follow_up_date?: string | null
+  next_follow_up_note?: string | null
+  follow_up_history?: import('@/lib/followUpTypes').FollowUpHistoryEntry[]
 }
 
 export interface QuotationLineItem {
@@ -221,6 +227,8 @@ export interface Quotation {
   created_by_name?: string | null
   created_by_email?: string | null
   created_by_phone?: string | null
+  /** Sum of linked purchase order totals; when &gt; 0 the quote is treated as PO received. */
+  po_total_amount?: number | null
 }
 
 export interface QuotationHistoryItem {
@@ -330,6 +338,8 @@ export interface QuotationListItem {
     QuotationLineStatusSummary
   >
   next_follow_up_date?: string | null
+  next_follow_up_note?: string | null
+  follow_up_history?: import('@/lib/followUpTypes').FollowUpHistoryEntry[]
   created_at: string
   /** Logged-in user who created the quotation (manual flow); omitted for older rows or system-generated quotes. */
   created_by_name?: string | null
@@ -673,6 +683,8 @@ export interface ManualEnquiryCreateForm {
   notes: string
   productNotes?: EnquiryProductNote[]
   enquiryDetailType: import('@/lib/enquiryDetailType').EnquiryDetailType
+  nextFollowUpDate: string
+  nextFollowUpNote?: string | null
   source: EnquirySource
   /** Links enquiry to IndiaMart query (one active enquiry per query until archived). */
   indiamartQueryId?: string | null
@@ -784,6 +796,8 @@ export interface ManualEnquiryForm {
   lineItems: ManualLineItem[]
   priority: 'Normal' | 'High' | 'Urgent'
   notes: string
+  nextFollowUpDate?: string
+  nextFollowUpNote?: string | null
   /** Optional supplier + pricing context for manual flow (stored on enquiry raw JSON when supported). */
   supplierPricing?: ManualSupplierPricingContext | null
   /** Net total section: optional P&amp;F toggle and override amount (defaults to 3% of subtotal). */

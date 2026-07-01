@@ -19,6 +19,7 @@ from core.exceptions import EnquiryParseError, ProductNotFoundError
 from db.models import Enquiry
 from services import enquiry_service
 from services.enquiry_service import normalize_enquiry_detail_type, normalize_enquiry_quote_status
+from services.follow_up_service import follow_up_history_payload
 from services.quotation_description_sanitize import supplier_names_for_client
 from services.email_display_infer import infer_company_from_email_raw
 
@@ -63,6 +64,8 @@ class EnquiryListItem(BaseModel):
     quotation_id: str | None = None
     quote_number: str | None = None
     next_follow_up_date: str | None = None
+    next_follow_up_note: str | None = None
+    follow_up_history: list[dict] = Field(default_factory=list)
     created_at: str
     created_by_user_id: str | None = None
     created_by_name: str | None = None
@@ -78,7 +81,10 @@ class EnquiryListItem(BaseModel):
 
 
 class EnquiryListingDatesBody(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     next_follow_up_date: date | None = None
+    next_follow_up_note: str | None = Field(None, alias="nextFollowUpNote")
 
 
 class EnquiryDetailTypeBody(BaseModel):
@@ -212,6 +218,8 @@ class ManualEnquiryCreateRequest(BaseModel):
     notes: str = ""
     product_notes: list[EnquiryProductNoteRequest] | None = Field(None, alias="productNotes")
     enquiry_detail_type: str = Field("incomplete", alias="enquiryDetailType")
+    next_follow_up_date: date = Field(..., alias="nextFollowUpDate")
+    next_follow_up_note: str | None = Field(None, alias="nextFollowUpNote")
     source: str = "manual"
     client_employee_id: str | None = Field(None, alias="clientEmployeeId")
     new_client_employee: ManualNewClientEmployeeRequest | None = Field(None, alias="newClientEmployee")
@@ -249,6 +257,8 @@ class ManualDropdownProcessRequest(BaseModel):
     supplier_pricing: ManualSupplierPricingPayload | None = Field(None, alias="supplierPricing")
     order_totals: ManualOrderTotalsPayload | None = Field(None, alias="orderTotals")
     target_enquiry_id: str = Field(..., alias="targetEnquiryId")
+    next_follow_up_date: date = Field(..., alias="nextFollowUpDate")
+    next_follow_up_note: str | None = Field(None, alias="nextFollowUpNote")
     #: Branch contact person for this quote (must belong to selected branch unless newClientEmployee creates one).
     client_employee_id: str | None = Field(None, alias="clientEmployeeId")
     new_client_employee: ManualNewClientEmployeeRequest | None = Field(None, alias="newClientEmployee")
@@ -512,6 +522,16 @@ async def handle_get_enquiry(
             "email_approval": enquiry_service.email_approval_record(enquiry),
             "requires_email_approval": enquiry_service.requires_email_approval(enquiry),
             "is_email_agent_enquiry": enquiry_service.is_email_agent_enquiry(enquiry),
+            "enquiry_detail_type": normalize_enquiry_detail_type(enquiry.enquiry_detail_type),
+            "next_follow_up_date": (
+                enquiry.next_follow_up_date.isoformat()
+                if getattr(enquiry, "next_follow_up_date", None)
+                else None
+            ),
+            "next_follow_up_note": getattr(enquiry, "next_follow_up_note", None),
+            "follow_up_history": follow_up_history_payload(
+                getattr(enquiry, "follow_up_history", None)
+            ),
         }
     except ProductNotFoundError:
         raise HTTPException(status_code=404, detail=f"Enquiry {enquiry_id} not found")
@@ -591,6 +611,8 @@ async def handle_list_enquiries(
                     if getattr(e, "next_follow_up_date", None)
                     else None
                 ),
+                next_follow_up_note=getattr(e, "next_follow_up_note", None),
+                follow_up_history=follow_up_history_payload(getattr(e, "follow_up_history", None)),
                 created_at=e.created_at.isoformat() if e.created_at else "",
                 created_by_user_id=str(e.created_by_user_id) if e.created_by_user_id else None,
                 created_by_name=(e.created_by_name or "").strip() or None,
@@ -628,15 +650,24 @@ async def handle_patch_enquiry_listing_dates(
             enquiry_id,
             db,
             next_follow_up_date=body.next_follow_up_date,
+            next_follow_up_note=body.next_follow_up_note,
             set_follow_up="next_follow_up_date" in fields_set,
+            set_follow_up_note="next_follow_up_note" in fields_set,
             performed_by=user.email,
             performed_by_name=user.full_name or None,
         )
-        return {"enquiry_id": str(e.id), "next_follow_up_date": (
-            e.next_follow_up_date.isoformat() if getattr(e, "next_follow_up_date", None) else None
-        )}
+        return {
+            "enquiry_id": str(e.id),
+            "next_follow_up_date": (
+                e.next_follow_up_date.isoformat() if getattr(e, "next_follow_up_date", None) else None
+            ),
+            "next_follow_up_note": getattr(e, "next_follow_up_note", None),
+            "follow_up_history": follow_up_history_payload(getattr(e, "follow_up_history", None)),
+        }
     except ProductNotFoundError:
         raise HTTPException(status_code=404, detail="Enquiry not found")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -666,6 +697,8 @@ async def handle_patch_enquiry_product_notes(
         }
     except ProductNotFoundError:
         raise HTTPException(status_code=404, detail="Enquiry not found")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -692,6 +725,8 @@ async def handle_patch_enquiry_detail_type(
         }
     except ProductNotFoundError:
         raise HTTPException(status_code=404, detail="Enquiry not found")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -899,6 +934,8 @@ async def handle_create_manual_enquiry(
         return EnquiryResponse(**result)
     except EnquiryParseError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         logger.exception("Manual enquiry creation failed")
         raise HTTPException(status_code=500, detail=str(e))
@@ -924,6 +961,8 @@ async def handle_process_manual_dropdown(
         )
         return EnquiryResponse(**result)
     except EnquiryParseError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         logger.exception("Manual dropdown processing failed")

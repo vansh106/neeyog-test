@@ -1,4 +1,8 @@
 import { MASTER_SIDEBAR_NAV, type MasterNavNode } from '@/lib/masterSidebarNav'
+import type { OthersCategory } from '@/types'
+
+/** Dynamic masters family (categories/sheets from API). */
+export const OTHERS_FAMILY_LABEL = 'Others'
 
 /** One product note — family / category / sub-category + optional details. */
 export type ProductNoteEntry = {
@@ -73,16 +77,37 @@ function getPresetIndex(): MasterNotesPresetIndex {
 }
 
 export function getMasterNotesFamilies(): string[] {
-  return getPresetIndex().families
+  const base = getPresetIndex().families
+  if (base.includes(OTHERS_FAMILY_LABEL)) return base
+  return uniqueSorted([...base, OTHERS_FAMILY_LABEL])
 }
 
-export function getMasterNotesCategories(family: string): string[] {
+export function getOthersNotesCategories(tree: OthersCategory[]): string[] {
+  return uniqueSorted(tree.map((c) => c.name))
+}
+
+export function getOthersNotesSubCategories(
+  tree: OthersCategory[],
+  category: string,
+): string[] {
+  const match = tree.find((c) => c.name === category)
+  if (!match) return []
+  return uniqueSorted(match.sheets.map((s) => s.name))
+}
+
+export function getMasterNotesCategories(family: string, othersTree: OthersCategory[] = []): string[] {
   if (!family.trim()) return []
+  if (family === OTHERS_FAMILY_LABEL) return getOthersNotesCategories(othersTree)
   return getPresetIndex().categoriesByFamily[family] ?? []
 }
 
-export function getMasterNotesSubCategories(family: string, category: string): string[] {
+export function getMasterNotesSubCategories(
+  family: string,
+  category: string,
+  othersTree: OthersCategory[] = [],
+): string[] {
   if (!family.trim() || !category.trim()) return []
+  if (family === OTHERS_FAMILY_LABEL) return getOthersNotesSubCategories(othersTree, category)
   return getPresetIndex().subCategoriesByPath[pathKey(family, category)] ?? []
 }
 

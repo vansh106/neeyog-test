@@ -1,12 +1,7 @@
 'use client'
 
-import { AlertTriangle, Flag, X } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { AlertTriangle, CheckCircle2, Flag } from 'lucide-react'
 
-import {
-  dismissFollowUpBannerForToday,
-  isFollowUpBannerDismissedToday,
-} from '@/lib/dashboardFollowUpBannerDismiss'
 import { formatCompactINR } from '@/lib/formatCompactINR'
 import { cn } from '@/lib/utils'
 import type { ActionQueuesResponse } from '@/lib/api'
@@ -17,86 +12,72 @@ type Props = {
 }
 
 export default function QuoteExpiryAlertBanner({ data, className }: Props) {
-  const [dismissed, setDismissed] = useState(false)
-
-  useEffect(() => {
-    setDismissed(isFollowUpBannerDismissedToday())
-  }, [])
-
-  if (!data.has_expiring_quotes || dismissed) {
-    return null
-  }
-
-  const handleDismiss = () => {
-    dismissFollowUpBannerForToday()
-    setDismissed(true)
-  }
+  const count = data.expired_count ?? 0
+  const hasExpired = count > 0
 
   return (
     <div
       className={cn(
-        'relative rounded-xl border border-amber-200 bg-amber-50/90 shadow-sm',
-        'border-l-4 border-l-amber-500',
+        'rounded-xl border shadow-sm border-l-4',
+        hasExpired
+          ? 'border-red-200 bg-red-50/90 border-l-red-600'
+          : 'border-[#E2E6DC] bg-[#FAFAF8] border-l-brand-green-500',
         className,
       )}
-      role="alert"
+      role="status"
     >
-      <button
-        type="button"
-        onClick={handleDismiss}
-        className="absolute right-3 top-3 rounded-md p-1 text-amber-800/70 transition-colors hover:bg-amber-100 hover:text-amber-900"
-        aria-label="Dismiss follow-up reminder for today"
-      >
-        <X className="size-4" />
-      </button>
-
-      <div className="flex gap-3 p-4 pr-10 sm:p-5">
-        <AlertTriangle className="mt-0.5 size-5 shrink-0 text-amber-600" aria-hidden />
+      <div className="flex gap-3 p-4 sm:p-5">
+        {hasExpired ? (
+          <AlertTriangle className="mt-0.5 size-5 shrink-0 text-red-600" aria-hidden />
+        ) : (
+          <CheckCircle2 className="mt-0.5 size-5 shrink-0 text-brand-green-600" aria-hidden />
+        )}
         <div className="min-w-0 flex-1">
-          <p className="text-[14px] font-semibold text-amber-950">
-            {formatCompactINR(data.expiring_value)} in open quotes need follow-up
+          <p
+            className={cn(
+              'text-[14px] font-semibold',
+              hasExpired ? 'text-red-950' : 'text-gray-900',
+            )}
+          >
+            {count} follow-up{count === 1 ? '' : 's'} expired — set a new date
+            {data.expired_value > 0 && (
+              <span className={cn('font-normal', hasExpired ? 'text-red-900/80' : 'text-surface-muted')}>
+                {' '}
+                ({formatCompactINR(data.expired_value)} pipeline)
+              </span>
+            )}
           </p>
-          <p className="mt-1 text-[12px] text-amber-900/80">
-            Overdue, due today, tomorrow, or within 2 days — plus quotes with no follow-up date set.
+          <p className={cn('mt-1 text-[12px]', hasExpired ? 'text-red-900/80' : 'text-surface-muted')}>
+            Enquiries and quotations with a past follow-up date need a new follow-up date entered.
           </p>
-          <ul className="mt-3 space-y-2">
-            {data.accounts.map((account) => {
-              const missing = account.no_follow_up_logged
-              return (
+
+          {hasExpired && data.accounts.length > 0 && (
+            <ul className="mt-3 space-y-2">
+              {data.accounts.map((account) => (
                 <li
                   key={account.account_name}
-                  className={cn(
-                    'flex flex-wrap items-center justify-between gap-2 rounded-md px-2 py-1.5 text-[13px]',
-                    missing ? 'bg-red-50 text-red-950' : 'text-gray-900',
-                  )}
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-red-100/60 px-2 py-1.5 text-[13px] text-red-950"
                 >
                   <div className="flex min-w-0 items-center gap-2">
-                    <span className={cn('font-medium', missing ? 'text-red-900' : 'text-gray-900')}>
-                      {account.account_name}
-                    </span>
-                    {missing ? (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-[11px] font-semibold text-red-800">
+                    <span className="font-medium">{account.account_name}</span>
+                    {account.no_follow_up_logged ? (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-red-200 px-2 py-0.5 text-[11px] font-semibold text-red-900">
                         <Flag className="size-3" aria-hidden />
                         No follow-up date
                       </span>
-                    ) : account.has_overdue ? (
-                      <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-900">
-                        Overdue
+                    ) : (
+                      <span className="inline-flex items-center rounded-full bg-red-200 px-2 py-0.5 text-[11px] font-medium text-red-900">
+                        Expired
                       </span>
-                    ) : null}
-                  </div>
-                  <span
-                    className={cn(
-                      'font-semibold tabular-nums',
-                      missing ? 'text-red-900' : 'text-gray-900',
                     )}
-                  >
-                    {formatCompactINR(account.expiring_value)}
-                  </span>
+                  </div>
+                  {account.expiring_value > 0 && (
+                    <span className="font-semibold tabular-nums">{formatCompactINR(account.expiring_value)}</span>
+                  )}
                 </li>
-              )
-            })}
-          </ul>
+              ))}
+            </ul>
+          )}
         </div>
       </div>
     </div>

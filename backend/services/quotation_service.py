@@ -293,6 +293,18 @@ async def po_totals_by_quotation_ids(
     return out
 
 
+async def quotation_po_total_amount(quotation_id: uuid.UUID, db: AsyncSession) -> float:
+    totals = await po_totals_by_quotation_ids(db, [quotation_id])
+    return float(totals.get(str(quotation_id), 0.0) or 0.0)
+
+
+async def ensure_quotation_editable(quotation_id: uuid.UUID, db: AsyncSession) -> None:
+    if await quotation_po_total_amount(quotation_id, db) > 0:
+        raise ValueError(
+            "This quotation cannot be edited after a purchase order has been recorded"
+        )
+
+
 def _trim_str(s: object, max_len: int) -> str:
     t = str(s) if s is not None else ""
     return t[:max_len]
@@ -547,6 +559,7 @@ async def update_quotation_financial_summary(
     performed_by_name: str | None = None,
 ) -> Quotation:
     q = await get_quotation(quotation_id, db)
+    await ensure_quotation_editable(q.id, db)
     item_total = round(float(q.subtotal or 0), 2)
     before_rows = financial_rows_from_quotation(q)
     before_totals = _totals_snapshot(q)
@@ -1162,21 +1175,35 @@ async def update_quotation_listing_dates(
     *,
     validity_date: date | None = None,
     next_follow_up_date: date | None = None,
+    next_follow_up_note: str | None = None,
     set_validity: bool = False,
     set_follow_up: bool = False,
+    set_follow_up_note: bool = False,
     performed_by: str = "user",
     performed_by_name: str | None = None,
 ) -> Quotation:
+    from services.follow_up_service import apply_follow_up_fields, parse_follow_up_note
+
     q = await get_quotation(quotation_id, db)
     changed: dict[str, object] = {}
     if set_validity:
         q.validity_date = validity_date
         changed["validity_date"] = validity_date.isoformat() if validity_date else None
     if set_follow_up:
-        q.next_follow_up_date = next_follow_up_date
-        changed["next_follow_up_date"] = (
-            next_follow_up_date.isoformat() if next_follow_up_date else None
+        if next_follow_up_date is None:
+            raise ValueError("next_follow_up_date is required")
+        note = parse_follow_up_note(next_follow_up_note) if set_follow_up_note else q.next_follow_up_note
+        apply_follow_up_fields(
+            q,
+            new_date=next_follow_up_date,
+            new_note=note,
+            performed_by_name=performed_by_name,
         )
+        changed["next_follow_up_date"] = next_follow_up_date.isoformat()
+        changed["next_follow_up_note"] = q.next_follow_up_note
+    elif set_follow_up_note:
+        q.next_follow_up_note = parse_follow_up_note(next_follow_up_note)
+        changed["next_follow_up_note"] = q.next_follow_up_note
     if not changed:
         return q
 
@@ -1289,6 +1316,7 @@ async def update_quotation_from_manual_line_items(
         raise ValueError("lineItems must be a non-empty array")
 
     q = await get_quotation(quotation_id, db)
+    await ensure_quotation_editable(q.id, db)
     enquiry = await enquiry_svc.get_enquiry(str(q.enquiry_id), db)
     before_lines = list(q.line_items or []) if isinstance(q.line_items, list) else []
     before_totals = _totals_snapshot(q)
@@ -1470,6 +1498,7 @@ async def update_quotation_pdf_display_overrides(
 ) -> Quotation:
     """Store PDF-only text overlays (line description/size, notes) and regenerate the PDF file."""
     q = await get_quotation(quotation_id, db)
+    await ensure_quotation_editable(q.id, db)
     line_count = len(q.line_items) if isinstance(q.line_items, list) else 0
     before_ov = copy.deepcopy(q.pdf_display_overrides) if isinstance(q.pdf_display_overrides, dict) else {}
 

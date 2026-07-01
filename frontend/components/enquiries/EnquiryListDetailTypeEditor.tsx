@@ -7,6 +7,7 @@ import { enquiriesApi } from '@/lib/api'
 import {
   ENQUIRY_DETAIL_TYPE_LABELS,
   ENQUIRY_DETAIL_TYPES,
+  isEnquiryDetailTypeLocked,
   normalizeEnquiryDetailType,
   type EnquiryDetailType,
 } from '@/lib/enquiryDetailType'
@@ -38,7 +39,10 @@ export default function EnquiryListDetailTypeEditor({
     setBusy(true)
     try {
       await enquiriesApi.updateDetailType(enquiryId, { enquiryDetailType: next })
-      await queryClient.invalidateQueries({ queryKey: ['enquiries'] })
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['enquiries'] }),
+        queryClient.invalidateQueries({ queryKey: ['enquiry', enquiryId] }),
+      ])
     } catch (e: unknown) {
       setLocalValue(normalizeEnquiryDetailType(value))
       window.alert(e instanceof Error ? e.message : 'Update failed')
@@ -48,21 +52,23 @@ export default function EnquiryListDetailTypeEditor({
   }
 
   const label = ENQUIRY_DETAIL_TYPE_LABELS[localValue]
+  const locked = isEnquiryDetailTypeLocked(value)
 
-  if (!canEdit || disabled) {
+  if (!canEdit || disabled || locked) {
     return <span className={cn('text-[13px] text-gray-900', className)}>{label}</span>
   }
 
   return (
     <select
       className={cn(
-        'h-8 min-w-[108px] rounded-md border border-[#E2E6DC] bg-white px-2 text-[12px] text-gray-900 disabled:cursor-not-allowed disabled:opacity-50',
+        'h-8 min-w-[140px] rounded-md border border-[#E2E6DC] bg-white px-2 text-[12px] text-gray-900 disabled:cursor-not-allowed disabled:opacity-50',
         className,
       )}
       value={localValue}
       disabled={busy || disabled}
       onChange={(e) => {
         const next = normalizeEnquiryDetailType(e.target.value)
+        if (isEnquiryDetailTypeLocked(value)) return
         setLocalValue(next)
         void persist(next)
       }}

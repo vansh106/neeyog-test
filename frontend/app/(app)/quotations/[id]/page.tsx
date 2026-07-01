@@ -37,6 +37,7 @@ import {
   quotationLinesToFallbackManualItems,
 } from '@/lib/quotationPrefillAssembly'
 import { Permissions } from '@/lib/permissions'
+import { quotationHasPoReceived } from '@/lib/quotationCrmStatus'
 import { useAuthStore } from '@/stores/authStore'
 import { formatCurrency, truncateId } from '@/lib/utils'
 import type {
@@ -194,6 +195,8 @@ export default function QuotationDetailPage() {
   }
 
   const pdfOverrides = quotation.pdf_display_overrides
+  const hasPoReceived = quotationHasPoReceived(quotation)
+  const canEditQuotation = canEditQuoteLines && !hasPoReceived
   const notesPreviewText =
     pdfOverrides && typeof pdfOverrides === 'object' && pdfOverrides !== null && 'notes' in pdfOverrides
       ? String(pdfOverrides.notes ?? '')
@@ -223,7 +226,7 @@ export default function QuotationDetailPage() {
           {canCreatePO && (
             <CreatePOButton fixedQuotationId={quotation.quotation_id} className="h-9" />
           )}
-          {canEditQuoteLines ? (
+          {canEditQuotation ? (
             <Button
               type="button"
               variant="outline"
@@ -261,7 +264,7 @@ export default function QuotationDetailPage() {
             </div>
           </div>
 
-          {canEditQuoteLines && (
+          {canEditQuotation && (
             <>
               <QuotationFinancialEditor
                 quotation={quotation}
@@ -362,6 +365,15 @@ export default function QuotationDetailPage() {
                           {quotation.status_remarks}
                         </p>
                       )}
+                      {hasPoReceived && (
+                        <p className="mt-2 text-[12px] leading-snug text-amber-800">
+                          PO recorded
+                          {quotation.po_total_amount != null && quotation.po_total_amount > 0
+                            ? ` (${formatCurrency(quotation.po_total_amount)})`
+                            : ''}
+                          — quotation editing is locked.
+                        </p>
+                      )}
                       <p className="mt-3 text-[13px] text-surface-muted">
                         Created {formatQuoteDate(quotation.created_at)}
                       </p>
@@ -369,7 +381,7 @@ export default function QuotationDetailPage() {
                         Valid for {quotation.validity_days} day{quotation.validity_days === 1 ? '' : 's'} from issue
                       </p>
                     </div>
-                    {canEditQuoteLines && (
+                    {canEditQuotation && (
                       <Button
                         type="button"
                         variant="outline"

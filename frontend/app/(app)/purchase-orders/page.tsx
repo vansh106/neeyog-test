@@ -39,12 +39,12 @@ function formatSoDate(iso: string | null | undefined): string | null {
 
 const SO_ENTRY_DEADLINE_MS = 24 * 60 * 60 * 1000
 
-function isSoMissing(soNumber?: string | null): boolean {
-  return !soNumber?.trim()
+function isSoDateMissing(soDate?: string | null): boolean {
+  return !soDate?.trim()
 }
 
-function isSoEntryOverdue(createdAt: string, soNumber?: string | null): boolean {
-  if (!isSoMissing(soNumber)) return false
+function isSoDateEntryOverdue(createdAt: string, soDate?: string | null): boolean {
+  if (!isSoDateMissing(soDate)) return false
   const createdMs = new Date(createdAt).getTime()
   if (Number.isNaN(createdMs)) return false
   return Date.now() - createdMs >= SO_ENTRY_DEADLINE_MS
@@ -249,8 +249,8 @@ function PoRow({
   onEnterSo: () => void
   onDelete: () => void
 }) {
-  const soMissing = isSoMissing(po.so_number)
-  const soOverdue = isSoEntryOverdue(po.created_at, po.so_number)
+  const soDateMissing = isSoDateMissing(po.so_date)
+  const soDateOverdue = isSoDateEntryOverdue(po.created_at, po.so_date)
   const soDateLabel = formatSoDate(po.so_date)
 
   return (
@@ -295,26 +295,26 @@ function PoRow({
         {soDateLabel && (
           <p className="mt-0.5 text-[11px] text-surface-muted">{soDateLabel}</p>
         )}
-        {soMissing &&
+        {soDateMissing &&
           (canEnterSo ? (
             <button
               type="button"
               onClick={onEnterSo}
               className={cn(
                 'mt-0.5 text-left text-[11px] font-medium leading-snug underline-offset-2 hover:underline',
-                soOverdue ? 'text-red-600' : 'text-brand-navy-600',
+                soDateOverdue ? 'text-red-600' : 'text-brand-navy-600',
               )}
             >
-              Enter SO number
+              Enter SO date
             </button>
           ) : (
             <p
               className={cn(
                 'mt-0.5 text-[11px] font-medium leading-snug',
-                soOverdue ? 'text-red-600' : 'text-surface-muted',
+                soDateOverdue ? 'text-red-600' : 'text-surface-muted',
               )}
             >
-              Enter SO number
+              Enter SO date
             </p>
           ))}
       </td>

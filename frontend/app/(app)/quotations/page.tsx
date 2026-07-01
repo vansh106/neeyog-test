@@ -320,6 +320,8 @@ export default function QuotationsPage() {
                         quotationId={q.quotation_id}
                         field="next_follow_up_date"
                         value={q.next_follow_up_date}
+                        note={q.next_follow_up_note}
+                        history={q.follow_up_history}
                       />
                     </td>
                     <td className="px-3 py-3 align-top text-[12px] text-surface-muted">

@@ -517,6 +517,31 @@ def _due_meta(due: date | None, today: date) -> tuple[str, str, int]:
     return due.strftime("%d %b"), "neutral", 100 + delta
 
 
+def _follow_up_due_meta(due: date | None, today: date) -> tuple[str, str, int]:
+    """Follow-up reminders: expired (set new date), today, or tomorrow only."""
+    if due is None:
+        return "Follow-up missing — set new date", "expired", -3000
+    delta = (due - today).days
+    if delta < 0:
+        days = abs(delta)
+        if days == 1:
+            label = "Expired yesterday — set new date"
+        else:
+            label = f"Expired {days}d ago — set new date"
+        return label, "expired", -2000 + delta
+    if delta == 0:
+        return "Due today", "today", 0
+    if delta == 1:
+        return "Due tomorrow", "soon", 1
+    return due.strftime("%d %b"), "neutral", 100 + delta
+
+
+def _follow_up_needs_reminder(due: date | None, today: date) -> bool:
+    if due is None:
+        return True
+    return (due - today).days <= 1
+
+
 def _quotation_account_name(q: Quotation) -> str:
     return (q.client_company or q.client_name or "Unknown").strip() or "Unknown"
 
@@ -576,24 +601,64 @@ async def get_action_queues(
         )
     incomplete_items.sort(key=lambda x: (-x["aging_days"], x["subject"]))
 
+    follow_items: list[dict] = []
+
+    enquiry_follow_stmt = select(Enquiry).options(
+        selectinload(Enquiry.branch).selectinload(ClientBranch.company)
+    ).where(
+        Enquiry.is_archived.is_(False),
+        Enquiry.status.notin_(list(TERMINAL_ENQUIRY_STATUSES)),
+        ~exists(
+            select(1).where(
+                Quotation.enquiry_id == Enquiry.id,
+                Quotation.is_archived.is_(False),
+                Quotation.status.in_(["ongoing", "hold"]),
+            )
+        ),
+    )
+    if user_ids:
+        enquiry_follow_stmt = enquiry_follow_stmt.where(Enquiry.created_by_user_id.in_(user_ids))
+    enquiry_follow_rows = list((await db.execute(enquiry_follow_stmt)).scalars().all())
+    for e in enquiry_follow_rows:
+        due = getattr(e, "next_follow_up_date", None)
+        if not _follow_up_needs_reminder(due, today):
+            continue
+        due_label, due_urgency, due_rank = _follow_up_due_meta(due, today)
+        follow_items.append(
+            {
+                "entity_type": "enquiry",
+                "entity_id": str(e.id),
+                "enquiry_id": str(e.id),
+                "quotation_id": None,
+                "client_product": _enquiry_subject(e),
+                "deal_value": 0.0,
+                "due_label": due_label,
+                "due_urgency": due_urgency,
+                "due_rank": due_rank,
+                "next_follow_up_date": due.isoformat() if due else None,
+                "status": "enquiry",
+                "status_label": "Enquiry",
+            }
+        )
+
     follow_stmt = select(Quotation).where(
         Quotation.is_archived.is_(False),
         Quotation.status.in_(["ongoing", "hold"]),
-        or_(
-            Quotation.next_follow_up_date.is_(None),
-            Quotation.next_follow_up_date <= today + timedelta(days=2),
-        ),
     )
     if user_ids:
         follow_stmt = follow_stmt.where(Quotation.created_by_user_id.in_(user_ids))
 
     follow_rows = list((await db.execute(follow_stmt)).scalars().all())
-    follow_items: list[dict] = []
     for q in follow_rows:
-        due_label, due_urgency, due_rank = _due_meta(q.next_follow_up_date, today)
+        due = q.next_follow_up_date
+        if not _follow_up_needs_reminder(due, today):
+            continue
+        due_label, due_urgency, due_rank = _follow_up_due_meta(due, today)
         status_key = (q.status or "ongoing").lower()
         follow_items.append(
             {
+                "entity_type": "quotation",
+                "entity_id": str(q.id),
                 "quotation_id": str(q.id),
                 "enquiry_id": str(q.enquiry_id),
                 "client_product": _quotation_client_product(q),
@@ -601,42 +666,69 @@ async def get_action_queues(
                 "due_label": due_label,
                 "due_urgency": due_urgency,
                 "due_rank": due_rank,
+                "next_follow_up_date": due.isoformat() if due else None,
                 "status": status_key,
-                "status_label": QUOTATION_CRM_LABELS.get(status_key, status_key.replace("_", " ").title()),
+                "status_label": QUOTATION_CRM_LABELS.get(
+                    status_key, status_key.replace("_", " ").title()
+                ),
             }
         )
     follow_items.sort(key=lambda x: (x["due_rank"], -x["deal_value"]))
 
-    alert_stmt = select(Quotation).where(
-        Quotation.is_archived.is_(False),
-        Quotation.status.in_(["ongoing", "hold"]),
-        or_(
-            Quotation.next_follow_up_date.is_(None),
-            Quotation.next_follow_up_date <= today + timedelta(days=2),
-        ),
+    expired_items = [x for x in follow_items if x["due_urgency"] == "expired"]
+    due_soon_items = [x for x in follow_items if x["due_urgency"] in ("today", "soon")]
+
+    so_cutoff = datetime.now(IST) - timedelta(hours=24)
+    so_stmt = select(PurchaseOrder).where(
+        PurchaseOrder.so_date.is_(None),
+        PurchaseOrder.created_at < so_cutoff,
     )
     if user_ids:
-        alert_stmt = alert_stmt.where(Quotation.created_by_user_id.in_(user_ids))
+        so_stmt = so_stmt.where(PurchaseOrder.created_by_user_id.in_(user_ids))
+    so_rows = list((await db.execute(so_stmt)).scalars().all())
+    so_items: list[dict] = []
+    for po in so_rows:
+        created = po.created_at
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=ZoneInfo("UTC"))
+        hours = max(int((datetime.now(IST) - created.astimezone(IST)).total_seconds() // 3600), 24)
+        days = hours // 24
+        if days <= 1:
+            overdue_label = "SO date not entered (24h+)"
+        else:
+            overdue_label = f"SO date not entered ({days}d)"
+        client = (po.client_company or po.client_name or "Unknown").strip() or "Unknown"
+        so_items.append(
+            {
+                "po_id": str(po.id),
+                "po_number": po.po_number,
+                "client_name": client,
+                "quote_number": po.quote_number,
+                "quotation_id": str(po.quotation_id) if po.quotation_id else None,
+                "total_amount": round(float(po.total_amount or 0.0), 2),
+                "hours_overdue": hours,
+                "due_label": overdue_label,
+                "created_at": po.created_at.isoformat() if po.created_at else None,
+            }
+        )
+    so_items.sort(key=lambda x: (-x["hours_overdue"], x["po_number"]))
 
-    alert_rows = list((await db.execute(alert_stmt)).scalars().all())
-    accounts: dict[str, dict] = {}
-    for q in alert_rows:
-        account = _quotation_account_name(q)
-        amount = float(q.total_amount or 0.0)
-        no_follow_up = q.next_follow_up_date is None
-        overdue = q.next_follow_up_date is not None and q.next_follow_up_date < today
-        if account not in accounts:
-            accounts[account] = {
+    alert_accounts: dict[str, dict] = {}
+    for item in follow_items:
+        if item["due_urgency"] != "expired":
+            continue
+        account = item["client_product"].split(" — ", 1)[0]
+        amount = float(item["deal_value"] or 0.0)
+        if account not in alert_accounts:
+            alert_accounts[account] = {
                 "account_name": account,
                 "expiring_value": 0.0,
                 "no_follow_up_logged": False,
-                "has_overdue": False,
+                "has_overdue": True,
             }
-        accounts[account]["expiring_value"] += amount
-        if no_follow_up:
-            accounts[account]["no_follow_up_logged"] = True
-        if overdue:
-            accounts[account]["has_overdue"] = True
+        alert_accounts[account]["expiring_value"] += amount
+        if item["next_follow_up_date"] is None:
+            alert_accounts[account]["no_follow_up_logged"] = True
 
     account_breakdown = sorted(
         [
@@ -646,15 +738,12 @@ async def get_action_queues(
                 "no_follow_up_logged": row["no_follow_up_logged"],
                 "has_overdue": row["has_overdue"],
             }
-            for row in accounts.values()
+            for row in alert_accounts.values()
         ],
-        key=lambda x: (
-            0 if x["no_follow_up_logged"] else (1 if x["has_overdue"] else 2),
-            -x["expiring_value"],
-        ),
+        key=lambda x: (-x["expiring_value"], x["account_name"]),
     )
-    alert_total = round(sum(a["expiring_value"] for a in account_breakdown), 2)
-
+    expired_pipeline_total = round(sum(x["deal_value"] for x in expired_items), 2)
+    due_soon_pipeline_total = round(sum(x["deal_value"] for x in due_soon_items), 2)
     follow_pipeline_total = round(sum(x["deal_value"] for x in follow_items), 2)
 
     return {
@@ -664,13 +753,24 @@ async def get_action_queues(
         },
         "follow_ups_due": {
             "count": len(follow_items),
+            "expired_count": len(expired_items),
+            "due_soon_count": len(due_soon_items),
             "pipeline_value": follow_pipeline_total,
             "items": follow_items,
         },
+        "so_dates_pending": {
+            "count": len(so_items),
+            "items": so_items,
+        },
         "quote_expiry": {
-            "has_expiring_quotes": alert_total > 0,
-            "expiring_value": alert_total,
-            "timeframe_days": 2,
+            "has_expiring_quotes": len(expired_items) > 0 or len(due_soon_items) > 0,
+            "has_expired_follow_ups": len(expired_items) > 0,
+            "expired_count": len(expired_items),
+            "expired_value": expired_pipeline_total,
+            "due_soon_count": len(due_soon_items),
+            "due_soon_value": due_soon_pipeline_total,
+            "expiring_value": expired_pipeline_total or due_soon_pipeline_total,
+            "timeframe_days": 1,
             "accounts": account_breakdown,
         },
     }

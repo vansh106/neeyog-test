@@ -445,7 +445,7 @@ export default function EmailsPage() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => router.push(`/upload?tab=manual&ref=${selected}`)}
+                    onClick={() => router.push(`/upload?ref=${selected}`)}
                     className="rounded-md border border-dashed border-surface-border px-3 py-2 text-[12px] text-surface-muted hover:text-gray-900"
                   >
                     Classic manual upload

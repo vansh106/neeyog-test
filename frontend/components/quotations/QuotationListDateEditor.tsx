@@ -1,12 +1,13 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 
+import FollowUpDateEditorDialog from '@/components/crm/FollowUpDateEditorDialog'
 import { quotationsApi } from '@/lib/api'
+import type { FollowUpHistoryEntry } from '@/lib/followUpTypes'
 import { Permissions } from '@/lib/permissions'
 import { useAuthStore } from '@/stores/authStore'
-import { cn } from '@/lib/utils'
 
 export function formatQuotationListDate(iso: string | null | undefined): string {
   if (!iso) return '—'
@@ -15,90 +16,52 @@ export function formatQuotationListDate(iso: string | null | undefined): string 
   return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'long' })
 }
 
-function toInputValue(iso: string | null | undefined): string {
-  if (!iso) return ''
-  return iso.slice(0, 10)
-}
-
 type ListingDateField = 'next_follow_up_date'
 
 export default function QuotationListDateEditor({
   quotationId,
   field,
   value,
+  note,
+  history,
   className,
 }: {
   quotationId: string
   field: ListingDateField
   value: string | null | undefined
+  note?: string | null
+  history?: FollowUpHistoryEntry[]
   className?: string
 }) {
   const queryClient = useQueryClient()
   const canEdit = useAuthStore((s) => s.hasPermission(Permissions.APPROVE_QUOTATIONS))
-  const [localValue, setLocalValue] = useState(toInputValue(value))
   const [busy, setBusy] = useState(false)
 
-  useEffect(() => {
-    setLocalValue(toInputValue(value))
-  }, [quotationId, value])
-
-  const persist = async (next: string) => {
+  const persist = async ({ date, note: nextNote }: { date: string; note: string }) => {
+    if (field !== 'next_follow_up_date') return
     setBusy(true)
     try {
-      const payload = { next_follow_up_date: next || null }
-      await quotationsApi.updateListingDates(quotationId, payload)
+      await quotationsApi.updateListingDates(quotationId, {
+        next_follow_up_date: date,
+        nextFollowUpNote: nextNote || null,
+      })
       await queryClient.invalidateQueries({ queryKey: ['quotations'] })
     } catch (e: unknown) {
-      setLocalValue(toInputValue(value))
-      window.alert(e instanceof Error ? e.message : 'Update failed')
+      throw e instanceof Error ? e : new Error('Update failed')
     } finally {
       setBusy(false)
     }
   }
 
-  const display = formatQuotationListDate(localValue ? `${localValue}T12:00:00` : null)
-
-  if (!canEdit) {
-    return (
-      <span
-        className={cn(
-          'text-[13px]',
-          !localValue ? 'font-medium text-red-600' : 'text-gray-900',
-          className,
-        )}
-      >
-        {display}
-      </span>
-    )
-  }
-
   return (
-    <label
-      className={cn(
-        'relative inline-flex min-w-[88px] cursor-pointer rounded px-1 py-0.5 transition-colors hover:bg-[#EEF0E8]',
-        busy && 'pointer-events-none opacity-50',
-        className,
-      )}
-    >
-      <span
-        className={cn(
-          'text-[13px]',
-          !localValue ? 'font-medium text-red-600' : 'text-gray-900',
-        )}
-      >
-        {display}
-      </span>
-      <input
-        type="date"
-        value={localValue}
-        disabled={busy}
-        className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-        onChange={(e) => {
-          const next = e.target.value
-          setLocalValue(next)
-          void persist(next)
-        }}
-      />
-    </label>
+    <FollowUpDateEditorDialog
+      value={value}
+      note={note}
+      history={history}
+      canEdit={canEdit}
+      busy={busy}
+      className={className}
+      onSave={persist}
+    />
   )
 }

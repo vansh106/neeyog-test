@@ -191,6 +191,8 @@ class Enquiry(Base):
     enquiry_number: Mapped[str | None] = mapped_column(String(20), nullable=True, unique=True, index=True)
     #: Next CRM follow-up (editable from enquiry list).
     next_follow_up_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    next_follow_up_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    follow_up_history: Mapped[list] = mapped_column(JSON, nullable=False, default=list, server_default=text("'[]'"))
 
     is_archived: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=text("false"), index=True
@@ -227,6 +229,8 @@ class Quotation(Base):
     validity_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     #: Next CRM follow-up (editable from quotation list).
     next_follow_up_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    next_follow_up_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    follow_up_history: Mapped[list] = mapped_column(JSON, nullable=False, default=list, server_default=text("'[]'"))
     #: CRM: po_received | lost | hold | ongoing
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="ongoing")
     status_remarks: Mapped[str | None] = mapped_column(Text, nullable=True)

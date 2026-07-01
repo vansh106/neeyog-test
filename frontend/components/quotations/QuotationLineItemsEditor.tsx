@@ -12,10 +12,11 @@ import {
   assemblyPartUnitMultiplier,
   assembledToLineItem,
   catalogPartsForAssembly,
+  isAssemblyPricingReady,
   uuidv4,
 } from '@/lib/manualAssemblyLineItem'
 import { quotationsApi, suppliersApi } from '@/lib/api'
-import { formatCurrency } from '@/lib/utils'
+import { formatCurrency, isPositivePrice } from '@/lib/utils'
 import type { AssembledProduct, PriceCalculationResult, SupplierResponse } from '@/types'
 
 type ProductPricingCalc = {
@@ -232,7 +233,9 @@ export default function QuotationLineItemsEditor({
   const pricingReady = useMemo(() => {
     if (assembledProducts.length === 0) return false
     if (!supplierRequired) return true
-    return assembledProducts.every((p) => Boolean(p.supplier_id))
+    return assembledProducts.every(
+      (p) => isAssemblyPricingReady(p, supplierRequired) || isPositivePrice(p.unit_price),
+    )
   }, [assembledProducts, supplierRequired])
 
   const handleProductComplete = useCallback(
@@ -271,8 +274,12 @@ export default function QuotationLineItemsEditor({
       e.products = 'Please complete at least one valve configurator'
     }
     if (supplierRequired) {
-      const missingSupplier = assembledProducts.some((p) => !p.supplier_id)
-      if (missingSupplier) e.supplier = 'Please select a supplier for each product'
+      const missingPricing = assembledProducts.some(
+        (p) => !isAssemblyPricingReady(p, supplierRequired) && !isPositivePrice(p.unit_price),
+      )
+      if (missingPricing) {
+        e.supplier = 'Complete supplier and pricing for each product before saving'
+      }
     }
     setErrors(e)
     return Object.keys(e).length === 0

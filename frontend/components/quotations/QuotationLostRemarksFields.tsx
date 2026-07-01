@@ -40,7 +40,7 @@ export default function QuotationLostRemarksFields({ value, onChange, disabled, 
 
       <label className="block text-[11px]">
         <span className="font-medium text-[#8A9488]">
-          Other <span className="text-red-600">*</span>
+          Remarks <span className="text-red-600">*</span>
         </span>
         <Input
           value={value.other1}

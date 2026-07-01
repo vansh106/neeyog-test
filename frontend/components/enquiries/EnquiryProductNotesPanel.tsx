@@ -14,9 +14,10 @@ import {
 type Props = {
   enquiryId: string
   parsed: Record<string, unknown> | null | undefined
+  readOnly?: boolean
 }
 
-export default function EnquiryProductNotesPanel({ enquiryId, parsed }: Props) {
+export default function EnquiryProductNotesPanel({ enquiryId, parsed, readOnly = false }: Props) {
   const productNotes = parseProductNotesFromParsedData(parsed)
   const [editOpen, setEditOpen] = useState(false)
 
@@ -27,16 +28,18 @@ export default function EnquiryProductNotesPanel({ enquiryId, parsed }: Props) {
       <section className="rounded-xl border border-surface-border bg-white p-5 shadow-sm">
         <div className="flex items-start justify-between gap-2">
           <h2 className="text-[14px] font-semibold text-gray-900">Notes for products</h2>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="h-8 shrink-0 gap-1.5 px-2 text-[12px] text-surface-muted hover:text-gray-900"
-            onClick={() => setEditOpen(true)}
-          >
-            <Pencil className="size-3.5" />
-            Edit
-          </Button>
+          {!readOnly ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-8 shrink-0 gap-1.5 px-2 text-[12px] text-surface-muted hover:text-gray-900"
+              onClick={() => setEditOpen(true)}
+            >
+              <Pencil className="size-3.5" />
+              Edit
+            </Button>
+          ) : null}
         </div>
         <ul className="mt-3 space-y-3">
           {productNotes.map((note, index) => {
