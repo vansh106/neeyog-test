@@ -25,3 +25,8 @@ export function enquiryDetailTypeLabel(value: string | null | undefined): string
 export function isEnquiryDetailTypeLocked(value: string | null | undefined): boolean {
   return normalizeEnquiryDetailType(value) === 'complete'
 }
+
+/** Manual product dropdowns and quotation generation are allowed only for complete enquiries. */
+export function canGenerateQuotationFromEnquiry(value: string | null | undefined): boolean {
+  return normalizeEnquiryDetailType(value) === 'complete'
+}

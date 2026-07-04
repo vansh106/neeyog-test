@@ -8,8 +8,35 @@ DAMPER_CATALOG_PREFIX = "fp_damper_"
 
 BUTTERFLY_DAMPER_KEY = "fp_damper_butterfly"
 MULTI_LOUVER_DAMPER_KEY = "fp_damper_multi_louver"
+SLIDE_GATE_DAMPER_KEY = "fp_damper_slide_gate"
+GUILLOTINE_DAMPER_KEY = "fp_damper_guillotine"
+DIVERTER_DAMPER_KEY = "fp_damper_diverter"
+DISCHARGE_DAMPER_KEY = "fp_damper_discharge"
 
-DAMPER_SHEET_KEYS = frozenset({BUTTERFLY_DAMPER_KEY, MULTI_LOUVER_DAMPER_KEY})
+DAMPER_SHEET_KEYS = frozenset(
+    {
+        BUTTERFLY_DAMPER_KEY,
+        MULTI_LOUVER_DAMPER_KEY,
+        SLIDE_GATE_DAMPER_KEY,
+        GUILLOTINE_DAMPER_KEY,
+        DIVERTER_DAMPER_KEY,
+        DISCHARGE_DAMPER_KEY,
+    }
+)
+
+# Field key for the damper sub-type selector (Diverter / Discharge sheets).
+DAMPER_TYPE_FIELD_KEY = "damper_type"
+
+DIVERTER_TYPE_OPTIONS = [
+    "T-Type Diverter Damper",
+    "Y-Type Diverter Damper",
+    "Poppet Type Diverter Damper",
+]
+
+DISCHARGE_TYPE_OPTIONS = [
+    "Single Flap Discharge Damper",
+    "Double Flap Discharge Damper",
+]
 
 STRUCTURAL_MOC = [
     "IS 2062",
@@ -91,7 +118,30 @@ def damper_sheet_label(catalog_key: str) -> str:
         return "Butterfly Damper"
     if catalog_key == MULTI_LOUVER_DAMPER_KEY:
         return "Multi-Louver Damper"
+    if catalog_key == SLIDE_GATE_DAMPER_KEY:
+        return "Slide Gate Damper"
+    if catalog_key == GUILLOTINE_DAMPER_KEY:
+        return "Guillotine Damper"
+    if catalog_key == DIVERTER_DAMPER_KEY:
+        return "Diverter Damper"
+    if catalog_key == DISCHARGE_DAMPER_KEY:
+        return "Discharge Damper"
     return catalog_key.replace("_", " ").title()
+
+
+def damper_type_variant_options(catalog_key: str) -> list[str]:
+    """Sub-type options for multi-variant damper sheets (empty for single-type)."""
+    if catalog_key == DIVERTER_DAMPER_KEY:
+        return list(DIVERTER_TYPE_OPTIONS)
+    if catalog_key == DISCHARGE_DAMPER_KEY:
+        return list(DISCHARGE_TYPE_OPTIONS)
+    return []
+
+
+def damper_type_options(catalog_key: str) -> list[str]:
+    """Values shown in the matrix "Damper Type" cell (variants or sheet label)."""
+    variants = damper_type_variant_options(catalog_key)
+    return variants if variants else [damper_sheet_label(catalog_key)]
 
 
 def _field(
@@ -173,6 +223,18 @@ def damper_fields_for_key(catalog_key: str) -> list[dict[str, Any]]:
             _field("blade_action", "Blade Action", options=BLADE_ACTION_OPTIONS),
             *_shared_body_fields(),
         ]
+    if catalog_key in (SLIDE_GATE_DAMPER_KEY, GUILLOTINE_DAMPER_KEY):
+        return [
+            _field("size", "Size", input_type="manual", required=False),
+            *_shared_body_fields(),
+        ]
+    variants = damper_type_variant_options(catalog_key)
+    if variants:
+        return [
+            _field(DAMPER_TYPE_FIELD_KEY, "Damper Type", options=variants),
+            _field("size", "Size", input_type="manual", required=False),
+            *_shared_body_fields(),
+        ]
     return []
 
 
@@ -181,6 +243,7 @@ def get_damper_full_schema(catalog_key: str) -> dict[str, Any]:
         "catalog_key": catalog_key,
         "damper_type": damper_sheet_label(catalog_key),
         "label": damper_sheet_label(catalog_key),
+        "type_options": damper_type_options(catalog_key),
         "fields": damper_fields_for_key(catalog_key),
         "has_catalog_price": False,
     }
@@ -190,4 +253,8 @@ def list_damper_sheets() -> list[dict[str, str]]:
     return [
         {"key": BUTTERFLY_DAMPER_KEY, "label": "Butterfly Damper"},
         {"key": MULTI_LOUVER_DAMPER_KEY, "label": "Multi-Louver Damper"},
+        {"key": SLIDE_GATE_DAMPER_KEY, "label": "Slide Gate Damper"},
+        {"key": GUILLOTINE_DAMPER_KEY, "label": "Guillotine Damper"},
+        {"key": DIVERTER_DAMPER_KEY, "label": "Diverter Damper"},
+        {"key": DISCHARGE_DAMPER_KEY, "label": "Discharge Damper"},
     ]

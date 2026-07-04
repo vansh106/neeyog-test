@@ -281,7 +281,7 @@ async def po_totals_by_quotation_ids(
     if not quotation_ids:
         return {}
     stmt = (
-        select(PurchaseOrder.quotation_id, func.coalesce(func.sum(PurchaseOrder.total_amount), 0.0))
+        select(PurchaseOrder.quotation_id, func.coalesce(func.sum(PurchaseOrder.subtotal), 0.0))
         .where(PurchaseOrder.quotation_id.in_(quotation_ids))
         .group_by(PurchaseOrder.quotation_id)
     )

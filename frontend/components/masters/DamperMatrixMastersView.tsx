@@ -1,14 +1,14 @@
 'use client'
 
-import { damperMatrixColumns, damperSheetLabel, getDamperFullSchema } from '@/lib/damperSchema'
+import { damperMatrixColumns, damperSheetLabel, damperTypeOptions } from '@/lib/damperSchema'
 
 type Props = {
   catalogKey: string
 }
 
 export default function DamperMatrixMastersView({ catalogKey }: Props) {
-  const schema = getDamperFullSchema(catalogKey)
   const columns = damperMatrixColumns(catalogKey)
+  const typeOptions = damperTypeOptions(catalogKey)
 
   return (
     <div className="space-y-4">
@@ -55,7 +55,15 @@ export default function DamperMatrixMastersView({ catalogKey }: Props) {
                 1
               </td>
               <td className="border border-surface-border bg-[#f8faf8] px-2 py-2 align-top font-medium">
-                {schema.damper_type}
+                {typeOptions.length > 1 ? (
+                  <ul className="space-y-0.5">
+                    {typeOptions.map((opt) => (
+                      <li key={opt}>{opt}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  typeOptions[0]
+                )}
               </td>
               {columns.map((col) =>
                 col.subColumns.map((sub) => (

@@ -20,7 +20,11 @@ from services.fiscal_numbering import fiscal_year_code
 from services.masters_service import CATEGORY_LABEL_BY_KEY, _category_label
 from services.damper_schema import (
     BUTTERFLY_DAMPER_KEY,
+    DISCHARGE_DAMPER_KEY,
+    DIVERTER_DAMPER_KEY,
+    GUILLOTINE_DAMPER_KEY,
     MULTI_LOUVER_DAMPER_KEY,
+    SLIDE_GATE_DAMPER_KEY,
     damper_sheet_label,
     is_damper_catalog_key,
 )
@@ -886,6 +890,14 @@ def _normalize_category_key(raw: str) -> str:
         return BUTTERFLY_DAMPER_KEY
     if snake in ("multi_louver_damper", "multi_louver"):
         return MULTI_LOUVER_DAMPER_KEY
+    if snake in ("slide_gate_damper", "slide_gate"):
+        return SLIDE_GATE_DAMPER_KEY
+    if snake in ("guillotine_damper", "guillotine", "gullotine_damper", "gullotine"):
+        return GUILLOTINE_DAMPER_KEY
+    if snake in ("diverter_damper", "diverter"):
+        return DIVERTER_DAMPER_KEY
+    if snake in ("discharge_damper", "discharge"):
+        return DISCHARGE_DAMPER_KEY
     if is_damper_catalog_key(snake):
         return snake
     if snake in ("fp_damper", "dampers", "damper"):

@@ -188,25 +188,10 @@ export function buildDefaultTerms(quotation: Quotation, companyName?: string): s
 }
 
 export function buildDefaultFooterContact(
-  clientConfig: ClientConfig | undefined,
-  preparer?: QuotationPreparer,
+  _clientConfig: ClientConfig | undefined,
+  _preparer?: QuotationPreparer,
 ): string {
-  const prepared = (
-    preparer?.name?.trim() ||
-    ((clientConfig?.prepared_by as string | undefined) || 'Sales Team').trim()
-  ).trim()
-  const prepPhone = preparer?.phone?.trim()
-  const companyPhone = (clientConfig?.phone || '').trim()
-  const letterEmail = (
-    preparer?.email?.trim() ||
-    (clientConfig?.sales_email as string | undefined)?.trim() ||
-    (clientConfig?.email || '').trim()
-  ).trim()
-  let line = `If you have any questions about this quote, please contact ${prepared}`
-  if (prepPhone) line += `, ${prepPhone}`
-  else if (companyPhone) line += `, ${companyPhone}`
-  if (letterEmail) line += `, ${letterEmail}`
-  return `${line}.`
+  return ''
 }
 
 export function defaultFooterThanks(): string {

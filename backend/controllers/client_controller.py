@@ -59,7 +59,7 @@ class CreateCompanyRequest(BaseModel):
     phone: str | None = None
     email: str | None = None
     city: str
-    state: str | None = None
+    state: str = Field(..., min_length=1)
     pincode: str | None = None
     address_line1: str | None = None
     country: str = "India"
@@ -72,7 +72,7 @@ class AddBranchRequest(BaseModel):
     phone: str | None = None
     email: str | None = None
     city: str
-    state: str | None = None
+    state: str = Field(..., min_length=1)
     pincode: str | None = None
     address_line1: str | None = None
     country: str = "India"
@@ -256,7 +256,7 @@ async def handle_create_company(body: CreateCompanyRequest, db: AsyncSession) ->
         phone=body.phone,
         email=body.email,
         city=body.city.strip(),
-        state=body.state,
+        state=body.state.strip(),
         pincode=body.pincode,
         address_line1=body.address_line1,
         country=body.country or "India",
@@ -304,7 +304,7 @@ async def handle_add_branch(company_id: str, body: AddBranchRequest, db: AsyncSe
         phone=body.phone,
         email=body.email,
         city=body.city.strip(),
-        state=body.state,
+        state=body.state.strip(),
         pincode=body.pincode,
         address_line1=body.address_line1,
         country=body.country or "India",

@@ -1,17 +1,71 @@
 import type { QuotationListItem } from '@/types'
 import { matchesArchiveFilter, type ArchiveFilter } from '@/lib/archiveFilter'
+import { isoLocalDay, isFullAmountRange, localTodayIso, uniqueSortedStrings } from '@/lib/listingFilterUtils'
 
 function norm(s: string): string {
   return s.trim().toLowerCase()
 }
 
+export type FollowUpFilter = '' | 'upcoming' | 'expired'
+
 export type LocalQuotationFilters = {
   search: string
   clientName: string
   status: string
+  category: string
+  user: string
   dateFrom: string
   dateTo: string
+  poAmountMin: number
+  poAmountMax: number
+  poBoundsMin: number
+  poBoundsMax: number
+  followUp: FollowUpFilter
   archive: ArchiveFilter
+}
+
+export const DEFAULT_QUOTATION_FILTERS: LocalQuotationFilters = {
+  search: '',
+  clientName: '',
+  status: '',
+  category: '',
+  user: '',
+  dateFrom: '',
+  dateTo: '',
+  poAmountMin: 0,
+  poAmountMax: 0,
+  poBoundsMin: 0,
+  poBoundsMax: 0,
+  followUp: '',
+  archive: 'active',
+}
+
+export function collectQuotationFilterOptions(rows: QuotationListItem[]) {
+  const categories = uniqueSortedStrings(
+    rows.flatMap((r) => [
+      r.category_label,
+      r.primary_category,
+      r.sub_category,
+      ...(r.category_lines ?? []).map((l) => l.category),
+    ]),
+  )
+  const users = uniqueSortedStrings(rows.map((r) => r.created_by_name))
+  return { categories, users }
+}
+
+export function quotationPoBounds(rows: QuotationListItem[]) {
+  const amounts = rows.map((r) => (r.po_total_amount != null && r.po_total_amount > 0 ? r.po_total_amount : 0))
+  const { min, max } = computePoBounds(amounts)
+  return { min, max }
+}
+
+function computePoBounds(amounts: number[]) {
+  const valid = amounts.filter((n) => Number.isFinite(n) && n >= 0)
+  if (valid.length === 0) return { min: 0, max: 100000 }
+  const min = Math.floor(Math.min(...valid))
+  const max = Math.ceil(Math.max(...valid))
+  if (max <= min) return { min: 0, max: Math.max(min + 1, 100000) }
+  return { min, max }
 }
 
 /** Instant in-memory filter; no network. */
@@ -58,6 +112,27 @@ export function filterQuotationsLocal(rows: QuotationListItem[], f: LocalQuotati
     })
   }
 
+  if (f.category) {
+    const cat = norm(f.category)
+    out = out.filter((row) => {
+      const labels = [
+        row.category_label,
+        row.primary_category,
+        row.sub_category,
+        ...(row.category_lines ?? []).map((l) => l.category),
+        ...(row.category_lines ?? []).map((l) => l.sub_category),
+      ]
+        .filter(Boolean)
+        .map((s) => norm(String(s)))
+      return labels.some((l) => l === cat || l.includes(cat))
+    })
+  }
+
+  if (f.user) {
+    const u = norm(f.user)
+    out = out.filter((row) => norm(row.created_by_name || '') === u)
+  }
+
   if (f.dateFrom || f.dateTo) {
     out = out.filter((row) => {
       if (!row.created_at) return false
@@ -68,5 +143,60 @@ export function filterQuotationsLocal(rows: QuotationListItem[], f: LocalQuotati
     })
   }
 
+  const boundsMin = f.poBoundsMin
+  const boundsMax = f.poBoundsMax
+  if (
+    boundsMax > boundsMin &&
+    !isFullAmountRange(boundsMin, boundsMax, f.poAmountMin, f.poAmountMax)
+  ) {
+    out = out.filter((row) => {
+      const amt = row.po_total_amount != null && row.po_total_amount > 0 ? row.po_total_amount : 0
+      return amt >= f.poAmountMin && amt <= f.poAmountMax
+    })
+  }
+
+  if (f.followUp) {
+    const today = localTodayIso()
+    out = out.filter((row) => {
+      const day = isoLocalDay(row.next_follow_up_date)
+      if (!day) return false
+      if (f.followUp === 'expired') return day < today
+      if (f.followUp === 'upcoming') return day >= today
+      return true
+    })
+  }
+
+  if (f.followUp === 'upcoming') {
+    out = [...out].sort((a, b) => {
+      const da = isoLocalDay(a.next_follow_up_date) || '9999-12-31'
+      const db = isoLocalDay(b.next_follow_up_date) || '9999-12-31'
+      return da.localeCompare(db)
+    })
+  } else if (f.followUp === 'expired') {
+    out = [...out].sort((a, b) => {
+      const da = isoLocalDay(a.next_follow_up_date) || ''
+      const db = isoLocalDay(b.next_follow_up_date) || ''
+      return db.localeCompare(da)
+    })
+  }
+
   return out
+}
+
+export function quotationFiltersActive(f: LocalQuotationFilters): boolean {
+  const poFiltered =
+    f.poBoundsMax > f.poBoundsMin &&
+    !isFullAmountRange(f.poBoundsMin, f.poBoundsMax, f.poAmountMin, f.poAmountMax)
+  return (
+    !!f.search.trim() ||
+    !!f.clientName.trim() ||
+    !!f.status ||
+    !!f.category ||
+    !!f.user ||
+    !!f.dateFrom ||
+    !!f.dateTo ||
+    !!f.followUp ||
+    poFiltered ||
+    f.archive !== 'active'
+  )
 }

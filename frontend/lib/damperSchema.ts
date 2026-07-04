@@ -6,8 +6,33 @@ export const DAMPER_CATALOG_PREFIX = 'fp_damper_'
 
 export const BUTTERFLY_DAMPER_KEY = 'fp_damper_butterfly'
 export const MULTI_LOUVER_DAMPER_KEY = 'fp_damper_multi_louver'
+export const SLIDE_GATE_DAMPER_KEY = 'fp_damper_slide_gate'
+export const GUILLOTINE_DAMPER_KEY = 'fp_damper_guillotine'
+export const DIVERTER_DAMPER_KEY = 'fp_damper_diverter'
+export const DISCHARGE_DAMPER_KEY = 'fp_damper_discharge'
 
-export const DAMPER_SHEET_KEYS = [BUTTERFLY_DAMPER_KEY, MULTI_LOUVER_DAMPER_KEY] as const
+export const DAMPER_SHEET_KEYS = [
+  BUTTERFLY_DAMPER_KEY,
+  MULTI_LOUVER_DAMPER_KEY,
+  SLIDE_GATE_DAMPER_KEY,
+  GUILLOTINE_DAMPER_KEY,
+  DIVERTER_DAMPER_KEY,
+  DISCHARGE_DAMPER_KEY,
+] as const
+
+/** Field key for the damper sub-type selector (Diverter / Discharge sheets). */
+export const DAMPER_TYPE_FIELD_KEY = 'damper_type'
+
+const DIVERTER_TYPE_OPTIONS = [
+  'T-Type Diverter Damper',
+  'Y-Type Diverter Damper',
+  'Poppet Type Diverter Damper',
+]
+
+const DISCHARGE_TYPE_OPTIONS = [
+  'Single Flap Discharge Damper',
+  'Double Flap Discharge Damper',
+]
 
 export type DamperInputType = 'select' | 'manual'
 
@@ -88,7 +113,24 @@ export function isDamperCatalogCategory(key: string | null | undefined): boolean
 export function damperSheetLabel(catalogKey: string): string {
   if (catalogKey === BUTTERFLY_DAMPER_KEY) return 'Butterfly Damper'
   if (catalogKey === MULTI_LOUVER_DAMPER_KEY) return 'Multi-Louver Damper'
+  if (catalogKey === SLIDE_GATE_DAMPER_KEY) return 'Slide Gate Damper'
+  if (catalogKey === GUILLOTINE_DAMPER_KEY) return 'Guillotine Damper'
+  if (catalogKey === DIVERTER_DAMPER_KEY) return 'Diverter Damper'
+  if (catalogKey === DISCHARGE_DAMPER_KEY) return 'Discharge Damper'
   return catalogKey.replace(/_/g, ' ')
+}
+
+/** Sub-type options shown in the "Damper Type" column (multi-variant sheets). */
+export function damperTypeVariantOptions(catalogKey: string): string[] {
+  if (catalogKey === DIVERTER_DAMPER_KEY) return DIVERTER_TYPE_OPTIONS
+  if (catalogKey === DISCHARGE_DAMPER_KEY) return DISCHARGE_TYPE_OPTIONS
+  return []
+}
+
+/** Values rendered in the matrix "Damper Type" cell (variants, or the sheet label). */
+export function damperTypeOptions(catalogKey: string): string[] {
+  const variants = damperTypeVariantOptions(catalogKey)
+  return variants.length > 0 ? variants : [damperSheetLabel(catalogKey)]
 }
 
 function field(
@@ -163,6 +205,17 @@ export function damperFieldsForKey(catalogKey: string): DamperFieldDef[] {
       ...sharedBodyFields(),
     ]
   }
+  if (catalogKey === SLIDE_GATE_DAMPER_KEY || catalogKey === GUILLOTINE_DAMPER_KEY) {
+    return [field('size', 'Size', { input_type: 'manual', required: false }), ...sharedBodyFields()]
+  }
+  const variants = damperTypeVariantOptions(catalogKey)
+  if (variants.length > 0) {
+    return [
+      field(DAMPER_TYPE_FIELD_KEY, 'Damper Type', { options: variants }),
+      field('size', 'Size', { input_type: 'manual', required: false }),
+      ...sharedBodyFields(),
+    ]
+  }
   return []
 }
 
@@ -209,6 +262,10 @@ export function listDamperSheets(): { key: string; label: string }[] {
   return [
     { key: BUTTERFLY_DAMPER_KEY, label: 'Butterfly Damper' },
     { key: MULTI_LOUVER_DAMPER_KEY, label: 'Multi-Louver Damper' },
+    { key: SLIDE_GATE_DAMPER_KEY, label: 'Slide Gate Damper' },
+    { key: GUILLOTINE_DAMPER_KEY, label: 'Guillotine Damper' },
+    { key: DIVERTER_DAMPER_KEY, label: 'Diverter Damper' },
+    { key: DISCHARGE_DAMPER_KEY, label: 'Discharge Damper' },
   ]
 }
 
@@ -223,7 +280,8 @@ export function damperSpecsComplete(
 }
 
 export function damperDisplayTitle(catalogKey: string, fieldValues: Record<string, string>): string {
-  const parts = [damperSheetLabel(catalogKey)]
+  const variant = fieldValues[DAMPER_TYPE_FIELD_KEY]?.trim()
+  const parts = [variant || damperSheetLabel(catalogKey)]
   const size = fieldValues.size?.trim()
   if (size) parts.push(size)
   return parts.join(' — ')
@@ -236,7 +294,9 @@ export type DamperMatrixColumn = {
 }
 
 export function damperMatrixColumns(catalogKey: string): DamperMatrixColumn[] {
-  const fields = damperFieldsForKey(catalogKey)
+  // The sub-type selector is rendered in the fixed "Damper Type" column, so it
+  // is excluded from the dynamic matrix columns to avoid a duplicate header.
+  const fields = damperFieldsForKey(catalogKey).filter((f) => f.key !== DAMPER_TYPE_FIELD_KEY)
   const columns: DamperMatrixColumn[] = []
   const groupOrder: string[] = []
   const byGroup = new Map<string, DamperFieldDef[]>()

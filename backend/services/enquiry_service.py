@@ -121,6 +121,17 @@ _DESC_FIELDS: list[tuple[str, str]] = [
     ("fitting_end_2_din_nut_moc", "Fitting End 2 Din Nut Moc"),
     ("fitting_end_2_swivel_nut_moc", "Fitting End 2 Swivel Nut Moc"),
     ("fitting_end_2_flange_nut_moc", "Fitting End 2 Flange Nut Moc"),
+    ("fitting", "Fitting"),
+    ("fitting_variant_type", "Fitting Variant Type"),
+    ("fitting_end_connection", "Fitting End Connection"),
+    ("fitting_size_mm", "Fitting Size Mm"),
+    ("fitting_hose_nipple_moc", "Fitting Hose Nipple Moc"),
+    ("fitting_hose_cap_moc", "Fitting Hose Cap Moc"),
+    ("fitting_sms_nut_moc", "Fitting Sms Nut Moc"),
+    ("fitting_tc_od", "Fitting Tc Od"),
+    ("fitting_din_nut_moc", "Fitting Din Nut Moc"),
+    ("fitting_swivel_nut_moc", "Fitting Swivel Nut Moc"),
+    ("fitting_flange_nut_moc", "Fitting Flange Nut Moc"),
     ("operator", "Operator"),
     ("operator_model", "Operator Model"),
     ("operator_size", "Operator Size"),
@@ -141,11 +152,77 @@ def _cascade_field_label(key: str) -> str:
     return key.replace("_", " ").title()
 
 
+_FITTING_SUFFIXES = (
+    "variant_type",
+    "end_connection",
+    "end_connection_1",
+    "end_connection_2",
+    "size_mm",
+    "hose_nipple_moc",
+    "hose_cap_moc",
+    "sms_nut_moc",
+    "tc_od",
+    "din_nut_moc",
+    "swivel_nut_moc",
+    "flange_nut_moc",
+)
+
+
+def _fitting_block_from_cascade(cascade: dict, prefix: str) -> dict[str, str]:
+    block: dict[str, str] = {}
+    for suffix in _FITTING_SUFFIXES:
+        key = f"{prefix}_{suffix}"
+        val = str(cascade.get(key) or "").strip()
+        if val:
+            block[suffix] = val
+    return block
+
+
+def _collapse_end_connections_in_cascade(cascade: dict) -> dict:
+    out = dict(cascade)
+    for prefix in ("fitting_end_1", "fitting_end_2", "fitting"):
+        ec1 = str(out.get(f"{prefix}_end_connection_1") or "").strip()
+        ec2 = str(out.get(f"{prefix}_end_connection_2") or "").strip()
+        if ec1 and ec2 and ec1 == ec2:
+            out[f"{prefix}_end_connection"] = ec1
+            out.pop(f"{prefix}_end_connection_1", None)
+            out.pop(f"{prefix}_end_connection_2", None)
+    return out
+
+
+def _collapse_duplicate_fitting_cascade(cascade: dict) -> dict:
+    out = _collapse_end_connections_in_cascade(cascade)
+    if str(out.get("fitting_end_1_qty") or "").strip() == "2":
+        return out
+
+    end1 = _fitting_block_from_cascade(out, "fitting_end_1")
+    end2 = _fitting_block_from_cascade(out, "fitting_end_2")
+    if end1 and end2 and end1 == end2:
+        for suffix in _FITTING_SUFFIXES:
+            out.pop(f"fitting_end_1_{suffix}", None)
+            out.pop(f"fitting_end_2_{suffix}", None)
+        out.pop("fitting_end_1", None)
+        out.pop("fitting_end_2", None)
+        for suffix, val in end1.items():
+            out[f"fitting_{suffix}"] = val
+        out["fitting"] = "Both ends (same type)"
+        return out
+
+    end1_summary = str(out.get("fitting_end_1") or "").strip()
+    end2_summary = str(out.get("fitting_end_2") or "").strip()
+    if end1_summary and end2_summary and end1_summary == end2_summary and not end1 and not end2:
+        out.pop("fitting_end_1", None)
+        out.pop("fitting_end_2", None)
+        out["fitting"] = end1_summary
+    return out
+
+
 def _build_structured_description(name: str, cascade: dict) -> str:
     lines = [f"Product : {name or 'Product'}"]
     seen: set[str] = set()
     if not isinstance(cascade, dict):
         cascade = {}
+    cascade = _collapse_duplicate_fitting_cascade(cascade)
     for key, label in _DESC_FIELDS:
         v = str(cascade.get(key) or "").strip()
         if not v:
@@ -969,6 +1046,9 @@ async def _resolve_manual_client_identity(body: dict, db: AsyncSession) -> dict:
     elif mode == "new":
         addr = (new_client.get("address_line1") or new_client.get("address") or "").strip() or None
         city = (new_client.get("city") or "").strip() or "Unknown"
+        state = (new_client.get("state") or "").strip()
+        if not state:
+            raise EnquiryParseError("State is required when creating a new client")
         company, branch = await create_company_with_branch(
             client_config="parth_valves",
             company_name=str(new_client.get("company_name") or "Unknown").strip(),
@@ -982,7 +1062,7 @@ async def _resolve_manual_client_identity(body: dict, db: AsyncSession) -> dict:
             phone=new_client.get("phone"),
             email=new_client.get("email"),
             city=city,
-            state=(new_client.get("state") or None),
+            state=state,
             pincode=(new_client.get("pincode") or None),
             address_line1=addr,
             country=str(new_client.get("country") or "India"),
@@ -1346,8 +1426,10 @@ async def process_manual_dropdown(
 ) -> dict:
     """Step 2 — add products to an existing enquiry and generate a quotation."""
     from services.client_service import (
+        build_customer_address_pdf_extra,
         client_for_export,
         increment_branch_enquiry_count,
+        get_branch_with_company,
         set_company_default_discount,
     )
     from services.erp_export_service import generate_enquiry_list_excel
@@ -1396,6 +1478,11 @@ async def process_manual_dropdown(
         raise EnquiryParseError("Invalid target enquiry id") from exc
 
     existing_enquiry = await get_enquiry(target_raw, db)
+    if normalize_enquiry_detail_type(existing_enquiry.enquiry_detail_type) != "complete":
+        raise EnquiryParseError(
+            "Quotation can only be generated when enquiry type is Complete. "
+            "Update the enquiry type before adding products."
+        )
     qcnt = (
         await db.execute(
             select(func.count()).select_from(Quotation).where(Quotation.enquiry_id == enquiry_uuid)
@@ -1559,7 +1646,11 @@ async def process_manual_dropdown(
     enquiry.matched_products = matched_products
     enquiry.status = "approved"
     enquiry.flow_type = "complete"
-    enquiry.enquiry_quote_status = "quoted"
+    quote_status_raw = body.get("enquiryQuoteStatus") or body.get("enquiry_quote_status") or "quoted"
+    quote_status = normalize_enquiry_quote_status(quote_status_raw)
+    if quote_status not in ("quoted", "partially_quoted"):
+        quote_status = "quoted"
+    enquiry.enquiry_quote_status = quote_status
     enquiry.company_id = company_id_uuid
     enquiry.branch_id = branch_id_uuid
     enquiry.raw_input = json.dumps(raw_payload, ensure_ascii=False)
@@ -1567,6 +1658,20 @@ async def process_manual_dropdown(
 
     quote_number = await allocate_quote_number(db)
     quotation_id = uuid.uuid4()
+
+    pdf_display_overrides: dict | None = None
+    if branch_id_uuid is not None:
+        branch_row = await get_branch_with_company(str(branch_id_uuid), db)
+        if branch_row is not None:
+            address_extra = build_customer_address_pdf_extra(
+                address_line1=branch_row.address_line1,
+                city=branch_row.city,
+                state=branch_row.state,
+                pincode=branch_row.pincode,
+            )
+            if address_extra:
+                pdf_display_overrides = {"company_left_extra": address_extra}
+
     quotation_data = {
         "quote_number": quote_number,
         "client_name": client_name,
@@ -1606,6 +1711,8 @@ async def process_manual_dropdown(
             "department": str(getattr(employee_for_quote, "department", None) or "").strip(),
             "designation": str(getattr(employee_for_quote, "designation", None) or "").strip(),
         }
+    if pdf_display_overrides:
+        quotation_data["pdf_display_overrides"] = pdf_display_overrides
 
     quotation = Quotation(
         id=quotation_id,
@@ -1631,6 +1738,7 @@ async def process_manual_dropdown(
         + timedelta(days=max(0, int(client_json.get("quote_validity_days", 15)))),
         status="ongoing",
         notes=notes or None,
+        pdf_display_overrides=pdf_display_overrides,
         created_by_user_id=cb_uid,
         created_by_name=cb_name,
         created_by_phone=prepared_by_phone,

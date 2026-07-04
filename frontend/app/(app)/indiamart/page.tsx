@@ -10,17 +10,23 @@ import {
   HandMetal,
   Loader2,
   RefreshCw,
-  Search,
   Store,
 } from 'lucide-react'
 
 import IndiaMartPickupSheet from '@/components/indiamart/IndiaMartPickupSheet'
+import IndiaMartListingFilters from '@/components/indiamart/IndiaMartListingFilters'
 import PageShell from '@/components/layout/PageShell'
 import EmptyState from '@/components/ui/EmptyState'
 import { Button, buttonVariants } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import { indiamartApi } from '@/lib/api'
+import {
+  collectIndiaMartFilterOptions,
+  DEFAULT_INDIAMART_FILTERS,
+  filterIndiaMartLocal,
+  indiaMartFiltersActive,
+  type LocalIndiaMartFilters,
+} from '@/lib/filterIndiaMartLocal'
 import { useIndiaMartQueries } from '@/lib/queries'
 import { cn } from '@/lib/utils'
 import type { IndiaMartPickupResponse, IndiaMartQueryItem } from '@/types'
@@ -60,7 +66,7 @@ function rowTone(row: IndiaMartQueryItem): string {
 export default function IndiaMartPage() {
   const router = useRouter()
   const qc = useQueryClient()
-  const [search, setSearch] = useState('')
+  const [filters, setFilters] = useState<LocalIndiaMartFilters>(DEFAULT_INDIAMART_FILTERS)
   const [showArchived, setShowArchived] = useState(false)
   const [pickupTarget, setPickupTarget] = useState<IndiaMartQueryItem | null>(null)
   const [pickupOpen, setPickupOpen] = useState(false)
@@ -77,29 +83,17 @@ export default function IndiaMartPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['indiamart-queries'] }),
   })
 
-  const rows = useMemo(() => {
-    const list = data?.queries ?? []
-    const q = search.trim().toLowerCase()
-    if (!q) return list
-    return list.filter((row) => {
-      const blob = [
-        row.sender_name,
-        row.sender_company,
-        row.sender_email,
-        row.sender_mobile,
-        row.query_product_name,
-        row.query_message,
-        row.unique_query_id,
-        row.query_type_label,
-        row.picked_up_by_name,
-        row.enquiry_number,
-      ]
-        .filter(Boolean)
-        .join(' ')
-        .toLowerCase()
-      return blob.includes(q)
-    })
-  }, [data?.queries, search])
+  const allRows = data?.queries ?? []
+  const filterOptions = useMemo(() => collectIndiaMartFilterOptions(allRows), [allRows])
+
+  const rows = useMemo(
+    () => filterIndiaMartLocal(allRows, filters),
+    [allRows, filters],
+  )
+
+  const hasActiveFilters = indiaMartFiltersActive(filters)
+
+  const clearFilters = () => setFilters(DEFAULT_INDIAMART_FILTERS)
 
   const openPickup = (row: IndiaMartQueryItem) => {
     if (!row.can_pickup) return
@@ -150,27 +144,20 @@ export default function IndiaMartPage() {
         </span>
       </div>
 
-      <div className="mb-4 flex flex-wrap items-center gap-3">
-        <div className="relative min-w-[220px] flex-1 max-w-md">
-          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-surface-muted" />
-          <Input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search buyer, company, product, enquiry no…"
-            className="pl-9"
-          />
-        </div>
-        <label className="flex items-center gap-2 text-[13px] text-gray-700">
-          <input
-            type="checkbox"
-            checked={showArchived}
-            onChange={(e) => setShowArchived(e.target.checked)}
-            className="rounded border-gray-300"
-          />
-          Show archived
-        </label>
-        <span className="text-[12px] text-surface-muted">{rows.length} lead{rows.length === 1 ? '' : 's'}</span>
-      </div>
+      <IndiaMartListingFilters
+        filters={filters}
+        onChange={setFilters}
+        queryTypeOptions={filterOptions.queryTypes}
+        showArchived={showArchived}
+        onShowArchivedChange={setShowArchived}
+        onClear={clearFilters}
+        hasActiveFilters={hasActiveFilters}
+      />
+
+      <p className="mb-3 text-[12px] text-surface-muted">
+        {rows.length} lead{rows.length === 1 ? '' : 's'}
+        {hasActiveFilters && allRows.length !== rows.length ? ` of ${allRows.length}` : ''}
+      </p>
 
       {isPending ? (
         <div className="space-y-2">
@@ -181,8 +168,12 @@ export default function IndiaMartPage() {
       ) : rows.length === 0 ? (
         <EmptyState
           icon={Store}
-          title="No IndiaMart leads yet"
-          description="Leads appear here after the first sync. Use Sync now or wait for the background job."
+          title={hasActiveFilters ? 'No matching leads' : 'No IndiaMart leads yet'}
+          description={
+            hasActiveFilters
+              ? 'Try adjusting search or filters.'
+              : 'Leads appear here after the first sync. Use Sync now or wait for the background job.'
+          }
         />
       ) : (
         <div className="overflow-hidden rounded-xl border border-[#E2E6DC] shadow-[0_1px_4px_rgba(0,0,0,0.06)]">

@@ -1143,17 +1143,12 @@ async def generate_quotation_pdf(
             el.append(note_tbl)
 
         el.append(Spacer(1, 6 * mm))
-        contact_line = f"If you have any questions about this quote, please contact {escape(str(prep_name))}"
-        footer_phone = prep_phone or phone
-        if footer_phone:
-            contact_line += f", {escape(str(footer_phone))}"
-        if prep_email:
-            contact_line += f", {escape(str(prep_email))}"
-        contact_line += "."
+        contact_line = ""
         if isinstance(pdf_ov, dict) and str(pdf_ov.get("footer_contact") or "").strip():
             contact_line = escape(str(pdf_ov.get("footer_contact") or "").strip())
-        el.append(Paragraph(contact_line, ParagraphStyle("Contact", parent=s_normal, fontSize=8.5)))
-        el.append(Spacer(1, 4 * mm))
+        if contact_line:
+            el.append(Paragraph(contact_line, ParagraphStyle("Contact", parent=s_normal, fontSize=8.5)))
+            el.append(Spacer(1, 4 * mm))
         thanks_line = "Thank You For Your Business!"
         if isinstance(pdf_ov, dict) and str(pdf_ov.get("footer_thanks") or "").strip():
             thanks_line = str(pdf_ov.get("footer_thanks") or "").strip()

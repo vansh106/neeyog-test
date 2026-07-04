@@ -117,6 +117,7 @@ function clientFieldsComplete(
     (newClient.company_name || '').trim().length >= 2 &&
     !!(newClient.branch_name || '').trim() &&
     !!(newClient.city || '').trim() &&
+    !!(newClient.state || '').trim() &&
     !!(newClient.contact_name || '').trim() &&
     ph.length === 10 &&
     (!(newClient.email || '').trim() || isValidEmail((newClient.email || '').trim()))
@@ -332,6 +333,7 @@ export function useManualClientPicker() {
       if ((newClient.company_name || '').trim().length < 2) e.company_name = 'Company name is required'
       if (!(newClient.branch_name || '').trim()) e.branch_name = 'Branch name is required'
       if (!(newClient.city || '').trim()) e.city = 'City is required'
+      if (!(newClient.state || '').trim()) e.state = 'State is required'
       if (!(newClient.contact_name || '').trim()) e.contact_name = 'Contact name is required'
       const ph = cleanPhone(newClient.phone || '')
       if (ph.length !== 10) e.phone = 'Enter a valid 10-digit phone number'

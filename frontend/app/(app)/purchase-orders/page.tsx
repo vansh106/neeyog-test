@@ -3,17 +3,25 @@
 import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Trash2, Eye, Plus, Search, ClipboardList } from 'lucide-react'
+import { Trash2, Eye, Plus, ClipboardList } from 'lucide-react'
 import PageShell from '@/components/layout/PageShell'
 import EmptyState from '@/components/ui/EmptyState'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Button, buttonVariants } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import CreatePurchaseOrderDialog from '@/components/purchase-orders/CreatePurchaseOrderDialog'
 import DeletePurchaseOrderDialog from '@/components/purchase-orders/DeletePurchaseOrderDialog'
 import EnterPoSoNumberDialog from '@/components/purchase-orders/EnterPoSoNumberDialog'
+import PurchaseOrderListingFilters from '@/components/purchase-orders/PurchaseOrderListingFilters'
 import ListingPagination from '@/components/listing/ListingPagination'
 import { usePurchaseOrdersListingDataset } from '@/lib/queries'
+import {
+  collectPurchaseOrderFilterOptions,
+  DEFAULT_PO_FILTERS,
+  filterPurchaseOrdersLocal,
+  purchaseOrderAmountBounds,
+  purchaseOrderFiltersActive,
+  type LocalPurchaseOrderFilters,
+} from '@/lib/filterPurchaseOrdersLocal'
 import { purchaseOrdersApi } from '@/lib/api'
 import { invalidateQuotationCrmCaches } from '@/lib/invalidateQuotationCrmCaches'
 import { Permissions } from '@/lib/permissions'
@@ -56,15 +64,29 @@ export default function PurchaseOrdersPage() {
   const canDelete = useAuthStore((s) => s.hasPermission(Permissions.DELETE_PURCHASE_ORDERS))
   const [createOpen, setCreateOpen] = useState(false)
   const [soEntryTarget, setSoEntryTarget] = useState<PurchaseOrderListItem | null>(null)
-  const [search, setSearch] = useState('')
-  const [clientFilter, setClientFilter] = useState('')
-  const [typeFilter, setTypeFilter] = useState('')
+  const [filters, setFilters] = useState<LocalPurchaseOrderFilters>(DEFAULT_PO_FILTERS)
   const [deleteTarget, setDeleteTarget] = useState<PurchaseOrderListItem | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const [page, setPage] = useState(1)
 
   const { data, isPending } = usePurchaseOrdersListingDataset(2000)
   const rows = data ?? []
+
+  const amountBounds = useMemo(() => purchaseOrderAmountBounds(rows), [rows])
+  const filterOptions = useMemo(() => collectPurchaseOrderFilterOptions(rows), [rows])
+
+  useEffect(() => {
+    setFilters((prev) => {
+      if (prev.boundsMin === amountBounds.min && prev.boundsMax === amountBounds.max) return prev
+      return {
+        ...prev,
+        boundsMin: amountBounds.min,
+        boundsMax: amountBounds.max,
+        amountMin: amountBounds.min,
+        amountMax: amountBounds.max,
+      }
+    })
+  }, [amountBounds.min, amountBounds.max])
 
   const deleteMut = useMutation({
     mutationFn: (poId: string) => purchaseOrdersApi.delete<{ po_id: string; deleted: boolean }>(poId),
@@ -81,27 +103,27 @@ export default function PurchaseOrdersPage() {
     },
   })
 
-  const list = useMemo(() => {
-    return rows.filter((po) => {
-      const q = search.trim().toLowerCase()
-      if (q) {
-        const blob = `${po.po_number} ${po.client_name} ${po.quote_number ?? ''} ${po.so_number ?? ''} ${po.item_desc_short}`.toLowerCase()
-        if (!blob.includes(q)) return false
-      }
-      if (clientFilter && !po.client_name.toLowerCase().includes(clientFilter.toLowerCase())) return false
-      if (typeFilter === 'quoted' && po.po_type !== 'quoted') return false
-      if (typeFilter === 'non_quoted' && po.po_type !== 'non_quoted') return false
-      return true
-    })
-  }, [rows, search, clientFilter, typeFilter])
+  const list = useMemo(() => filterPurchaseOrdersLocal(rows, filters), [rows, filters])
 
   useEffect(() => {
     setPage(1)
-  }, [search, clientFilter, typeFilter])
+  }, [filters])
 
   const pagedList = useMemo(() => listingPageSlice(list, page), [list, page])
 
-  const totalValue = list.reduce((sum, po) => sum + po.total_amount, 0)
+  const totalValue = list.reduce((sum, po) => sum + po.subtotal, 0)
+
+  const clearFilters = () => {
+    setFilters({
+      ...DEFAULT_PO_FILTERS,
+      boundsMin: amountBounds.min,
+      boundsMax: amountBounds.max,
+      amountMin: amountBounds.min,
+      amountMax: amountBounds.max,
+    })
+  }
+
+  const hasActiveFilters = purchaseOrderFiltersActive(filters)
 
   return (
     <PageShell
@@ -116,32 +138,14 @@ export default function PurchaseOrdersPage() {
         ) : null
       }
     >
-      <div className="mb-4 flex flex-wrap items-end gap-3">
-        <div className="relative min-w-[200px] flex-1">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#8A9488]" />
-          <Input
-            className="pl-9"
-            placeholder="Search PO, client, quote…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </div>
-        <Input
-          className="w-44"
-          placeholder="Client name"
-          value={clientFilter}
-          onChange={(e) => setClientFilter(e.target.value)}
-        />
-        <select
-          className="h-10 rounded-md border border-[#E2E6DC] bg-white px-3 text-[13px]"
-          value={typeFilter}
-          onChange={(e) => setTypeFilter(e.target.value)}
-        >
-          <option value="">All types</option>
-          <option value="quoted">Quoted</option>
-          <option value="non_quoted">Non-quoted</option>
-        </select>
-      </div>
+      <PurchaseOrderListingFilters
+        filters={filters}
+        onChange={setFilters}
+        categoryOptions={filterOptions.categories}
+        userOptions={filterOptions.users}
+        onClear={clearFilters}
+        hasActiveFilters={hasActiveFilters}
+      />
 
       <div className="mb-3 text-[13px] text-surface-muted">
         {list.length} PO{list.length === 1 ? '' : 's'} · Total {formatCurrency(totalValue)}
@@ -177,8 +181,12 @@ export default function PurchaseOrdersPage() {
                 <td colSpan={PO_LIST_COL_COUNT}>
                   <EmptyState
                     icon={ClipboardList}
-                    title="No purchase orders"
-                    description="Create your first PO to get started."
+                    title={hasActiveFilters ? 'No matching purchase orders' : 'No purchase orders'}
+                    description={
+                      hasActiveFilters
+                        ? 'Try adjusting search or filters.'
+                        : 'Create your first PO to get started.'
+                    }
                   />
                 </td>
               </tr>
@@ -286,7 +294,7 @@ function PoRow({
         {po.item_desc_short}
       </td>
       <td className="px-4 py-3 text-right">
-        <p className="font-mono font-medium">{formatCurrency(po.total_amount)}</p>
+        <p className="font-mono font-medium">{formatCurrency(po.subtotal)}</p>
       </td>
       <td className="px-4 py-3">
         <p className="font-mono text-[12px] text-gray-900">

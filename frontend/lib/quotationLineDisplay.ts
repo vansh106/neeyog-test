@@ -1,11 +1,13 @@
 import type { QuotationLineItem, QuotationPdfDisplayOverrides } from '@/types'
+import { collapseDuplicateFittingDescription } from '@/lib/hoseFittingDescription'
 import { stripSupplierNamesFromText } from '@/lib/stripSupplierFromQuotationText'
 
 /** Omit spec lines with no value (legacy quotes used ``----`` placeholders). */
 export function sanitizeQuotationDescription(desc: string, supplierNames: string[] = []): string {
   if (!desc) return ''
   const sep = ' : '
-  return desc
+  const deduped = collapseDuplicateFittingDescription(desc)
+  return deduped
     .split('\n')
     .filter((line) => {
       const i = line.indexOf(sep)

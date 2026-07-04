@@ -75,6 +75,7 @@ class PurchaseOrderListItem(BaseModel):
     quotation_id: str | None = None
     primary_category: str
     item_desc_short: str
+    subtotal: float
     total_amount: float
     so_number: str | None = None
     so_date: str | None = None
@@ -190,6 +191,7 @@ async def handle_list_purchase_orders(
             "quotation_id": str(po.quotation_id) if po.quotation_id else None,
             "primary_category": po.primary_category,
             "item_desc_short": po.item_desc_short,
+            "subtotal": float(po.subtotal or 0),
             "total_amount": po.total_amount,
             "so_number": po.so_number,
             "so_date": po.so_date.isoformat() if po.so_date else None,

@@ -217,8 +217,8 @@ export default function ClientsTab() {
     setSaving(true)
     try {
       if (companySheet === 'add') {
-        if (!bf.city.trim() || !bf.branch_name.trim()) {
-          setErr('Branch name and city are required')
+        if (!bf.city.trim() || !bf.branch_name.trim() || !bf.state.trim()) {
+          setErr('Branch name, city, and state are required')
           setSaving(false)
           return
         }
@@ -233,7 +233,7 @@ export default function ClientsTab() {
           phone: bf.phone.trim() || null,
           email: bf.email.trim() || null,
           city: bf.city.trim(),
-          state: bf.state.trim() || null,
+          state: bf.state.trim(),
           pincode: bf.pincode.trim() || null,
           address_line1: bf.address_line1.trim() || null,
           country: bf.country.trim() || 'India',
@@ -261,7 +261,10 @@ export default function ClientsTab() {
   }
 
   async function submitBranchSheet() {
-    if (!detail || !bf.branch_name.trim() || !bf.city.trim()) return
+    if (!detail || !bf.branch_name.trim() || !bf.city.trim() || !bf.state.trim()) {
+      if (branchSheet !== null) setErr('Branch name, city, and state are required')
+      return
+    }
     setSaving(true)
     try {
       if (branchSheet === 'add') {
@@ -272,7 +275,7 @@ export default function ClientsTab() {
           phone: bf.phone.trim() || null,
           email: bf.email.trim() || null,
           city: bf.city.trim(),
-          state: bf.state.trim() || null,
+          state: bf.state.trim(),
           pincode: bf.pincode.trim() || null,
           address_line1: bf.address_line1.trim() || null,
           country: bf.country.trim() || 'India',
@@ -805,7 +808,7 @@ export default function ClientsTab() {
                   </div>
                   <div className="grid grid-cols-2 gap-2">
                     <div>
-                      <label className="text-[11px] font-medium uppercase text-surface-muted">State</label>
+                      <label className="text-[11px] font-medium uppercase text-surface-muted">State *</label>
                       <Input className="mt-1" value={bf.state} onChange={(e) => setBf({ ...bf, state: e.target.value })} />
                     </div>
                     <div>
@@ -868,7 +871,7 @@ export default function ClientsTab() {
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div>
-                <label className="text-[11px] font-medium uppercase text-surface-muted">State</label>
+                <label className="text-[11px] font-medium uppercase text-surface-muted">State *</label>
                 <Input className="mt-1" value={bf.state} onChange={(e) => setBf({ ...bf, state: e.target.value })} />
               </div>
               <div>

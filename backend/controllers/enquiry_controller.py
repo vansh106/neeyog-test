@@ -143,7 +143,7 @@ class ManualNewClientRequest(BaseModel):
     phone: str = ""
     email: str = ""
     city: str = ""
-    state: str | None = None
+    state: str = Field(..., min_length=1)
     pincode: str | None = None
     address_line1: str | None = None
     country: str = "India"
@@ -262,6 +262,7 @@ class ManualDropdownProcessRequest(BaseModel):
     #: Branch contact person for this quote (must belong to selected branch unless newClientEmployee creates one).
     client_employee_id: str | None = Field(None, alias="clientEmployeeId")
     new_client_employee: ManualNewClientEmployeeRequest | None = Field(None, alias="newClientEmployee")
+    enquiry_quote_status: str = Field("quoted", alias="enquiryQuoteStatus")
 
     @model_validator(mode="after")
     def validate_fields(self):
@@ -276,6 +277,10 @@ class ManualDropdownProcessRequest(BaseModel):
             raise ValueError("At least one line item is required")
         if not (self.target_enquiry_id or "").strip():
             raise ValueError("targetEnquiryId is required")
+        qs = normalize_enquiry_quote_status(self.enquiry_quote_status)
+        if qs not in ("quoted", "partially_quoted"):
+            raise ValueError("enquiryQuoteStatus must be 'quoted' or 'partially_quoted'")
+        self.enquiry_quote_status = qs
         return self
 
 

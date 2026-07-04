@@ -13,7 +13,12 @@ import { ClientVerificationPanel } from '@/components/upload/ClientVerificationP
 import ManualEntryForm from '@/components/upload/ManualEntryForm'
 import { useEnquiry } from '@/lib/queries'
 import EnquiryProductNotesPanel from '@/components/enquiries/EnquiryProductNotesPanel'
-import { isEnquiryDetailTypeLocked } from '@/lib/enquiryDetailType'
+import EnquiryListDetailTypeEditor from '@/components/enquiries/EnquiryListDetailTypeEditor'
+import {
+  canGenerateQuotationFromEnquiry,
+  enquiryDetailTypeLabel,
+  isEnquiryDetailTypeLocked,
+} from '@/lib/enquiryDetailType'
 import EnquiryManualLineItemsTable, {
   parseManualLineItemsFromParsed,
 } from '@/components/enquiries/EnquiryManualLineItemsTable'
@@ -120,6 +125,7 @@ export default function EnquiryDetailPage() {
   const reasoningSteps = useMemo(() => toReasoningSteps(ext?.ai_reasoning ?? null), [ext?.ai_reasoning])
 
   const notesReadOnly = isEnquiryDetailTypeLocked(ext?.enquiry_detail_type)
+  const canGenerateQuote = canGenerateQuotationFromEnquiry(ext?.enquiry_detail_type)
 
   const [clientContext, setClientContext] = useState<ClientVerificationContext | null>(null)
   const [pdfDownloadBusy, setPdfDownloadBusy] = useState(false)
@@ -309,6 +315,16 @@ export default function EnquiryDetailPage() {
     return inputType === 'manual_dropdown' || inputType === 'indiamart' || flow === 'manual'
   }, [ext?.flow_type, ext?.input_type, quoteId])
 
+  const showManualQuoteForm = isManualPendingQuote && canGenerateQuote
+  const showQuoteBlockedNotice = isManualPendingQuote && !canGenerateQuote
+
+  useEffect(() => {
+    if (!canGenerateQuote) {
+      setShowManualCompletion(false)
+      setFullManualOverride(false)
+    }
+  }, [canGenerateQuote])
+
   const matcherClientHint = useMemo(() => {
     if (!matcher) return null
     const c = matcher.client
@@ -419,6 +435,7 @@ export default function EnquiryDetailPage() {
       try {
         const res = await processManualDropdown({ ...form, targetEnquiryId: id })
         await qc.invalidateQueries({ queryKey: ['enquiry', id] })
+        await qc.invalidateQueries({ queryKey: ['enquiries'] })
         setShowManualCompletion(false)
         if (res.quotation_id) {
           router.push(`/quotations/${res.quotation_id}`)
@@ -622,7 +639,23 @@ export default function EnquiryDetailPage() {
             <ClientVerificationPanel />
           )}
 
-          {isManualPendingQuote && (
+          {showQuoteBlockedNotice && (
+            <section className="rounded-xl border border-amber-200 bg-amber-50/80 p-5 shadow-sm">
+              <h2 className="text-[15px] font-semibold text-amber-950">Quotation not available yet</h2>
+              <p className="mt-1 text-[13px] leading-relaxed text-amber-950/90">
+                This enquiry is marked as{' '}
+                <span className="font-medium">{enquiryDetailTypeLabel(ext?.enquiry_detail_type)}</span>.
+                Set the enquiry type to <span className="font-medium">Complete</span> before configuring
+                products and generating a quotation.
+              </p>
+              <div className="mt-4 flex flex-wrap items-center gap-3">
+                <span className="text-[12px] font-medium text-amber-950">Enquiry type</span>
+                <EnquiryListDetailTypeEditor enquiryId={id} value={ext?.enquiry_detail_type} />
+              </div>
+            </section>
+          )}
+
+          {showManualQuoteForm && (
             <section className="rounded-xl border border-brand-green-200 bg-white p-5 shadow-sm">
               <h2 className="text-[15px] font-semibold text-gray-900">Add products &amp; generate quotation</h2>
               <p className="mt-1 text-[13px] text-surface-muted">
@@ -700,31 +733,40 @@ export default function EnquiryDetailPage() {
                     </ul>
                   )}
                   <div className="mt-4 flex flex-col gap-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setFullManualOverride(false)
-                        setShowManualCompletion((v) => !v)
-                      }}
-                      className={buttonVariants({
-                        variant: 'default',
-                        size: 'sm',
-                        className: 'w-full justify-center bg-brand-green-600 hover:bg-brand-green-700',
-                      })}
-                    >
-                      {showManualCompletion ? 'Hide completion form' : 'Complete the product'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setFullManualOverride(true)
-                        setMatcherSeedVersion((n) => n + 1)
-                        setShowManualCompletion(true)
-                      }}
-                      className={buttonVariants({ variant: 'outline', size: 'sm', className: 'w-full' })}
-                    >
-                      Wrong product — full manual entry
-                    </button>
+                    {canGenerateQuote ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setFullManualOverride(false)
+                            setShowManualCompletion((v) => !v)
+                          }}
+                          className={buttonVariants({
+                            variant: 'default',
+                            size: 'sm',
+                            className: 'w-full justify-center bg-brand-green-600 hover:bg-brand-green-700',
+                          })}
+                        >
+                          {showManualCompletion ? 'Hide completion form' : 'Complete the product'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setFullManualOverride(true)
+                            setMatcherSeedVersion((n) => n + 1)
+                            setShowManualCompletion(true)
+                          }}
+                          className={buttonVariants({ variant: 'outline', size: 'sm', className: 'w-full' })}
+                        >
+                          Wrong product — full manual entry
+                        </button>
+                      </>
+                    ) : (
+                      <p className="rounded-lg border border-amber-200 bg-amber-50/90 px-3 py-2 text-[12px] leading-relaxed text-amber-950/90">
+                        Set enquiry type to <span className="font-medium">Complete</span> in the panel
+                        below before completing the product or generating a quotation.
+                      </p>
+                    )}
                     <button
                       type="button"
                       onClick={() => void openRevertDraft()}
@@ -739,7 +781,7 @@ export default function EnquiryDetailPage() {
             </section>
           )}
 
-          {showMatcherRail && showManualCompletion && (
+          {showMatcherRail && showManualCompletion && canGenerateQuote && (
             <section className="rounded-xl border border-surface-border bg-white p-4 shadow-sm max-h-[min(78vh,920px)] overflow-y-auto">
               {manualError && <p className="mb-3 text-[12px] text-red-600">{manualError}</p>}
               <ManualEntryForm
@@ -757,6 +799,19 @@ export default function EnquiryDetailPage() {
                 initialFollowUpDate={ext?.next_follow_up_date}
                 matcherSeedVersion={matcherSeedVersion}
               />
+            </section>
+          )}
+
+          {!quoteId && (
+            <section className="rounded-xl border border-surface-border bg-white p-5 shadow-sm">
+              <h2 className="text-[14px] font-semibold text-gray-900">Enquiry type</h2>
+              <p className="mt-1 text-[12px] leading-relaxed text-surface-muted">
+                Product configuration and quotation generation are available only when the enquiry type
+                is Complete.
+              </p>
+              <div className="mt-3">
+                <EnquiryListDetailTypeEditor enquiryId={id} value={ext?.enquiry_detail_type} />
+              </div>
             </section>
           )}
 

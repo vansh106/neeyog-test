@@ -48,6 +48,36 @@ class ClientExportAdapter:
         )
 
 
+def build_customer_address_pdf_extra(
+    *,
+    address_line1: str | None = None,
+    city: str | None = None,
+    state: str | None = None,
+    pincode: str | None = None,
+) -> list[dict[str, str]]:
+    """Build quotation PDF customer address rows (company_left_extra)."""
+    rows: list[dict[str, str]] = []
+    addr = (address_line1 or "").strip()
+    if addr:
+        rows.append({"label": "Address", "value": addr})
+
+    city_s = (city or "").strip()
+    state_s = (state or "").strip()
+    pin_s = (pincode or "").strip()
+    if city_s or pin_s or state_s:
+        if city_s and pin_s:
+            loc = f"{city_s} – {pin_s}"
+        elif city_s:
+            loc = city_s
+        else:
+            loc = pin_s
+        if state_s:
+            loc = f"{loc}, {state_s}" if loc else state_s
+        if loc:
+            rows.append({"label": "", "value": loc})
+    return rows
+
+
 DUMMY_CLIENTS: list[dict] = [
     {
         "id": "dummy-001",

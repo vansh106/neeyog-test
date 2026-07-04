@@ -14,6 +14,8 @@ import { useSheetDefaultSuppliers } from '@/lib/queries'
 import { resolveSupplierFromSheetDefaults } from '@/lib/sheetDefaultSupplier'
 import { isTemporaryCatalogCategory } from '@/lib/configuratorProductFlow'
 import { ValveConfigurator, CompletedProductCard } from '@/components/configurator/ValveConfigurator'
+import QuotationCompletenessDialog from '@/components/enquiries/QuotationCompletenessDialog'
+import type { EnquiryQuoteStatus } from '@/lib/enquiryQuoteStatus'
 import {
   assemblyLabel,
   assemblyPartComponentKey,
@@ -621,6 +623,8 @@ export default function ManualEntryForm({
     initialFollowUpDate ? initialFollowUpDate.slice(0, 10) : '',
   )
   const [nextFollowUpNote, setNextFollowUpNote] = useState('')
+  const [quoteCompletenessOpen, setQuoteCompletenessOpen] = useState(false)
+  const [pendingQuotationForm, setPendingQuotationForm] = useState<ManualEnquiryForm | null>(null)
   const [productNotes, setProductNotes] = useState<ProductNoteEntry[]>(() =>
     initProductNotesFromPrefill(prefillNotesFromEnquiry),
   )
@@ -1220,6 +1224,7 @@ export default function ManualEntryForm({
         if ((newClient.company_name || '').trim().length < 2) e.company_name = 'Company name is required'
         if (!(newClient.branch_name || '').trim()) e.branch_name = 'Branch name is required'
         if (!(newClient.city || '').trim()) e.city = 'City is required'
+        if (!(newClient.state || '').trim()) e.state = 'State is required'
         if (!(newClient.contact_name || '').trim()) e.contact_name = 'Contact name is required'
         const ph = cleanPhone(newClient.phone || '')
         if (ph.length !== 10) e.phone = 'Enter a valid 10-digit phone number'
@@ -1361,12 +1366,7 @@ export default function ManualEntryForm({
     return base
   }
 
-  async function submit() {
-    if (!validate()) return
-    if (stage === 'client') {
-      onCreateEnquiry?.(buildClientPayload())
-      return
-    }
+  function buildQuotationForm(): ManualEnquiryForm {
     const form: ManualEnquiryForm = {
       ...(targetEnquiryId ? { targetEnquiryId } : {}),
       clientMode,
@@ -1447,6 +1447,10 @@ export default function ManualEntryForm({
         designation: inlineNewEmployeeDesignation.trim() || undefined,
       }
     }
+    return form
+  }
+
+  function submitQuotationForm(form: ManualEnquiryForm) {
     if (typeof window !== 'undefined' && typeof console !== 'undefined') {
       console.log(
         '[ManualEntryForm] buildEmailText:\n' +
@@ -1461,6 +1465,26 @@ export default function ManualEntryForm({
       )
     }
     onSubmitManual(form)
+  }
+
+  function submit() {
+    if (!validate()) return
+    if (stage === 'client') {
+      onCreateEnquiry?.(buildClientPayload())
+      return
+    }
+    const form = buildQuotationForm()
+    if (targetEnquiryId) {
+      setPendingQuotationForm(form)
+      setQuoteCompletenessOpen(true)
+      return
+    }
+    submitQuotationForm(form)
+  }
+
+  function confirmQuoteCompleteness(status: Extract<EnquiryQuoteStatus, 'quoted' | 'partially_quoted'>) {
+    if (!pendingQuotationForm || isProcessing) return
+    submitQuotationForm({ ...pendingQuotationForm, enquiryQuoteStatus: status })
   }
 
   const submitLabel =
@@ -1739,7 +1763,7 @@ export default function ManualEntryForm({
                             onChange={(e) => setInlineBranch({ ...inlineBranch, email: e.target.value })}
                           />
                           <Input
-                            placeholder="State"
+                            placeholder="State *"
                             value={inlineBranch.state}
                             onChange={(e) => setInlineBranch({ ...inlineBranch, state: e.target.value })}
                             className="sm:col-span-1"
@@ -1762,7 +1786,7 @@ export default function ManualEntryForm({
                             size="sm"
                             disabled={addBranchSaving}
                             onClick={async () => {
-                              if (!inlineBranch.branch_name.trim() || !inlineBranch.city.trim()) return
+                              if (!inlineBranch.branch_name.trim() || !inlineBranch.city.trim() || !inlineBranch.state.trim()) return
                               setAddBranchSaving(true)
                               try {
                                 await clientsApi.addBranch(selectedCompany.id, {
@@ -1772,7 +1796,7 @@ export default function ManualEntryForm({
                                   phone: inlineBranch.phone.trim() || null,
                                   email: inlineBranch.email.trim() || null,
                                   city: inlineBranch.city.trim(),
-                                  state: inlineBranch.state.trim() || null,
+                                  state: inlineBranch.state.trim(),
                                   pincode: inlineBranch.pincode.trim() || null,
                                   address_line1: inlineBranch.address_line1.trim() || null,
                                   country: inlineBranch.country.trim() || 'India',
@@ -2147,12 +2171,15 @@ export default function ManualEntryForm({
                   {errors.city && <p className="text-[12px] text-red-600">{errors.city}</p>}
                 </div>
                 <div>
-                  <div className="text-[10px] font-medium uppercase tracking-wide text-[#8A9488]">State</div>
+                  <div className="text-[10px] font-medium uppercase tracking-wide text-[#8A9488]">
+                    State<span className="text-red-600"> *</span>
+                  </div>
                   <Input
                     value={newClient.state}
                     onChange={(e) => setNewClient({ ...newClient, state: e.target.value })}
-                    className="mt-1 h-10"
+                    className={cn('mt-1 h-10', errors.state && 'border-red-300')}
                   />
+                  {errors.state && <p className="text-[12px] text-red-600">{errors.state}</p>}
                 </div>
                 <div>
                   <div className="text-[10px] font-medium uppercase tracking-wide text-[#8A9488]">Pincode</div>
@@ -2613,6 +2640,18 @@ export default function ManualEntryForm({
           {submitLabel}
         </Button>
       </div>
+
+      <QuotationCompletenessDialog
+        open={quoteCompletenessOpen}
+        onOpenChange={(open) => {
+          if (!open && !isProcessing) {
+            setQuoteCompletenessOpen(false)
+            setPendingQuotationForm(null)
+          }
+        }}
+        onConfirm={confirmQuoteCompleteness}
+        busy={isProcessing}
+      />
     </div>
   )
 }

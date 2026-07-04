@@ -257,7 +257,7 @@ export default function ManualClientDetailsSection({
                           onChange={(e) => setInlineBranch({ ...inlineBranch, email: e.target.value })}
                         />
                         <Input
-                          placeholder="State"
+                          placeholder="State *"
                           disabled={disabled}
                           value={inlineBranch.state}
                           onChange={(e) => setInlineBranch({ ...inlineBranch, state: e.target.value })}
@@ -283,7 +283,7 @@ export default function ManualClientDetailsSection({
                           size="sm"
                           disabled={disabled || addBranchSaving}
                           onClick={async () => {
-                            if (!inlineBranch.branch_name.trim() || !inlineBranch.city.trim()) return
+                            if (!inlineBranch.branch_name.trim() || !inlineBranch.city.trim() || !inlineBranch.state.trim()) return
                             setAddBranchSaving(true)
                             try {
                               await clientsApi.addBranch(selectedCompany.id, {
@@ -293,7 +293,7 @@ export default function ManualClientDetailsSection({
                                 phone: inlineBranch.phone.trim() || null,
                                 email: inlineBranch.email.trim() || null,
                                 city: inlineBranch.city.trim(),
-                                state: inlineBranch.state.trim() || null,
+                                state: inlineBranch.state.trim(),
                                 pincode: inlineBranch.pincode.trim() || null,
                                 address_line1: inlineBranch.address_line1.trim() || null,
                                 country: inlineBranch.country.trim() || 'India',
@@ -703,13 +703,16 @@ export default function ManualClientDetailsSection({
                 {errors.city && <p className="text-[12px] text-red-600">{errors.city}</p>}
               </div>
               <div>
-                <div className="text-[10px] font-medium uppercase tracking-wide text-[#8A9488]">State</div>
+                <div className="text-[10px] font-medium uppercase tracking-wide text-[#8A9488]">
+                  State<span className="text-red-600"> *</span>
+                </div>
                 <Input
                   value={newClient.state}
                   disabled={disabled}
                   onChange={(e) => setNewClient({ ...newClient, state: e.target.value })}
-                  className="mt-1 h-10"
+                  className={cn('mt-1 h-10', errors.state && 'border-red-300')}
                 />
+                {errors.state && <p className="text-[12px] text-red-600">{errors.state}</p>}
               </div>
               <div>
                 <div className="text-[10px] font-medium uppercase tracking-wide text-[#8A9488]">Pincode</div>

@@ -361,6 +361,8 @@ export interface PurchaseOrderListItem {
   quotation_id?: string | null
   primary_category: string
   item_desc_short: string
+  /** Sum of PO line items before P&F, freight, and GST. */
+  subtotal: number
   total_amount: number
   so_number?: string | null
   so_date?: string | null
@@ -585,7 +587,7 @@ export interface CreateCompanyRequestPayload {
   phone?: string | null
   email?: string | null
   city: string
-  state?: string | null
+  state: string
   pincode?: string | null
   address_line1?: string | null
   country?: string
@@ -598,7 +600,7 @@ export interface AddBranchRequestPayload {
   phone?: string | null
   email?: string | null
   city: string
-  state?: string | null
+  state: string
   pincode?: string | null
   address_line1?: string | null
   country?: string
@@ -802,6 +804,8 @@ export interface ManualEnquiryForm {
   supplierPricing?: ManualSupplierPricingContext | null
   /** Net total section: optional P&amp;F toggle and override amount (defaults to 3% of subtotal). */
   orderTotals?: ManualOrderTotals | null
+  /** Set when generating a quotation — drives enquiry list quote status (Quoted / Partially Quoted). */
+  enquiryQuoteStatus?: import('@/lib/enquiryQuoteStatus').EnquiryQuoteStatus
 }
 
 export interface ManualOrderTotals {

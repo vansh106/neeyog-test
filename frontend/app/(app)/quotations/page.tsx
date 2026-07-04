@@ -3,14 +3,14 @@
 import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Archive, FileText, Search } from 'lucide-react'
+import { Archive, FileText } from 'lucide-react'
 import PageShell from '@/components/layout/PageShell'
 import EmptyState from '@/components/ui/EmptyState'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import ArchiveRecordDialog from '@/components/listing/ArchiveRecordDialog'
 import QuotationLineStatusColumn from '@/components/quotations/QuotationLineStatusColumn'
+import QuotationListingFilters from '@/components/quotations/QuotationListingFilters'
 import ListingItemDescriptionsCell from '@/components/listing/ListingItemDescriptionsCell'
 import ListingCategoryCell from '@/components/listing/ListingCategoryCell'
 import ListingPagination from '@/components/listing/ListingPagination'
@@ -18,13 +18,15 @@ import QuotationListDateEditor, {
   formatQuotationListDate,
 } from '@/components/quotations/QuotationListDateEditor'
 import { useQuotationsListingDataset } from '@/lib/queries'
-import { filterQuotationsLocal } from '@/lib/filterQuotationsLocal'
-import { ARCHIVE_FILTER_OPTIONS, archivedListingRowClass, type ArchiveFilter } from '@/lib/archiveFilter'
 import {
-  QUOTATION_CRM_LABELS,
-  QUOTATION_CRM_STATUSES,
-  type QuotationCrmStatus,
-} from '@/lib/quotationCrmStatus'
+  collectQuotationFilterOptions,
+  DEFAULT_QUOTATION_FILTERS,
+  filterQuotationsLocal,
+  quotationFiltersActive,
+  quotationPoBounds,
+  type LocalQuotationFilters,
+} from '@/lib/filterQuotationsLocal'
+import { archivedListingRowClass } from '@/lib/archiveFilter'
 import { quotationsApi } from '@/lib/api'
 import { Permissions } from '@/lib/permissions'
 import { useAuthStore } from '@/stores/authStore'
@@ -55,18 +57,29 @@ const LISTING_FETCH_LIMIT = 2000
 export default function QuotationsPage() {
   const queryClient = useQueryClient()
   const canArchive = useAuthStore((s) => s.hasPermission(Permissions.DELETE_QUOTATIONS))
-  const [searchInput, setSearchInput] = useState('')
-  const [clientFilter, setClientFilter] = useState('')
-  const [statusFilter, setStatusFilter] = useState<string>('')
-  const [dateFrom, setDateFrom] = useState('')
-  const [dateTo, setDateTo] = useState('')
-  const [archiveFilter, setArchiveFilter] = useState<ArchiveFilter>('active')
+  const [filters, setFilters] = useState<LocalQuotationFilters>(DEFAULT_QUOTATION_FILTERS)
   const [archiveTarget, setArchiveTarget] = useState<QuotationListItem | null>(null)
   const [archiveError, setArchiveError] = useState<string | null>(null)
   const [page, setPage] = useState(1)
 
   const { data: quotations, isPending } = useQuotationsListingDataset(LISTING_FETCH_LIMIT)
   const allRows: QuotationListItem[] = quotations ?? []
+
+  const poBounds = useMemo(() => quotationPoBounds(allRows), [allRows])
+  const filterOptions = useMemo(() => collectQuotationFilterOptions(allRows), [allRows])
+
+  useEffect(() => {
+    setFilters((prev) => {
+      if (prev.poBoundsMin === poBounds.min && prev.poBoundsMax === poBounds.max) return prev
+      return {
+        ...prev,
+        poBoundsMin: poBounds.min,
+        poBoundsMax: poBounds.max,
+        poAmountMin: poBounds.min,
+        poAmountMax: poBounds.max,
+      }
+    })
+  }, [poBounds.min, poBounds.max])
 
   const archiveMut = useMutation({
     mutationFn: (quotationId: string) =>
@@ -81,135 +94,37 @@ export default function QuotationsPage() {
     },
   })
 
-  const list = useMemo(
-    () =>
-      filterQuotationsLocal(allRows, {
-        search: searchInput,
-        clientName: clientFilter,
-        status: statusFilter,
-        dateFrom,
-        dateTo,
-        archive: archiveFilter,
-      }),
-    [allRows, searchInput, clientFilter, statusFilter, dateFrom, dateTo, archiveFilter],
-  )
+  const list = useMemo(() => filterQuotationsLocal(allRows, filters), [allRows, filters])
 
   useEffect(() => {
     setPage(1)
-  }, [searchInput, clientFilter, statusFilter, dateFrom, dateTo, archiveFilter])
+  }, [filters])
 
   const pagedList = useMemo(() => listingPageSlice(list, page), [list, page])
   const totalValue = list.reduce((sum, q) => sum + (q.subtotal ?? q.total_amount), 0)
 
   const clearFilters = () => {
-    setSearchInput('')
-    setClientFilter('')
-    setStatusFilter('')
-    setDateFrom('')
-    setDateTo('')
-    setArchiveFilter('active')
+    setFilters({
+      ...DEFAULT_QUOTATION_FILTERS,
+      poBoundsMin: poBounds.min,
+      poBoundsMax: poBounds.max,
+      poAmountMin: poBounds.min,
+      poAmountMax: poBounds.max,
+    })
   }
 
-  const hasActiveFilters =
-    !!searchInput.trim() ||
-    !!clientFilter.trim() ||
-    !!statusFilter ||
-    !!dateFrom ||
-    !!dateTo ||
-    archiveFilter !== 'active'
+  const hasActiveFilters = quotationFiltersActive(filters)
 
   return (
     <PageShell title="Quotations">
-      <div className="mb-4 space-y-3 rounded-xl border border-surface-border bg-white p-4 shadow-sm">
-        <div className="relative">
-          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-surface-muted" />
-          <Input
-            value={searchInput}
-            onChange={(e) => setSearchInput(e.target.value)}
-            placeholder="Search quote, enquiry, client, or item…"
-            className="h-10 border-[#E2E6DC] pl-9 text-[13px]"
-            aria-label="Search quotations"
-          />
-        </div>
-        <div className="flex flex-wrap items-end gap-3">
-          <div className="min-w-[160px] flex-1">
-            <label htmlFor="qf-client" className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-[#8A9488]">
-              Client name
-            </label>
-            <Input
-              id="qf-client"
-              value={clientFilter}
-              onChange={(e) => setClientFilter(e.target.value)}
-              placeholder="Filter by client…"
-              className="h-9 border-[#E2E6DC] text-[13px]"
-            />
-          </div>
-          <div className="w-full min-w-[140px] sm:w-40">
-            <label htmlFor="qf-status" className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-[#8A9488]">
-              Status
-            </label>
-            <select
-              id="qf-status"
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              className="h-9 w-full rounded-md border border-[#E2E6DC] bg-white px-2 text-[13px] text-gray-900"
-            >
-              <option value="">All statuses</option>
-              {QUOTATION_CRM_STATUSES.map((v) => (
-                <option key={v} value={v}>
-                  {QUOTATION_CRM_LABELS[v as QuotationCrmStatus]}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="w-full min-w-[130px] sm:w-36">
-            <label htmlFor="qf-from" className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-[#8A9488]">
-              From date
-            </label>
-            <Input
-              id="qf-from"
-              type="date"
-              value={dateFrom}
-              onChange={(e) => setDateFrom(e.target.value)}
-              className="h-9 border-[#E2E6DC] text-[13px]"
-            />
-          </div>
-          <div className="w-full min-w-[130px] sm:w-36">
-            <label htmlFor="qf-to" className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-[#8A9488]">
-              To date
-            </label>
-            <Input
-              id="qf-to"
-              type="date"
-              value={dateTo}
-              onChange={(e) => setDateTo(e.target.value)}
-              className="h-9 border-[#E2E6DC] text-[13px]"
-            />
-          </div>
-          <div className="w-full min-w-[130px] sm:w-36">
-            <label htmlFor="qf-archive" className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-[#8A9488]">
-              Records
-            </label>
-            <select
-              id="qf-archive"
-              value={archiveFilter}
-              onChange={(e) => setArchiveFilter(e.target.value as ArchiveFilter)}
-              className="h-9 w-full rounded-md border border-[#E2E6DC] bg-white px-2 text-[13px] text-gray-900"
-            >
-              {ARCHIVE_FILTER_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          {hasActiveFilters && (
-            <Button type="button" variant="ghost" size="sm" className="h-9 text-[12px]" onClick={clearFilters}>
-              Clear filters
-            </Button>
-          )}
-        </div>
-      </div>
+      <QuotationListingFilters
+        filters={filters}
+        onChange={setFilters}
+        categoryOptions={filterOptions.categories}
+        userOptions={filterOptions.users}
+        onClear={clearFilters}
+        hasActiveFilters={hasActiveFilters}
+      />
 
       <div className="overflow-hidden rounded-xl border border-surface-border bg-white shadow-sm">
         <div className="overflow-x-auto">

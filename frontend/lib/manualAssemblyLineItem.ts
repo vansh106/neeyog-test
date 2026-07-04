@@ -53,19 +53,11 @@ const VALVE_CASCADE_KEYS = [
   'fasteners',
 ] as const
 
-const FITTING_CASCADE_KEYS = [
-  'variant_type',
-  'end_connection_1',
-  'end_connection_2',
-  'size_mm',
-  'hose_nipple_moc',
-  'hose_cap_moc',
-  'sms_nut_moc',
-  'tc_od',
-  'din_nut_moc',
-  'swivel_nut_moc',
-  'flange_nut_moc',
-] as const
+import {
+  FITTING_CASCADE_KEYS,
+  collapseDuplicateFittingCascade,
+  fittingCascadeFields,
+} from '@/lib/hoseFittingDescription'
 
 function productCascadeFields(
   product: ValveProduct,
@@ -419,7 +411,7 @@ export function assembledToLineItem(
       if (isTemporaryFittingSelection(fit1.catalog_category)) {
         cascade.fitting_end_1 = (fit1.temporary_description ?? fit1.type).trim()
       } else {
-        Object.assign(cascade, productCascadeFields(fit1, FITTING_CASCADE_KEYS, 'fitting_end_1'))
+        Object.assign(cascade, fittingCascadeFields(fit1, 'fitting_end_1'))
       }
       if ((p.fitting_end_1_qty ?? 1) === 2) cascade.fitting_end_1_qty = '2'
     }
@@ -432,10 +424,13 @@ export function assembledToLineItem(
       if (isTemporaryFittingSelection(fit2.catalog_category)) {
         cascade.fitting_end_2 = (fit2.temporary_description ?? fit2.type).trim()
       } else {
-        Object.assign(cascade, productCascadeFields(fit2, FITTING_CASCADE_KEYS, 'fitting_end_2'))
+        Object.assign(cascade, fittingCascadeFields(fit2, 'fitting_end_2'))
       }
     }
   }
+
+  Object.assign(cascade, collapseDuplicateFittingCascade(cascade))
+
   if (p.operator_key) {
     cascade.operator = operatorLabel(p.operator_key)
     if (p.operator_model) {

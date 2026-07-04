@@ -482,6 +482,10 @@ export const MASTER_SIDEBAR_NAV: MasterNavNode[] = [
     children: [
       { kind: 'leaf', key: 'fp_damper_butterfly', label: 'Butterfly Damper' },
       { kind: 'leaf', key: 'fp_damper_multi_louver', label: 'Multi-Louver Damper' },
+      { kind: 'leaf', key: 'fp_damper_slide_gate', label: 'Slide Gate Damper' },
+      { kind: 'leaf', key: 'fp_damper_guillotine', label: 'Guillotine Damper' },
+      { kind: 'leaf', key: 'fp_damper_diverter', label: 'Diverter Damper' },
+      { kind: 'leaf', key: 'fp_damper_discharge', label: 'Discharge Damper' },
     ],
   },
   {

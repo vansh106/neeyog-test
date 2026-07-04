@@ -521,8 +521,13 @@ export default function QuotationFormatPreview({
       ) : null}
 
       <section className="p-3 sm:p-4">
-        <p className="whitespace-pre-line text-[11px] text-gray-800">{footerContact}</p>
-        <p className="mt-3 text-center text-[13px] font-extrabold tracking-wide" style={{ color: TEAL }}>
+        {footerContact ? (
+          <p className="whitespace-pre-line text-[11px] text-gray-800">{footerContact}</p>
+        ) : null}
+        <p
+          className={`text-center text-[13px] font-extrabold tracking-wide ${footerContact ? 'mt-3' : ''}`}
+          style={{ color: TEAL }}
+        >
           {footerThanks}
         </p>
         <p className="mt-4 text-center text-[10px] italic text-[#6b7280]">{footerDisclaimer}</p>
