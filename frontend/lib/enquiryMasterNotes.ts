@@ -230,3 +230,27 @@ export function storedProductNotesToEntries(notes: StoredEnquiryProductNote[]): 
     details: note.details,
   }))
 }
+
+/** Flat category list across all preset families (+ Others when tree provided). */
+export function getAllMasterNotesCategories(othersTree: OthersCategory[] = []): string[] {
+  const out = new Set<string>()
+  for (const family of getMasterNotesFamilies()) {
+    for (const cat of getMasterNotesCategories(family, othersTree)) {
+      if (cat.trim()) out.add(cat.trim())
+    }
+  }
+  return uniqueSorted([...out])
+}
+
+/** Flat sub-category list across all preset family/category paths (+ Others). */
+export function getAllMasterNotesSubCategories(othersTree: OthersCategory[] = []): string[] {
+  const out = new Set<string>()
+  for (const family of getMasterNotesFamilies()) {
+    for (const category of getMasterNotesCategories(family, othersTree)) {
+      for (const sub of getMasterNotesSubCategories(family, category, othersTree)) {
+        if (sub.trim()) out.add(sub.trim())
+      }
+    }
+  }
+  return uniqueSorted([...out])
+}

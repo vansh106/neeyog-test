@@ -27,7 +27,14 @@ import {
   INITIAL_APPLIED_ENQUIRY_FILTERS,
   type EnquiryListingFilters,
 } from '@/lib/filterEnquiriesLocal'
-import { ARCHIVE_FILTER_OPTIONS, archivedListingRowClass, matchesArchiveFilter, type ArchiveFilter } from '@/lib/archiveFilter'
+import ListingExportButton from '@/components/listing/ListingExportButton'
+import { exportEnquiriesListingExcel } from '@/lib/exportEnquiriesListing'
+import {
+  ARCHIVE_FILTER_OPTIONS,
+  archivedListingRowClass,
+  matchesArchiveFilter,
+  type ArchiveFilter,
+} from '@/lib/archiveFilter'
 import { enquiriesApi } from '@/lib/api'
 import { Permissions } from '@/lib/permissions'
 import { useAuthStore } from '@/stores/authStore'
@@ -200,10 +207,18 @@ export default function EnquiriesPage() {
     <PageShell
       title="Enquiries"
       actions={
-        <span className="rounded-full bg-brand-green-500/15 px-2.5 py-1 text-[12px] font-semibold text-brand-green-600 tabular-nums">
-          {rows.length}
-          {rows.length !== scopedRows.length ? ` / ${scopedRows.length}` : ''}
-        </span>
+        <div className="flex items-center gap-2">
+          <ListingExportButton
+            dialogTitle="Export enquiries"
+            dialogDescription="Choose a time period. Each enquiry is exported on its own row with alternating row colors."
+            onExport={(range) => exportEnquiriesListingExcel(rows, range)}
+            disabled={isPending || rows.length === 0}
+          />
+          <span className="rounded-full bg-brand-green-500/15 px-2.5 py-1 text-[12px] font-semibold text-brand-green-600 tabular-nums">
+            {rows.length}
+            {rows.length !== scopedRows.length ? ` / ${scopedRows.length}` : ''}
+          </span>
+        </div>
       }
     >
       <div className="space-y-3">

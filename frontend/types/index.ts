@@ -44,6 +44,8 @@ export interface EnquiryListItem {
   series?: string | null
   is_sales_enquiry?: boolean
   is_archived?: boolean
+  /** Free-text notes from enquiry detail (parsed_data.notes). */
+  notes?: string | null
 }
 
 export interface EnquiryResponse {
@@ -350,6 +352,13 @@ export interface PurchaseOrderLineItem extends QuotationLineItem {
   quoted_unit_price?: number
 }
 
+export interface PurchaseOrderExportLine {
+  description: string
+  quantity: number
+  unit_price: number
+  line_total: number
+}
+
 export interface PurchaseOrderListItem {
   po_id: string
   po_number: string
@@ -367,6 +376,7 @@ export interface PurchaseOrderListItem {
   so_number?: string | null
   so_date?: string | null
   created_by_name?: string | null
+  export_lines?: PurchaseOrderExportLine[]
 }
 
 export interface PurchaseOrder {

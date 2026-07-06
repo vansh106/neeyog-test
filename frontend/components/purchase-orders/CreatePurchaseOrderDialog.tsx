@@ -21,7 +21,9 @@ import PurchaseOrderFinancialPanel, {
 } from '@/components/purchase-orders/PurchaseOrderFinancialPanel'
 import QuotationPreviewDialog from '@/components/purchase-orders/QuotationPreviewDialog'
 import ManualClientDetailsSection from '@/components/clients/ManualClientDetailsSection'
+import PurchaseOrderExcelImportSection from '@/components/purchase-orders/PurchaseOrderExcelImportSection'
 import { purchaseOrdersApi, suppliersApi } from '@/lib/api'
+import { poImportItemTotal, type PoImportParseResult } from '@/lib/poExcelImport'
 import { invalidateQuotationCrmCaches } from '@/lib/invalidateQuotationCrmCaches'
 import { useManualClientPicker } from '@/lib/manualClientPicker'
 import { useQuotationsListingDataset, useQuotation } from '@/lib/queries'
@@ -40,6 +42,7 @@ function formatQuoteListDate(iso: string): string {
 }
 
 type Step = 'link' | 'pick_quotation' | 'quoted_lines' | 'manual'
+type ManualEntryMode = 'configurator' | 'import'
 
 type SelectedLineState = {
   selected: boolean
@@ -91,6 +94,8 @@ export default function CreatePurchaseOrderDialog({
   const [suppliers, setSuppliers] = useState<SupplierResponse[]>([])
   const [activeConfigId, setActiveConfigId] = useState<string>(() => uuidv4())
   const [editingId, setEditingId] = useState<string | null>(null)
+  const [manualEntryMode, setManualEntryMode] = useState<ManualEntryMode>('configurator')
+  const [importParseResult, setImportParseResult] = useState<PoImportParseResult | null>(null)
 
   useEffect(() => {
     if (!open) return
@@ -101,6 +106,8 @@ export default function CreatePurchaseOrderDialog({
     if (!open) {
       clientPicker.reset()
       setSoNumber('')
+      setManualEntryMode('configurator')
+      setImportParseResult(null)
     }
   }, [open, clientPicker.reset])
 
@@ -198,7 +205,17 @@ export default function CreatePurchaseOrderDialog({
     [assembledProducts],
   )
 
-  const itemTotal = step === 'manual' ? manualItemTotal : quotedItemTotal
+  const importItemTotal = useMemo(
+    () => (importParseResult?.valid ? poImportItemTotal(importParseResult.lineItems) : 0),
+    [importParseResult],
+  )
+
+  const itemTotal =
+    step === 'manual'
+      ? manualEntryMode === 'import'
+        ? importItemTotal
+        : manualItemTotal
+      : quotedItemTotal
   const { draft, setDraft, apiBody } = usePurchaseOrderFinancialDraft(itemTotal)
 
   const resetAndClose = () => {
@@ -219,6 +236,21 @@ export default function CreatePurchaseOrderDialog({
           quotation_id: selectedQuotationId,
           selected_lines: selectedQuotedLines,
           so_number: so,
+          ...apiBody,
+        }
+      } else if (manualEntryMode === 'import') {
+        if (!importParseResult?.valid) {
+          throw new Error('Upload a valid Excel file with client details and at least one product')
+        }
+        const c = importParseResult.client
+        payload = {
+          manual_line_items: importParseResult.lineItems,
+          client_name: c.client_name,
+          client_company: c.client_company || undefined,
+          client_email: c.client_email || undefined,
+          client_phone: c.client_phone || undefined,
+          so_number: (c.so_number?.trim() || so) || undefined,
+          notes: c.notes || undefined,
           ...apiBody,
         }
       } else {
@@ -409,6 +441,48 @@ export default function CreatePurchaseOrderDialog({
 
           {step === 'manual' && (
             <div className="space-y-5">
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={manualEntryMode === 'configurator' ? 'default' : 'outline'}
+                  onClick={() => {
+                    setManualEntryMode('configurator')
+                    setImportParseResult(null)
+                  }}
+                  disabled={creating}
+                >
+                  Enter products manually
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={manualEntryMode === 'import' ? 'default' : 'outline'}
+                  onClick={() => setManualEntryMode('import')}
+                  disabled={creating}
+                >
+                  Import from Excel
+                </Button>
+              </div>
+
+              {manualEntryMode === 'import' ? (
+                <>
+                  <PurchaseOrderExcelImportSection
+                    disabled={creating}
+                    parsed={importParseResult}
+                    onParsed={setImportParseResult}
+                  />
+                  {importParseResult?.valid && (
+                    <PurchaseOrderFinancialPanel
+                      itemTotal={importItemTotal}
+                      draft={draft}
+                      onDraftChange={setDraft}
+                      disabled={creating}
+                    />
+                  )}
+                </>
+              ) : (
+                <>
               <ManualClientDetailsSection {...clientPicker} disabled={creating} />
               <ValveConfigurator
                 key={activeConfigId}
@@ -450,12 +524,14 @@ export default function CreatePurchaseOrderDialog({
                   disabled={creating}
                 />
               )}
+                </>
+              )}
             </div>
           )}
 
           {error && <p className="mt-4 text-[13px] text-red-600">{error}</p>}
 
-          {(step === 'quoted_lines' || step === 'manual') && (
+          {(step === 'quoted_lines' || (step === 'manual' && manualEntryMode === 'configurator')) && (
             <label className="mt-4 block max-w-xs text-[12px]">
               <span className="text-surface-muted">SO number (optional)</span>
               <Input
@@ -495,7 +571,10 @@ export default function CreatePurchaseOrderDialog({
                 disabled={
                   creating ||
                   (step === 'quoted_lines' && selectedQuotedLines.length === 0) ||
-                  (step === 'manual' && (assembledProducts.length === 0 || !clientPicker.isComplete))
+                  (step === 'manual' &&
+                    manualEntryMode === 'configurator' &&
+                    (assembledProducts.length === 0 || !clientPicker.isComplete)) ||
+                  (step === 'manual' && manualEntryMode === 'import' && !importParseResult?.valid)
                 }
                 onClick={handleCreate}
               >

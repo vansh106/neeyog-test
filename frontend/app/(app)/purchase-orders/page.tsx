@@ -22,6 +22,8 @@ import {
   purchaseOrderFiltersActive,
   type LocalPurchaseOrderFilters,
 } from '@/lib/filterPurchaseOrdersLocal'
+import ListingExportButton from '@/components/listing/ListingExportButton'
+import { exportPurchaseOrdersListingExcel } from '@/lib/exportPurchaseOrdersListing'
 import { purchaseOrdersApi } from '@/lib/api'
 import { invalidateQuotationCrmCaches } from '@/lib/invalidateQuotationCrmCaches'
 import { Permissions } from '@/lib/permissions'
@@ -130,12 +132,20 @@ export default function PurchaseOrdersPage() {
       title="Purchase Orders"
       subtitle="Customer purchase orders — linked to quotations or created manually."
       actions={
-        canCreate ? (
-          <Button onClick={() => setCreateOpen(true)}>
-            <Plus className="mr-2 h-4 w-4" />
-            Create PO
-          </Button>
-        ) : null
+        <div className="flex items-center gap-2">
+          <ListingExportButton
+            dialogTitle="Export purchase orders"
+            dialogDescription="Choose a time period. Multi-line POs use the same row color per order."
+            onExport={(range) => exportPurchaseOrdersListingExcel(list, range)}
+            disabled={isPending || list.length === 0}
+          />
+          {canCreate ? (
+            <Button onClick={() => setCreateOpen(true)}>
+              <Plus className="mr-2 h-4 w-4" />
+              Create PO
+            </Button>
+          ) : null}
+        </div>
       }
     >
       <PurchaseOrderListingFilters

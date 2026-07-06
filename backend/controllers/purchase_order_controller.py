@@ -11,6 +11,7 @@ from core.auth_middleware import CurrentUser
 from core.exceptions import ProductNotFoundError
 from db.models import PurchaseOrder
 from services import purchase_order_service, quotation_service
+from services.quotation_description_sanitize import supplier_names_for_client
 
 
 def _po_api_dict(po: PurchaseOrder) -> dict:
@@ -64,6 +65,61 @@ def _ensure_po_access(po: PurchaseOrder, user: CurrentUser) -> None:
         raise HTTPException(status_code=404, detail="Purchase order not found")
 
 
+def _po_export_lines(po: PurchaseOrder, supplier_names: list[str] | None = None) -> list[dict]:
+    lines = po.line_items if isinstance(po.line_items, list) else []
+    if not lines:
+        return [
+            {
+                "description": (po.item_desc_short or "—").strip(),
+                "quantity": 1,
+                "unit_price": float(po.subtotal or 0),
+                "line_total": float(po.subtotal or 0),
+            }
+        ]
+    desc_lines = quotation_service.item_desc_lines_from_lines(lines, supplier_names)
+    out: list[dict] = []
+    for idx, li in enumerate(lines):
+        if not isinstance(li, dict):
+            continue
+        qty = int(li.get("quantity") or 1)
+        unit_price = round(float(li.get("unit_price") or 0), 2)
+        line_total = li.get("line_total")
+        if line_total is None:
+            line_total = li.get("total")
+        if line_total is None:
+            line_total = round(qty * unit_price, 2)
+        else:
+            line_total = round(float(line_total), 2)
+        desc = ""
+        if idx < len(desc_lines):
+            desc = str(desc_lines[idx].get("full") or desc_lines[idx].get("short") or "").strip()
+        if not desc:
+            desc = str(li.get("description") or po.item_desc_short or "Item").strip()
+        out.append(
+            {
+                "description": desc,
+                "quantity": max(1, qty),
+                "unit_price": unit_price,
+                "line_total": line_total,
+            }
+        )
+    return out or [
+        {
+            "description": (po.item_desc_short or "—").strip(),
+            "quantity": 1,
+            "unit_price": float(po.subtotal or 0),
+            "line_total": float(po.subtotal or 0),
+        }
+    ]
+
+
+class PurchaseOrderExportLine(BaseModel):
+    description: str
+    quantity: int = 1
+    unit_price: float = 0.0
+    line_total: float = 0.0
+
+
 class PurchaseOrderListItem(BaseModel):
     po_id: str
     po_number: str
@@ -80,6 +136,7 @@ class PurchaseOrderListItem(BaseModel):
     so_number: str | None = None
     so_date: str | None = None
     created_by_name: str | None = None
+    export_lines: list[PurchaseOrderExportLine] = Field(default_factory=list)
 
 
 class PurchaseOrderSelectedLine(BaseModel):
@@ -179,6 +236,7 @@ async def handle_list_purchase_orders(
         po_type=po_type,
         created_by_user_id=scope_user_id,
     )
+    supplier_names = await supplier_names_for_client(db)
     return [
         {
             "po_id": str(po.id),
@@ -196,6 +254,7 @@ async def handle_list_purchase_orders(
             "so_number": po.so_number,
             "so_date": po.so_date.isoformat() if po.so_date else None,
             "created_by_name": po.created_by_name,
+            "export_lines": _po_export_lines(po, supplier_names),
         }
         for po in rows
     ]

@@ -26,6 +26,8 @@ import {
   quotationPoBounds,
   type LocalQuotationFilters,
 } from '@/lib/filterQuotationsLocal'
+import ListingExportButton from '@/components/listing/ListingExportButton'
+import { exportQuotationsListingExcel } from '@/lib/exportQuotationsListing'
 import { archivedListingRowClass } from '@/lib/archiveFilter'
 import { quotationsApi } from '@/lib/api'
 import { Permissions } from '@/lib/permissions'
@@ -116,7 +118,17 @@ export default function QuotationsPage() {
   const hasActiveFilters = quotationFiltersActive(filters)
 
   return (
-    <PageShell title="Quotations">
+    <PageShell
+      title="Quotations"
+      actions={
+        <ListingExportButton
+          dialogTitle="Export quotations"
+          dialogDescription="Choose a time period. The export includes one row per product line with alternating colors per quotation."
+          onExport={(range) => exportQuotationsListingExcel(list, range)}
+          disabled={isPending || list.length === 0}
+        />
+      }
+    >
       <QuotationListingFilters
         filters={filters}
         onChange={setFilters}

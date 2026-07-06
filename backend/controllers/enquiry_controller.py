@@ -78,6 +78,7 @@ class EnquiryListItem(BaseModel):
     is_archived: bool = False
     enquiry_detail_type: str = "incomplete"
     enquiry_quote_status: str = "not_quoted"
+    notes: str | None = None
 
 
 class EnquiryListingDatesBody(BaseModel):
@@ -438,6 +439,12 @@ def _enquiry_is_sales(e: Enquiry) -> bool:
     return (e.input_type or "").lower() in ("manual", "manual_dropdown")
 
 
+def _enquiry_list_notes(e: Enquiry) -> str | None:
+    pd = e.parsed_data if isinstance(e.parsed_data, dict) else {}
+    notes = str(pd.get("notes") or "").strip()
+    return notes or None
+
+
 def _enquiry_list_source(e: Enquiry) -> str:
     """Business source for listing: email, indiamart, manual, referral."""
     pd = e.parsed_data if isinstance(e.parsed_data, dict) else {}
@@ -634,6 +641,7 @@ async def handle_list_enquiries(
                 enquiry_quote_status=normalize_enquiry_quote_status(
                     getattr(e, "enquiry_quote_status", None)
                 ),
+                notes=_enquiry_list_notes(e),
             )
             for e in enquiries
         ]

@@ -53,7 +53,10 @@ def _collapse_duplicate_end_connection_lines(desc: str) -> str:
     lines = desc.split("\n")
     parsed = [_parse_desc_line(line) for line in lines]
     sibling_values: dict[str, str] = {}
-    for label, val in parsed:
+    for item in parsed:
+        if not item:
+            continue
+        label, val = item
         if not label:
             continue
         m = _END_CONNECTION_DUP.match(label)
