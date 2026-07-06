@@ -288,7 +288,7 @@ export default function ClientsTab() {
           phone: bf.phone.trim() || null,
           email: bf.email.trim() || null,
           city: bf.city.trim(),
-          state: bf.state.trim() || null,
+          state: bf.state.trim(),
           pincode: bf.pincode.trim() || null,
           address_line1: bf.address_line1.trim() || null,
           country: bf.country.trim() || 'India',

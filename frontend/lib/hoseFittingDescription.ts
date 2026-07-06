@@ -162,24 +162,29 @@ export function collapseDuplicateFittingDescription(desc: string): string {
     return collapseDuplicateEndConnectionLines(desc)
   }
 
-  const parsed = desc.split('\n').map((line) => ({ raw: line, ...parseDescLine(line) }))
+  const parsed = desc.split('\n').map((line) => ({ raw: line, parsed: parseDescLine(line),}))
   const end1 = new Map<string, string>()
   const end2 = new Map<string, string>()
   const kept: string[] = []
 
   for (const row of parsed) {
-    if (!row.label) {
+    if (!row.parsed) {
       kept.push(row.raw)
       continue
     }
-    if (row.label.startsWith('Fitting End 1 ')) {
-      end1.set(row.label.slice('Fitting End 1 '.length), row.value)
+  
+    const { label, value } = row.parsed
+  
+    if (label.startsWith('Fitting End 1 ')) {
+      end1.set(label.slice('Fitting End 1 '.length), value)
       continue
     }
-    if (row.label.startsWith('Fitting End 2 ')) {
-      end2.set(row.label.slice('Fitting End 2 '.length), row.value)
+  
+    if (label.startsWith('Fitting End 2 ')) {
+      end2.set(label.slice('Fitting End 2 '.length), value)
       continue
     }
+  
     kept.push(row.raw)
   }
 
