@@ -690,7 +690,7 @@ export interface ManualEnquiryCreateForm {
   selectedClientId: string | null
   clientEmployeeId?: string | null
   newClientEmployee?: ManualEnquiryForm['newClientEmployee']
-  newClient: ManualEnquiryForm['newClient']
+  newClient?: ManualEnquiryForm['newClient']
   priority: 'Normal' | 'High' | 'Urgent'
   notes: string
   productNotes?: EnquiryProductNote[]
@@ -788,7 +788,7 @@ export interface ManualEnquiryForm {
     department?: string | null
     designation?: string | null
   }
-  newClient: {
+  newClient?: {
     company_name: string
     gst_number: string
     industry: string

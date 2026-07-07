@@ -469,6 +469,7 @@ function buildEmailText(
     }
   } else if (form.clientMode === 'new') {
     const nc = form.newClient
+    if (!nc) throw new Error('New client details are required')
     company_name = nc.company_name
     branch_name = nc.branch_name
     city = nc.city
@@ -1305,13 +1306,17 @@ export default function ManualEntryForm({
   ])
 
   function buildClientPayload() {
+    const newClientPayload =
+      clientMode === 'new'
+        ? {
+            ...newClient,
+            address: newClient.address_line1 || newClient.address,
+          }
+        : undefined
     const base = {
       clientMode,
       selectedClientId: effectiveBranchId,
-      newClient: {
-        ...newClient,
-        address: newClient.address_line1 || newClient.address,
-      },
+      ...(newClientPayload ? { newClient: newClientPayload } : {}),
       priority: 'Normal' as const,
       notes: enquiryNotes,
       productNotes: serializeProductNotes(productNotes),
@@ -1367,14 +1372,18 @@ export default function ManualEntryForm({
   }
 
   function buildQuotationForm(): ManualEnquiryForm {
+    const newClientPayload =
+      clientMode === 'new'
+        ? {
+            ...newClient,
+            address: newClient.address_line1 || newClient.address,
+          }
+        : undefined
     const form: ManualEnquiryForm = {
       ...(targetEnquiryId ? { targetEnquiryId } : {}),
       clientMode,
       selectedClientId: effectiveBranchId,
-      newClient: {
-        ...newClient,
-        address: newClient.address_line1 || newClient.address,
-      },
+      ...(newClientPayload ? { newClient: newClientPayload } : {}),
       lineItems: assembledProducts.map((p) =>
         assembledToLineItem(
           p,
