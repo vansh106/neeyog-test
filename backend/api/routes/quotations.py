@@ -20,7 +20,7 @@ from controllers.quotation_controller import (
     QuotationTermCreateBody,
     QuotationUpdateLineItemsBody,
 )
-from core.auth_middleware import CurrentUser, require_permission
+from core.auth_middleware import CurrentUser, require_admin_or_above, require_permission
 from core.database import get_db
 
 router = APIRouter(prefix="/api/quotations", tags=["quotations"])
@@ -108,7 +108,7 @@ async def patch_quotation_line_items_route(
 async def patch_quotation_pdf_display_route(
     quotation_id: str,
     body: QuotationPdfDisplayBody,
-    user: CurrentUser = Depends(require_permission(Permission.APPROVE_QUOTATIONS)),
+    user: CurrentUser = Depends(require_admin_or_above()),
     db: AsyncSession = Depends(get_db),
 ):
     """PDF-only text overlays for this quotation; regenerates the stored PDF."""

@@ -44,10 +44,10 @@ def listing_category_lines_from_lines(lines: list[dict]) -> list[dict[str, str |
     for li in lines:
         if not isinstance(li, dict):
             continue
-        ct = str(li.get("catalog_table") or "").strip()
+        ct = str(li.get("catalog_table") or li.get("catalogTable") or "").strip()
         if not ct:
             continue
-        vt = str(li.get("variant_type") or "").strip() or None
+        vt = str(li.get("variant_type") or li.get("variantType") or "").strip() or None
         category, sub_category = masters_listing_labels(ct, vt)
         out.append({"category": category, "sub_category": sub_category})
     return out

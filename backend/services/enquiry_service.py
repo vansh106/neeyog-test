@@ -1646,11 +1646,7 @@ async def process_manual_dropdown(
     enquiry.matched_products = matched_products
     enquiry.status = "approved"
     enquiry.flow_type = "complete"
-    quote_status_raw = body.get("enquiryQuoteStatus") or body.get("enquiry_quote_status") or "quoted"
-    quote_status = normalize_enquiry_quote_status(quote_status_raw)
-    if quote_status not in ("quoted", "partially_quoted"):
-        quote_status = "quoted"
-    enquiry.enquiry_quote_status = quote_status
+    enquiry.enquiry_quote_status = "quoted"
     enquiry.company_id = company_id_uuid
     enquiry.branch_id = branch_id_uuid
     enquiry.raw_input = json.dumps(raw_payload, ensure_ascii=False)
@@ -2206,19 +2202,23 @@ async def update_enquiry_product_notes(
     return e
 
 
-ENQUIRY_DETAIL_TYPE_VALUES = frozenset({"complete", "incomplete", "partially_complete"})
+ENQUIRY_DETAIL_TYPE_VALUES = frozenset({"complete", "incomplete"})
 
 
 def normalize_enquiry_detail_type(raw: object) -> str:
     v = str(raw or "").strip().lower()
+    if v == "partially_complete":
+        return "incomplete"
     return v if v in ENQUIRY_DETAIL_TYPE_VALUES else "incomplete"
 
 
-ENQUIRY_QUOTE_STATUS_VALUES = frozenset({"not_quoted", "quoted", "partially_quoted"})
+ENQUIRY_QUOTE_STATUS_VALUES = frozenset({"not_quoted", "quoted"})
 
 
 def normalize_enquiry_quote_status(raw: object) -> str:
     v = str(raw or "").strip().lower()
+    if v == "partially_quoted":
+        return "quoted"
     return v if v in ENQUIRY_QUOTE_STATUS_VALUES else "not_quoted"
 
 

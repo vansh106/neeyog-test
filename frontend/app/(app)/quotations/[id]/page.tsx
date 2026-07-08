@@ -77,6 +77,7 @@ export default function QuotationDetailPage() {
   const queryClient = useQueryClient()
   const canEditQuoteLines = useAuthStore((s) => s.hasPermission(Permissions.APPROVE_QUOTATIONS))
   const canCreatePO = useAuthStore((s) => s.hasPermission(Permissions.CREATE_PURCHASE_ORDERS))
+  const canEditPdf = useAuthStore((s) => s.isAdminOrAbove())
 
   // Hooks MUST be declared before any conditional returns.
   const [historyOpen, setHistoryOpen] = useState(false)
@@ -226,7 +227,7 @@ export default function QuotationDetailPage() {
           {canCreatePO && (
             <CreatePOButton fixedQuotationId={quotation.quotation_id} className="h-9" />
           )}
-          {canEditQuotation ? (
+          {canEditPdf ? (
             <Button
               type="button"
               variant="outline"
@@ -524,7 +525,7 @@ export default function QuotationDetailPage() {
         />
       )}
 
-      {quotation && (
+      {quotation && canEditPdf && (
         <QuotationPdfEditorDialog
           open={pdfEditOpen}
           onOpenChange={setPdfEditOpen}

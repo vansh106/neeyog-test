@@ -51,7 +51,7 @@ class CompanyResponse(BaseModel):
 class CreateCompanyRequest(BaseModel):
     company_name: str
     gst_number: str | None = None
-    industry: str | None = None
+    industry: str = Field(..., min_length=1)
     notes: str | None = None
     branch_name: str = "Main"
     contact_name: str | None = None

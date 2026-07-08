@@ -71,6 +71,7 @@ class EnquiryListItem(BaseModel):
     created_by_name: str | None = None
     erp_export_available: bool = False
     category: str | None = None
+    sub_category: str | None = None
     items_search_text: str = ""
     is_non_standard_customer: bool = False
     series: str | None = None
@@ -137,7 +138,7 @@ class ManualLineItemRequest(BaseModel):
 class ManualNewClientRequest(BaseModel):
     company_name: str
     gst_number: str | None = None
-    industry: str | None = None
+    industry: str = Field(..., min_length=1)
     branch_name: str = "Head Office"
     contact_name: str = ""
     designation: str | None = None
@@ -278,10 +279,7 @@ class ManualDropdownProcessRequest(BaseModel):
             raise ValueError("At least one line item is required")
         if not (self.target_enquiry_id or "").strip():
             raise ValueError("targetEnquiryId is required")
-        qs = normalize_enquiry_quote_status(self.enquiry_quote_status)
-        if qs not in ("quoted", "partially_quoted"):
-            raise ValueError("enquiryQuoteStatus must be 'quoted' or 'partially_quoted'")
-        self.enquiry_quote_status = qs
+        self.enquiry_quote_status = "quoted"
         return self
 
 
@@ -367,6 +365,93 @@ def _enquiry_client_org_name(e: Enquiry) -> str:
 
 
 def _enquiry_list_category(e: Enquiry) -> str | None:
+    category, _ = _enquiry_listing_category_fields(e, quote=None)
+    return category
+
+
+def _enquiry_listing_category_fields(
+    e: Enquiry,
+    *,
+    quote=None,
+) -> tuple[str | None, str | None]:
+    if quote is not None:
+        from services.quotation_service import listing_fields_from_quotation
+
+        fields = listing_fields_from_quotation(quote)
+        return fields.get("category_label") or None, fields.get("sub_category")
+
+    from masters.listing_category import masters_listing_labels
+
+    parsed = e.parsed_data if isinstance(e.parsed_data, dict) else {}
+    product_notes = parsed.get("product_notes") if isinstance(parsed, dict) else None
+    if isinstance(product_notes, list):
+        for item in product_notes:
+            if not isinstance(item, dict):
+                continue
+            family = str(item.get("family") or "").strip()
+            category = str(item.get("category") or "").strip()
+            sub = str(item.get("sub_category") or item.get("subCategory") or "").strip() or None
+            if family:
+                return family, category or sub
+            if category:
+                return _normalize_enquiry_main_category(category), sub
+
+    matched = e.matched_products
+    if isinstance(matched, list):
+        for m in matched:
+            if not isinstance(m, dict):
+                continue
+            ct = str(m.get("catalog_table") or "").strip()
+            vt = str(m.get("variant_type") or "").strip() or None
+            if ct:
+                cat, sub = masters_listing_labels(ct, vt)
+                return cat, sub
+
+    products = parsed.get("products_requested", []) if isinstance(parsed, dict) else []
+    if isinstance(products, list):
+        for p in products:
+            if not isinstance(p, dict):
+                continue
+            ct = str(p.get("catalog_table") or "").strip()
+            vt = str(p.get("variant_type") or "").strip() or None
+            if ct:
+                cat, sub = masters_listing_labels(ct, vt)
+                return cat, sub
+            cat_raw = str(p.get("category") or "").strip()
+            sub_raw = str(p.get("sub_category") or p.get("subCategory") or "").strip() or None
+            if cat_raw:
+                return _normalize_enquiry_main_category(cat_raw), sub_raw
+
+    cat = _enquiry_list_category_legacy(e)
+    return _normalize_enquiry_main_category(cat) if cat else None, None
+
+
+def _normalize_enquiry_main_category(raw: str | None) -> str | None:
+    if not raw:
+        return None
+    v = raw.strip().lower()
+    aliases = {
+        "valve": "Valves",
+        "valves": "Valves",
+        "hose": "Hoses",
+        "hoses": "Hoses",
+        "fitting": "Hose Fittings",
+        "fittings": "Hose Fittings",
+        "hose fitting": "Hose Fittings",
+        "hose fittings": "Hose Fittings",
+        "damper": "Dampers",
+        "dampers": "Dampers",
+        "accessory": "Accessories",
+        "accessories": "Accessories",
+        "other": "Others",
+        "others": "Others",
+    }
+    if v in aliases:
+        return aliases[v]
+    return raw.strip()
+
+
+def _enquiry_list_category_legacy(e: Enquiry) -> str | None:
     parsed = e.parsed_data if isinstance(e.parsed_data, dict) else {}
     products = parsed.get("products_requested", []) if isinstance(parsed, dict) else []
     if not isinstance(products, list) or not products:
@@ -593,8 +678,12 @@ async def handle_list_enquiries(
             db, [e.id for e in enquiries]
         )
         supplier_names = await supplier_names_for_client(db)
-        return [
-            EnquiryListItem(
+        items: list[EnquiryListItem] = []
+        for e in enquiries:
+            quote = quote_by_enquiry.get(str(e.id))
+            category, sub_category = _enquiry_listing_category_fields(e, quote=quote)
+            items.append(
+                EnquiryListItem(
                 enquiry_id=str(e.id),
                 enquiry_number=(e.enquiry_number or "").strip() or None,
                 client_org_name=_enquiry_client_org_name(e),
@@ -603,19 +692,19 @@ async def handle_list_enquiries(
                 input_type=e.input_type,
                 source=_enquiry_list_source(e),
                 item_desc_short=enquiry_service.item_desc_short_from_enquiry(
-                    e, quote_by_enquiry.get(str(e.id)), supplier_names=supplier_names
+                    e, quote, supplier_names=supplier_names
                 ),
                 item_desc_lines=enquiry_service.item_desc_lines_from_enquiry(
-                    e, quote_by_enquiry.get(str(e.id)), supplier_names=supplier_names
+                    e, quote, supplier_names=supplier_names
                 ),
                 quotation_id=(
-                    str(quote_by_enquiry[str(e.id)].id)
-                    if str(e.id) in quote_by_enquiry
+                    str(quote.id)
+                    if quote is not None
                     else None
                 ),
                 quote_number=(
-                    quote_by_enquiry[str(e.id)].quote_number
-                    if str(e.id) in quote_by_enquiry
+                    quote.quote_number
+                    if quote is not None
                     else None
                 ),
                 next_follow_up_date=(
@@ -629,7 +718,8 @@ async def handle_list_enquiries(
                 created_by_user_id=str(e.created_by_user_id) if e.created_by_user_id else None,
                 created_by_name=(e.created_by_name or "").strip() or None,
                 erp_export_available=bool(getattr(e, "erp_export_path", None)),
-                category=_enquiry_list_category(e),
+                category=category,
+                sub_category=sub_category,
                 items_search_text=_enquiry_items_search_text(e),
                 is_non_standard_customer=e.company_id is None,
                 series=_enquiry_series(e),
@@ -642,9 +732,9 @@ async def handle_list_enquiries(
                     getattr(e, "enquiry_quote_status", None)
                 ),
                 notes=_enquiry_list_notes(e),
+                )
             )
-            for e in enquiries
-        ]
+        return items
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

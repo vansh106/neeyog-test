@@ -19,6 +19,8 @@ import {
   listingFilterInputClass,
   listingFilterSelectTriggerClass,
 } from '@/components/listing/ListingFilterPrimitives'
+import { listingCategorySubCategorySelects } from '@/components/listing/ListingCategorySubCategoryFilters'
+import type { ListingCategoryFilterOptions } from '@/lib/listingCategoryFilter'
 import { ARCHIVE_FILTER_OPTIONS } from '@/lib/archiveFilter'
 import type { LocalQuotationFilters } from '@/lib/filterQuotationsLocal'
 import {
@@ -29,8 +31,9 @@ import {
 
 type Props = {
   filters: LocalQuotationFilters
-  onChange: (next: LocalQuotationFilters) => void
+  onChange: (next: LocalQuotationFilters | ((prev: LocalQuotationFilters) => LocalQuotationFilters)) => void
   categoryOptions: string[]
+  subCategoriesByCategory: Record<string, string[]>
   userOptions: string[]
   onClear: () => void
   hasActiveFilters: boolean
@@ -46,11 +49,17 @@ export default function QuotationListingFilters({
   filters,
   onChange,
   categoryOptions,
+  subCategoriesByCategory,
   userOptions,
   onClear,
   hasActiveFilters,
 }: Props) {
-  const set = (partial: Partial<LocalQuotationFilters>) => onChange({ ...filters, ...partial })
+  const set = (partial: Partial<LocalQuotationFilters>) =>
+    onChange((prev) => ({ ...prev, ...partial }))
+  const categoryFilterOptions: ListingCategoryFilterOptions = {
+    categories: categoryOptions,
+    subCategoriesByCategory,
+  }
 
   return (
     <ListingFilterShell>
@@ -64,7 +73,7 @@ export default function QuotationListingFilters({
           />
         </ListingFilterCell>
 
-        <ListingFilterCell label="Client :" stacked>
+        <ListingFilterCell label="Client :" stacked className="lg:col-span-1">
           <Input
             value={filters.clientName}
             onChange={(e) => set({ clientName: e.target.value })}
@@ -73,26 +82,20 @@ export default function QuotationListingFilters({
           />
         </ListingFilterCell>
 
-        <ListingFilterCell label="Category :" stacked>
-          <Select
-            value={filters.category || 'ALL'}
-            onValueChange={(v) => set({ category: v === 'ALL' ? '' : v ?? '' })}
-          >
-            <SelectTrigger className={listingFilterSelectTriggerClass}>
-              <SelectValue placeholder="All" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="ALL">All</SelectItem>
-              {categoryOptions.map((c) => (
-                <SelectItem key={c} value={c}>
-                  {c}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+        <ListingFilterCell label="Category :" stacked className="col-span-2 sm:col-span-2 lg:col-span-2">
+          {listingCategorySubCategorySelects({
+            category: filters.category,
+            subCategory: filters.subCategory,
+            onCategoryChange: (category) => set({ category, subCategory: '' }),
+            onSubCategoryChange: (subCategory) => set({ subCategory }),
+            options: categoryFilterOptions,
+            selectTriggerClassName: listingFilterSelectTriggerClass,
+            layout: 'compact',
+            subCategoryLabel: 'Sub-cat',
+          })}
         </ListingFilterCell>
 
-        <ListingFilterCell label="Status :" stacked>
+        <ListingFilterCell label="Status :" stacked className="lg:col-span-1">
           <Select
             value={filters.status || 'ALL'}
             onValueChange={(v) => set({ status: v === 'ALL' ? '' : v ?? '' })}

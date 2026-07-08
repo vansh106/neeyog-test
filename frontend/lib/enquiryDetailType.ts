@@ -1,11 +1,10 @@
-export const ENQUIRY_DETAIL_TYPES = ['complete', 'incomplete', 'partially_complete'] as const
+export const ENQUIRY_DETAIL_TYPES = ['complete', 'incomplete'] as const
 
 export type EnquiryDetailType = (typeof ENQUIRY_DETAIL_TYPES)[number]
 
 export const ENQUIRY_DETAIL_TYPE_LABELS: Record<EnquiryDetailType, string> = {
   complete: 'Complete',
   incomplete: 'Incomplete',
-  partially_complete: 'Partially complete',
 }
 
 export function isEnquiryDetailType(value: string): value is EnquiryDetailType {
@@ -14,6 +13,7 @@ export function isEnquiryDetailType(value: string): value is EnquiryDetailType {
 
 export function normalizeEnquiryDetailType(value: string | null | undefined): EnquiryDetailType {
   const v = (value || '').trim().toLowerCase()
+  if (v === 'partially_complete') return 'incomplete'
   return isEnquiryDetailType(v) ? v : 'incomplete'
 }
 

@@ -149,7 +149,7 @@ async def patch_enquiry_quote_status_route(
     user: CurrentUser = Depends(require_permission(Permission.VIEW_QUOTATIONS)),
     db: AsyncSession = Depends(get_db),
 ):
-    """Update enquiry listing quote status (Not Quoted / Quoted / Partially Quoted)."""
+    """Update enquiry listing quote status (Not Quoted / Quoted)."""
     return await enquiry_controller.handle_patch_enquiry_quote_status(enquiry_id, body, db, user)
 
 

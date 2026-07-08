@@ -133,6 +133,7 @@ export default function QuotationsPage() {
         filters={filters}
         onChange={setFilters}
         categoryOptions={filterOptions.categories}
+        subCategoriesByCategory={filterOptions.subCategoriesByCategory}
         userOptions={filterOptions.users}
         onClear={clearFilters}
         hasActiveFilters={hasActiveFilters}

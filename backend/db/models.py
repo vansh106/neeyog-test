@@ -156,7 +156,7 @@ class Enquiry(Base):
     enquiry_detail_type: Mapped[str] = mapped_column(
         String(20), nullable=False, default="incomplete", server_default="incomplete"
     )
-    #: Listing quote status: ``not_quoted`` | ``quoted`` | ``partially_quoted``.
+    #: Listing quote status: ``not_quoted`` | ``quoted``.
     enquiry_quote_status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="not_quoted", server_default="not_quoted"
     )

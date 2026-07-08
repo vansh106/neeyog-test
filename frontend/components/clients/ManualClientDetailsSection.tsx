@@ -146,10 +146,9 @@ export default function ManualClientDetailsSection({
                       }}
                     >
                       <span className="font-medium text-gray-900">{co.company_name}</span>
-                      <span className="text-[12px] text-surface-muted">
-                        {co.branch_count} branches
-                        {co.gst_number ? ` · GST: ${co.gst_number}` : ''}
-                      </span>
+                        <span className="text-[12px] text-surface-muted">
+                          {co.branch_count} branches
+                        </span>
                     </button>
                   ))
                 )}
@@ -536,18 +535,10 @@ export default function ManualClientDetailsSection({
                 />
                 {errors.company_name && <p className="text-[12px] text-red-600">{errors.company_name}</p>}
               </div>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div>
-                  <div className="text-[10px] font-medium uppercase tracking-wide text-[#8A9488]">GST Number</div>
-                  <Input
-                    value={newClient.gst_number}
-                    disabled={disabled}
-                    onChange={(e) => setNewClient({ ...newClient, gst_number: e.target.value })}
-                    className="mt-1 h-10 font-mono"
-                  />
+              <div>
+                <div className="text-[10px] font-medium uppercase tracking-wide text-[#8A9488]">
+                  Industry<span className="text-red-600"> *</span>
                 </div>
-                <div>
-                  <div className="text-[10px] font-medium uppercase tracking-wide text-[#8A9488]">Industry</div>
                   <Select
                     value={newClient.industry || SELECT_EMPTY}
                     onValueChange={(v) =>
@@ -558,11 +549,10 @@ export default function ManualClientDetailsSection({
                     }
                     disabled={disabled}
                   >
-                    <SelectTrigger className="mt-1 h-10">
+                    <SelectTrigger className={cn('mt-1 h-10', errors.industry && 'border-red-300')}>
                       <SelectValue placeholder="Select industry" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value={SELECT_EMPTY}>—</SelectItem>
                       {CLIENT_INDUSTRY_OPTIONS.map((x) => (
                         <SelectItem key={x} value={x}>
                           {x}
@@ -570,7 +560,7 @@ export default function ManualClientDetailsSection({
                       ))}
                     </SelectContent>
                   </Select>
-                </div>
+                  {errors.industry && <p className="text-[12px] text-red-600">{errors.industry}</p>}
               </div>
             </div>
           </div>

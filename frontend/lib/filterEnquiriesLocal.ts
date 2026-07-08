@@ -28,7 +28,6 @@ export type EnquiryListingFilters = {
   dateFrom: string
   useToDate: boolean
   dateTo: string
-  category: string
   useCustomer: boolean
   customer: string
   useNonStandardCustomer: boolean
@@ -52,7 +51,6 @@ export const EMPTY_ENQUIRY_LISTING_FILTERS: EnquiryListingFilters = {
   dateFrom: '',
   useToDate: false,
   dateTo: '',
-  category: 'ALL',
   useCustomer: false,
   customer: '',
   useNonStandardCustomer: false,
@@ -108,13 +106,6 @@ export function filterEnquiriesLocal(
       if (!row.created_at) return false
       return enquiryLocalDay(row.created_at) <= to
     })
-  }
-
-  if (f.category && f.category !== 'ALL') {
-    const cat = norm(f.category)
-    out = out.filter(
-      (row) => norm(row.category || '') === cat || norm(row.category || '').includes(cat),
-    )
   }
 
   if (f.useCustomer) {
@@ -185,20 +176,13 @@ export function filterEnquiriesLocal(
   return out
 }
 
-export function collectEnquiryFilterOptions(rows: EnquiryListItem[]): {
-  categories: string[]
-  series: string[]
-} {
-  const cats = new Set<string>(['Hose', 'Valve', 'Fitting'])
+export function collectEnquiryFilterOptions(rows: EnquiryListItem[]): { series: string[] } {
   const series = new Set<string>()
   for (const row of rows) {
-    const c = (row.category || '').trim()
-    if (c) cats.add(c)
     const s = (row.series || '').trim()
     if (s) series.add(s)
   }
   return {
-    categories: [...cats].sort((a, b) => a.localeCompare(b)),
     series: [...series].sort((a, b) => a.localeCompare(b)),
   }
 }

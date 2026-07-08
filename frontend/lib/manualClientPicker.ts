@@ -75,7 +75,6 @@ export function dummyCompaniesForSearch(): CompanyResponse[] {
 
 const defaultNewClient = {
   company_name: '',
-  gst_number: '',
   industry: '',
   branch_name: 'Head Office',
   contact_name: '',
@@ -115,6 +114,7 @@ function clientFieldsComplete(
   const ph = cleanPhone(newClient.phone || '')
   return (
     (newClient.company_name || '').trim().length >= 2 &&
+    !!(newClient.industry || '').trim() &&
     !!(newClient.branch_name || '').trim() &&
     !!(newClient.city || '').trim() &&
     !!(newClient.state || '').trim() &&
@@ -331,6 +331,7 @@ export function useManualClientPicker() {
       else if (!selectedBranchId) e.client = 'Please select a branch'
     } else {
       if ((newClient.company_name || '').trim().length < 2) e.company_name = 'Company name is required'
+      if (!(newClient.industry || '').trim()) e.industry = 'Industry is required'
       if (!(newClient.branch_name || '').trim()) e.branch_name = 'Branch name is required'
       if (!(newClient.city || '').trim()) e.city = 'City is required'
       if (!(newClient.state || '').trim()) e.state = 'State is required'

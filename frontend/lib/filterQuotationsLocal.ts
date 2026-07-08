@@ -1,6 +1,10 @@
 import type { QuotationListItem } from '@/types'
 import { matchesArchiveFilter, type ArchiveFilter } from '@/lib/archiveFilter'
 import { isoLocalDay, isFullAmountRange, localTodayIso, uniqueSortedStrings } from '@/lib/listingFilterUtils'
+import {
+  collectQuotationCategoryFilterOptions,
+  quotationMatchesCategoryFilters,
+} from '@/lib/listingCategoryFilter'
 
 function norm(s: string): string {
   return s.trim().toLowerCase()
@@ -13,6 +17,7 @@ export type LocalQuotationFilters = {
   clientName: string
   status: string
   category: string
+  subCategory: string
   user: string
   dateFrom: string
   dateTo: string
@@ -29,6 +34,7 @@ export const DEFAULT_QUOTATION_FILTERS: LocalQuotationFilters = {
   clientName: '',
   status: '',
   category: '',
+  subCategory: '',
   user: '',
   dateFrom: '',
   dateTo: '',
@@ -41,16 +47,9 @@ export const DEFAULT_QUOTATION_FILTERS: LocalQuotationFilters = {
 }
 
 export function collectQuotationFilterOptions(rows: QuotationListItem[]) {
-  const categories = uniqueSortedStrings(
-    rows.flatMap((r) => [
-      r.category_label,
-      r.primary_category,
-      r.sub_category,
-      ...(r.category_lines ?? []).map((l) => l.category),
-    ]),
-  )
+  const categoryOptions = collectQuotationCategoryFilterOptions(rows)
   const users = uniqueSortedStrings(rows.map((r) => r.created_by_name))
-  return { categories, users }
+  return { ...categoryOptions, users }
 }
 
 export function quotationPoBounds(rows: QuotationListItem[]) {
@@ -112,20 +111,8 @@ export function filterQuotationsLocal(rows: QuotationListItem[], f: LocalQuotati
     })
   }
 
-  if (f.category) {
-    const cat = norm(f.category)
-    out = out.filter((row) => {
-      const labels = [
-        row.category_label,
-        row.primary_category,
-        row.sub_category,
-        ...(row.category_lines ?? []).map((l) => l.category),
-        ...(row.category_lines ?? []).map((l) => l.sub_category),
-      ]
-        .filter(Boolean)
-        .map((s) => norm(String(s)))
-      return labels.some((l) => l === cat || l.includes(cat))
-    })
+  if (f.category || f.subCategory) {
+    out = out.filter((row) => quotationMatchesCategoryFilters(row, f.category, f.subCategory))
   }
 
   if (f.user) {
@@ -192,6 +179,7 @@ export function quotationFiltersActive(f: LocalQuotationFilters): boolean {
     !!f.clientName.trim() ||
     !!f.status ||
     !!f.category ||
+    !!f.subCategory ||
     !!f.user ||
     !!f.dateFrom ||
     !!f.dateTo ||

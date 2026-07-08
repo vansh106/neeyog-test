@@ -15,6 +15,7 @@ import {
 import { Input } from '@/components/ui/input'
 import {
   LISTING_EXPORT_RANGE_OPTIONS,
+  validateListingExportRange,
   type ListingExportRange,
   type ListingExportRangePreset,
 } from '@/lib/listingExportRange'
@@ -33,6 +34,16 @@ function defaultSpecificMonth(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
 }
 
+function defaultFromDate(): string {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`
+}
+
+function defaultToDate(): string {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
 export default function ListingExportDialog({
   open,
   onOpenChange,
@@ -42,6 +53,8 @@ export default function ListingExportDialog({
 }: Props) {
   const [preset, setPreset] = useState<ListingExportRangePreset>('this_month')
   const [specificMonth, setSpecificMonth] = useState(defaultSpecificMonth)
+  const [fromDate, setFromDate] = useState(defaultFromDate)
+  const [toDate, setToDate] = useState(defaultToDate)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -49,18 +62,29 @@ export default function ListingExportDialog({
     if (!open) return
     setPreset('this_month')
     setSpecificMonth(defaultSpecificMonth())
+    setFromDate(defaultFromDate())
+    setToDate(defaultToDate())
     setBusy(false)
     setError(null)
   }, [open])
 
   const handleExport = async () => {
+    const range: ListingExportRange = {
+      preset,
+      specificMonth: preset === 'specific_month' ? specificMonth : undefined,
+      fromDate: preset === 'specific_date' ? fromDate : undefined,
+      toDate: preset === 'specific_date' ? toDate : undefined,
+    }
+    const validationError = validateListingExportRange(range)
+    if (validationError) {
+      setError(validationError)
+      return
+    }
+
     setBusy(true)
     setError(null)
     try {
-      await onExport({
-        preset,
-        specificMonth: preset === 'specific_month' ? specificMonth : undefined,
-      })
+      await onExport(range)
       onOpenChange(false)
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Export failed')
@@ -112,6 +136,33 @@ export default function ListingExportDialog({
               disabled={busy}
             />
           </label>
+        )}
+
+        {preset === 'specific_date' && (
+          <div className="grid grid-cols-2 gap-3">
+            <label className="block text-[12px]">
+              <span className="text-surface-muted">From date</span>
+              <Input
+                type="date"
+                className="mt-1"
+                value={fromDate}
+                max={toDate || undefined}
+                onChange={(e) => setFromDate(e.target.value)}
+                disabled={busy}
+              />
+            </label>
+            <label className="block text-[12px]">
+              <span className="text-surface-muted">To date</span>
+              <Input
+                type="date"
+                className="mt-1"
+                value={toDate}
+                min={fromDate || undefined}
+                onChange={(e) => setToDate(e.target.value)}
+                disabled={busy}
+              />
+            </label>
+          </div>
         )}
 
         {error && <p className="text-[13px] text-red-600">{error}</p>}

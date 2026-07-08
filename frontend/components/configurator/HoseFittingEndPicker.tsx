@@ -22,6 +22,7 @@ import {
   HOSE_FITTING_SIZE_FIELD,
   isBareFittingSelection,
   isTemporaryFittingSelection,
+  filterFittingSizeOptionsForHoseMatch,
   matchHoseSizeToFittingOption,
   TEMPORARY_FITTING_CATALOG_KEY,
 } from '@/lib/configuratorProductFlow'
@@ -192,10 +193,13 @@ export function HoseFittingEndPicker({
         const v = specs.field_values[pc.key]
         if (v) prior[pc.key] = v
       }
-      o[field] = getOptions(field, prior)
+      o[field] =
+        field === HOSE_FITTING_SIZE_FIELD
+          ? filterFittingSizeOptionsForHoseMatch(hoseSizeForMatch, getOptions(field, prior))
+          : getOptions(field, prior)
     }
     return o
-  }, [specs, catalog, getOptions, visibleCascadeSteps])
+  }, [specs, catalog, getOptions, visibleCascadeSteps, hoseSizeForMatch])
 
   const resolved = useMemo((): ValveProduct | null => {
     if (isTemporaryFittingSelection(specs.catalog_category)) {
@@ -423,7 +427,7 @@ export function HoseFittingEndPicker({
               : 'border-surface-border bg-white hover:bg-surface-page',
           )}
         >
-          <p className="text-[13px] font-semibold text-gray-900 leading-snug">Ingest temporary product</p>
+          <p className="text-[13px] font-semibold text-gray-900 leading-snug">Add temporary product</p>
           <p className="mt-0.5 text-[11px] text-surface-muted">Free-text description — price on review step</p>
         </button>
       </div>

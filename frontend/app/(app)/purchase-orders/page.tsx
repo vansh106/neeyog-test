@@ -11,6 +11,7 @@ import { Button, buttonVariants } from '@/components/ui/button'
 import CreatePurchaseOrderDialog from '@/components/purchase-orders/CreatePurchaseOrderDialog'
 import DeletePurchaseOrderDialog from '@/components/purchase-orders/DeletePurchaseOrderDialog'
 import EnterPoSoNumberDialog from '@/components/purchase-orders/EnterPoSoNumberDialog'
+import ListingCategoryCell from '@/components/listing/ListingCategoryCell'
 import PurchaseOrderListingFilters from '@/components/purchase-orders/PurchaseOrderListingFilters'
 import ListingPagination from '@/components/listing/ListingPagination'
 import { usePurchaseOrdersListingDataset } from '@/lib/queries'
@@ -152,6 +153,7 @@ export default function PurchaseOrdersPage() {
         filters={filters}
         onChange={setFilters}
         categoryOptions={filterOptions.categories}
+        subCategoriesByCategory={filterOptions.subCategoriesByCategory}
         userOptions={filterOptions.users}
         onClear={clearFilters}
         hasActiveFilters={hasActiveFilters}
@@ -169,7 +171,7 @@ export default function PurchaseOrdersPage() {
               <th className="px-4 py-3">PO no / date</th>
               <th className="px-4 py-3">Customer</th>
               <th className="px-4 py-3">Type / quote ref</th>
-              <th className="px-4 py-3">Category</th>
+              <th className="px-4 py-3">Category / Sub-Category</th>
               <th className="px-4 py-3">Item desc</th>
               <th className="px-4 py-3 text-right">PO ₹</th>
               <th className="px-4 py-3">SO no.</th>
@@ -299,7 +301,13 @@ function PoRow({
           <span className="text-[12px] text-surface-muted">—</span>
         )}
       </td>
-      <td className="px-4 py-3">{po.primary_category}</td>
+      <td className="px-4 py-3 align-top">
+        <ListingCategoryCell
+          lines={po.category_lines}
+          category={po.category_label || po.primary_category}
+          subCategory={po.sub_category}
+        />
+      </td>
       <td className="max-w-[180px] truncate px-4 py-3 text-[12px] text-surface-muted" title={po.item_desc_short}>
         {po.item_desc_short}
       </td>

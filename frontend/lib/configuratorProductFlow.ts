@@ -335,5 +335,15 @@ export function matchHoseSizeToFittingOption(
   return null
 }
 
+/** When hose size maps to a fittings ``size_mm`` option, keep only that option in the dropdown. */
+export function filterFittingSizeOptionsForHoseMatch(
+  hoseSizeIdMm: string | null | undefined,
+  fittingOptions: string[],
+): string[] {
+  if (!hoseSizeIdMm?.trim() || fittingOptions.length === 0) return fittingOptions
+  const matched = matchHoseSizeToFittingOption(hoseSizeIdMm, fittingOptions)
+  return matched ? [matched] : fittingOptions
+}
+
 export const HOSE_FITTING_SIZE_FIELD = 'size_mm'
 export const HOSE_SIZE_FIELD = 'size_id_mm'

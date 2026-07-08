@@ -399,14 +399,14 @@ export default function ConfiguratorCategoryPicker({
               )}
               {onSelectTemporary && activeFamily !== 'Others' ? (
                 <SelectionCard
-                  label="Ingest temporary product"
+                  label="Add temporary product"
                   hint="Free-text description — price on review step"
                   onClick={() => onSelectTemporary(activeFamily)}
                 />
               ) : null}
               {onSelectTemporary && activeFamily === 'Others' ? (
                 <SelectionCard
-                  label="Ingest temporary product"
+                  label="Add temporary product"
                   hint="Free-text description — price on review step"
                   onClick={() => onSelectTemporary('Others')}
                 />

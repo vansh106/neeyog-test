@@ -1,5 +1,9 @@
 import type { PurchaseOrderListItem } from '@/types'
 import { computeAmountBounds, isFullAmountRange, uniqueSortedStrings } from '@/lib/listingFilterUtils'
+import {
+  collectPurchaseOrderCategoryFilterOptions,
+  purchaseOrderMatchesCategoryFilters,
+} from '@/lib/listingCategoryFilter'
 
 function norm(s: string): string {
   return s.trim().toLowerCase()
@@ -10,6 +14,7 @@ export type LocalPurchaseOrderFilters = {
   clientName: string
   type: string
   category: string
+  subCategory: string
   user: string
   dateFrom: string
   dateTo: string
@@ -24,6 +29,7 @@ export const DEFAULT_PO_FILTERS: LocalPurchaseOrderFilters = {
   clientName: '',
   type: '',
   category: '',
+  subCategory: '',
   user: '',
   dateFrom: '',
   dateTo: '',
@@ -34,8 +40,9 @@ export const DEFAULT_PO_FILTERS: LocalPurchaseOrderFilters = {
 }
 
 export function collectPurchaseOrderFilterOptions(rows: PurchaseOrderListItem[]) {
+  const categoryOptions = collectPurchaseOrderCategoryFilterOptions(rows)
   return {
-    categories: uniqueSortedStrings(rows.map((r) => r.primary_category)),
+    ...categoryOptions,
     users: uniqueSortedStrings(rows.map((r) => r.created_by_name)),
   }
 }
@@ -70,9 +77,8 @@ export function filterPurchaseOrdersLocal(
   if (f.type === 'quoted') out = out.filter((row) => row.po_type === 'quoted')
   if (f.type === 'non_quoted') out = out.filter((row) => row.po_type === 'non_quoted')
 
-  if (f.category) {
-    const cat = norm(f.category)
-    out = out.filter((row) => norm(row.primary_category || '') === cat)
+  if (f.category || f.subCategory) {
+    out = out.filter((row) => purchaseOrderMatchesCategoryFilters(row, f.category, f.subCategory))
   }
 
   if (f.user) {
@@ -109,6 +115,7 @@ export function purchaseOrderFiltersActive(f: LocalPurchaseOrderFilters): boolea
     !!f.clientName.trim() ||
     !!f.type ||
     !!f.category ||
+    !!f.subCategory ||
     !!f.user ||
     !!f.dateFrom ||
     !!f.dateTo ||

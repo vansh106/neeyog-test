@@ -22,7 +22,7 @@ export interface EnquiryListItem {
   source?: EnquirySource | string
   /** Whether client/product details were complete at intake. */
   enquiry_detail_type?: import('@/lib/enquiryDetailType').EnquiryDetailType | string
-  /** Listing quote status: not_quoted | quoted | partially_quoted. */
+  /** Listing quote status: not_quoted | quoted. */
   enquiry_quote_status?: import('@/lib/enquiryQuoteStatus').EnquiryQuoteStatus | string
   item_desc_short?: string
   item_desc_lines?: ListingItemDescriptionLine[]
@@ -39,6 +39,7 @@ export interface EnquiryListItem {
   erp_export_available?: boolean
   /** Inferred from parsed line items (listing filters). */
   category?: string | null
+  sub_category?: string | null
   items_search_text?: string
   is_non_standard_customer?: boolean
   series?: string | null
@@ -369,6 +370,9 @@ export interface PurchaseOrderListItem {
   quote_number?: string | null
   quotation_id?: string | null
   primary_category: string
+  category_label?: string | null
+  sub_category?: string | null
+  category_lines?: ListingCategoryLine[]
   item_desc_short: string
   /** Sum of PO line items before P&F, freight, and GST. */
   subtotal: number
@@ -588,7 +592,7 @@ export interface CompanyResponse {
 export interface CreateCompanyRequestPayload {
   company_name?: string
   gst_number?: string | null
-  industry?: string | null
+  industry: string
   notes?: string | null
   is_active?: boolean
   branch_name?: string
@@ -623,7 +627,6 @@ export interface ClientSelection {
   selectedBranch: BranchResponse | null
   newCompany: {
     company_name: string
-    gst_number: string
     industry: string
   }
   newBranch: {
@@ -790,7 +793,6 @@ export interface ManualEnquiryForm {
   }
   newClient?: {
     company_name: string
-    gst_number: string
     industry: string
     branch_name: string
     contact_name: string
@@ -814,7 +816,7 @@ export interface ManualEnquiryForm {
   supplierPricing?: ManualSupplierPricingContext | null
   /** Net total section: optional P&amp;F toggle and override amount (defaults to 3% of subtotal). */
   orderTotals?: ManualOrderTotals | null
-  /** Set when generating a quotation — drives enquiry list quote status (Quoted / Partially Quoted). */
+  /** Set when generating a quotation — marks the enquiry as Quoted in the listing. */
   enquiryQuoteStatus?: import('@/lib/enquiryQuoteStatus').EnquiryQuoteStatus
 }
 

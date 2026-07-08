@@ -63,7 +63,6 @@ export default function ClientsTab() {
   const [saving, setSaving] = useState(false)
 
   const [coName, setCoName] = useState('')
-  const [coGst, setCoGst] = useState('')
   const [coIndustry, setCoIndustry] = useState('')
   const [coNotes, setCoNotes] = useState('')
 
@@ -162,14 +161,12 @@ export default function ClientsTab() {
     return companies.filter(
       (c) =>
         c.company_name.toLowerCase().includes(s) ||
-        (c.industry || '').toLowerCase().includes(s) ||
-        (c.gst_number || '').toLowerCase().includes(s),
+        (c.industry || '').toLowerCase().includes(s),
     )
   }, [companies, leftSearch])
 
   function openAddCompany() {
     setCoName('')
-    setCoGst('')
     setCoIndustry('')
     setCoNotes('')
     setBf({
@@ -182,7 +179,6 @@ export default function ClientsTab() {
   function openEditCompany() {
     if (!detail) return
     setCoName(detail.company_name)
-    setCoGst(detail.gst_number ?? '')
     setCoIndustry(detail.industry ?? '')
     setCoNotes('')
     setCompanySheet('edit')
@@ -214,6 +210,10 @@ export default function ClientsTab() {
 
   async function submitCompanySheet() {
     if (!coName.trim()) return
+    if (!coIndustry.trim()) {
+      setErr('Industry is required')
+      return
+    }
     setSaving(true)
     try {
       if (companySheet === 'add') {
@@ -224,8 +224,7 @@ export default function ClientsTab() {
         }
         const payload: CreateCompanyRequestPayload = {
           company_name: coName.trim(),
-          gst_number: coGst.trim() || null,
-          industry: coIndustry.trim() || null,
+          industry: coIndustry.trim(),
           notes: coNotes.trim() || null,
           branch_name: bf.branch_name.trim(),
           contact_name: bf.contact_name.trim() || null,
@@ -245,8 +244,7 @@ export default function ClientsTab() {
       } else if (companySheet === 'edit' && detail) {
         await clientsApi.updateCompany(detail.id, {
           company_name: coName.trim(),
-          gst_number: coGst.trim() || null,
-          industry: coIndustry.trim() || null,
+          industry: coIndustry.trim(),
           notes: coNotes.trim() || null,
         })
         setCompanySheet(null)
@@ -442,9 +440,6 @@ export default function ClientsTab() {
             <div className="flex flex-col gap-3 border-b border-surface-border pb-4 sm:flex-row sm:items-start sm:justify-between">
               <div>
                 <h2 className="text-[20px] font-semibold text-gray-900">{detail.company_name}</h2>
-                {detail.gst_number ? (
-                  <p className="mt-1 font-mono text-[13px] text-surface-muted">GST {detail.gst_number}</p>
-                ) : null}
                 {detail.industry ? (
                   <span className="mt-2 inline-block rounded-full bg-gray-100 px-2 py-0.5 text-[11px] text-gray-700">
                     {detail.industry}
@@ -748,20 +743,15 @@ export default function ClientsTab() {
               <Input className="mt-1" value={coName} onChange={(e) => setCoName(e.target.value)} />
             </div>
             <div>
-              <label className="text-[11px] font-medium uppercase text-surface-muted">GST Number</label>
-              <Input className="mt-1 font-mono" value={coGst} onChange={(e) => setCoGst(e.target.value)} />
-            </div>
-            <div>
-              <label className="text-[11px] font-medium uppercase text-surface-muted">Industry</label>
+              <label className="text-[11px] font-medium uppercase text-surface-muted">Industry *</label>
               <Select
                 value={coIndustry || '__none__'}
                 onValueChange={(v) => setCoIndustry(!v || v === '__none__' ? '' : v)}
               >
                 <SelectTrigger className="mt-1">
-                  <SelectValue placeholder="Select" />
+                  <SelectValue placeholder="Select industry" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="__none__">—</SelectItem>
                   {CLIENT_INDUSTRY_OPTIONS.map((x) => (
                     <SelectItem key={x} value={x}>
                       {x}

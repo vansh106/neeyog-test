@@ -117,6 +117,17 @@ def require_admin_permissions(*permissions: Permission):
     return checker
 
 
+def require_admin_or_above():
+    """Admin or superadmin tier only."""
+
+    async def checker(current_user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
+        if not current_user.is_admin_or_above:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+        return current_user
+
+    return checker
+
+
 def require_indiamart_access():
     """Admin, superadmin, or dedicated IndiaMart account tier."""
 

@@ -14,8 +14,6 @@ import { useSheetDefaultSuppliers } from '@/lib/queries'
 import { resolveSupplierFromSheetDefaults } from '@/lib/sheetDefaultSupplier'
 import { isTemporaryCatalogCategory } from '@/lib/configuratorProductFlow'
 import { ValveConfigurator, CompletedProductCard } from '@/components/configurator/ValveConfigurator'
-import QuotationCompletenessDialog from '@/components/enquiries/QuotationCompletenessDialog'
-import type { EnquiryQuoteStatus } from '@/lib/enquiryQuoteStatus'
 import {
   assemblyLabel,
   assemblyPartComponentKey,
@@ -437,7 +435,6 @@ function buildEmailText(
   let branch_name = ''
   let city = ''
   let state = ''
-  let gst = ''
   let industry = ''
   let contact_name = ''
   let designation = ''
@@ -452,7 +449,6 @@ function buildEmailText(
     branch_name = existingBranch.branch_name
     city = existingBranch.city
     state = existingBranch.state || ''
-    gst = existingCompany.gst_number || 'N/A'
     industry = existingCompany.industry || 'N/A'
     contact_name = existingBranch.contact_name || ''
     designation = existingBranch.designation || ''
@@ -474,7 +470,6 @@ function buildEmailText(
     branch_name = nc.branch_name
     city = nc.city
     state = nc.state
-    gst = nc.gst_number || 'N/A'
     industry = nc.industry || 'N/A'
     contact_name = nc.contact_name
     designation = nc.designation
@@ -500,7 +495,6 @@ function buildEmailText(
   if (branch_name) lines.push(`Branch: ${branch_name}`)
   if (city || state) lines.push(`City: ${city}${state ? `, ${state}` : ''}`)
   if (form.clientMode === 'new' || (form.clientMode === 'existing' && existingCompany)) {
-    lines.push(`GST: ${gst}`)
     lines.push(`Industry: ${industry}`)
   }
   if (contact_name) lines.push(`Contact: ${contact_name}`)
@@ -624,8 +618,6 @@ export default function ManualEntryForm({
     initialFollowUpDate ? initialFollowUpDate.slice(0, 10) : '',
   )
   const [nextFollowUpNote, setNextFollowUpNote] = useState('')
-  const [quoteCompletenessOpen, setQuoteCompletenessOpen] = useState(false)
-  const [pendingQuotationForm, setPendingQuotationForm] = useState<ManualEnquiryForm | null>(null)
   const [productNotes, setProductNotes] = useState<ProductNoteEntry[]>(() =>
     initProductNotesFromPrefill(prefillNotesFromEnquiry),
   )
@@ -636,7 +628,6 @@ export default function ManualEntryForm({
   const [clientMode, setClientMode] = useState<'existing' | 'new'>('existing')
   const [newClient, setNewClient] = useState({
     company_name: '',
-    gst_number: '',
     industry: '',
     branch_name: 'Head Office',
     contact_name: '',
@@ -1223,6 +1214,7 @@ export default function ManualEntryForm({
         else if (!selectedBranchId) e.client = 'Please select a branch'
       } else {
         if ((newClient.company_name || '').trim().length < 2) e.company_name = 'Company name is required'
+        if (!(newClient.industry || '').trim()) e.industry = 'Industry is required'
         if (!(newClient.branch_name || '').trim()) e.branch_name = 'Branch name is required'
         if (!(newClient.city || '').trim()) e.city = 'City is required'
         if (!(newClient.state || '').trim()) e.state = 'State is required'
@@ -1484,16 +1476,10 @@ export default function ManualEntryForm({
     }
     const form = buildQuotationForm()
     if (targetEnquiryId) {
-      setPendingQuotationForm(form)
-      setQuoteCompletenessOpen(true)
+      submitQuotationForm({ ...form, enquiryQuoteStatus: 'quoted' })
       return
     }
     submitQuotationForm(form)
-  }
-
-  function confirmQuoteCompleteness(status: Extract<EnquiryQuoteStatus, 'quoted' | 'partially_quoted'>) {
-    if (!pendingQuotationForm || isProcessing) return
-    submitQuotationForm({ ...pendingQuotationForm, enquiryQuoteStatus: status })
   }
 
   const submitLabel =
@@ -1671,7 +1657,6 @@ export default function ManualEntryForm({
                         <span className="font-medium text-gray-900">{co.company_name}</span>
                         <span className="text-[12px] text-surface-muted">
                           {co.branch_count} branches
-                          {co.gst_number ? ` · GST: ${co.gst_number}` : ''}
                         </span>
                       </button>
                     ))
@@ -2027,18 +2012,11 @@ export default function ManualEntryForm({
                   />
                   {errors.company_name && <p className="text-[12px] text-red-600">{errors.company_name}</p>}
                 </div>
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <div>
-                    <div className="text-[10px] font-medium uppercase tracking-wide text-[#8A9488]">GST Number</div>
-                    <Input
-                      value={newClient.gst_number}
-                      onChange={(e) => setNewClient({ ...newClient, gst_number: e.target.value })}
-                      className="mt-1 h-10 font-mono"
-                    />
+                <div>
+                  <div className="text-[10px] font-medium uppercase tracking-wide text-[#8A9488]">
+                    Industry<span className="text-red-600"> *</span>
                   </div>
-                  <div>
-                    <div className="text-[10px] font-medium uppercase tracking-wide text-[#8A9488]">Industry</div>
-                    <Select
+                  <Select
                       value={newClient.industry || SELECT_EMPTY}
                       onValueChange={(v) =>
                         setNewClient({
@@ -2047,11 +2025,10 @@ export default function ManualEntryForm({
                         })
                       }
                     >
-                      <SelectTrigger className="mt-1 h-10">
+                      <SelectTrigger className={cn('mt-1 h-10', errors.industry && 'border-red-300')}>
                         <SelectValue placeholder="Select industry" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value={SELECT_EMPTY}>—</SelectItem>
                         {CLIENT_INDUSTRY_OPTIONS.map((x) => (
                           <SelectItem key={x} value={x}>
                             {x}
@@ -2059,7 +2036,7 @@ export default function ManualEntryForm({
                         ))}
                       </SelectContent>
                     </Select>
-                  </div>
+                    {errors.industry && <p className="text-[12px] text-red-600">{errors.industry}</p>}
                 </div>
               </div>
             </div>
@@ -2649,18 +2626,6 @@ export default function ManualEntryForm({
           {submitLabel}
         </Button>
       </div>
-
-      <QuotationCompletenessDialog
-        open={quoteCompletenessOpen}
-        onOpenChange={(open) => {
-          if (!open && !isProcessing) {
-            setQuoteCompletenessOpen(false)
-            setPendingQuotationForm(null)
-          }
-        }}
-        onConfirm={confirmQuoteCompleteness}
-        busy={isProcessing}
-      />
     </div>
   )
 }

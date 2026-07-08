@@ -238,7 +238,6 @@ export default function EnquiriesPage() {
         <EnquiryListingFiltersPanel
           draft={filterDraft}
           onDraftChange={setFilterDraft}
-          categoryOptions={filterOptions.categories}
           seriesOptions={filterOptions.series}
           showSearchOptions={showSearchOptions}
           onToggleSearchOptions={() => setShowSearchOptions((v) => !v)}

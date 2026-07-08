@@ -20,8 +20,7 @@ const STATUS_OPTIONS = ENQUIRY_LISTING_STATUS_OPTIONS
 
 type Props = {
   draft: Filters
-  onDraftChange: (next: Filters) => void
-  categoryOptions: string[]
+  onDraftChange: (next: Filters | ((prev: Filters) => Filters)) => void
   seriesOptions: string[]
   showSearchOptions: boolean
   onToggleSearchOptions: () => void
@@ -95,14 +94,13 @@ const selectTriggerClass = 'h-6 w-full min-w-0 border-[#C5C9C0] px-1 text-[10px]
 export default function EnquiryListingFilters({
   draft,
   onDraftChange,
-  categoryOptions,
   seriesOptions,
   showSearchOptions,
   onToggleSearchOptions,
   onSearch,
   extraOptions,
 }: Props) {
-  const set = (partial: Partial<Filters>) => onDraftChange(patch(draft, partial))
+  const set = (partial: Partial<Filters>) => onDraftChange((prev) => patch(prev, partial))
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') {
@@ -117,8 +115,8 @@ export default function EnquiryListingFilters({
       onKeyDown={handleKeyDown}
     >
       <div className="overflow-x-auto">
-        <div className="min-w-[1040px] space-y-1.5">
-          <div className="grid grid-cols-7 gap-x-2 gap-y-0">
+        <div className="min-w-[960px] space-y-1.5">
+          <div className="grid grid-cols-6 gap-x-2 gap-y-0">
             <FilterCell
               label="From :"
               checkbox={
@@ -136,22 +134,6 @@ export default function EnquiryListingFilters({
                 disabled={!draft.useFromDate}
                 className={inputClass}
               />
-            </FilterCell>
-
-            <FilterCell label="Category :">
-              <Select value={draft.category} onValueChange={(v) => set({ category: v ?? 'ALL' })}>
-                <SelectTrigger className={selectTriggerClass}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="ALL">ALL</SelectItem>
-                  {categoryOptions.map((c) => (
-                    <SelectItem key={c} value={c}>
-                      {c}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
             </FilterCell>
 
             <FilterCell

@@ -54,6 +54,52 @@ def _po_api_dict(po: PurchaseOrder) -> dict:
     }
 
 
+def _po_quotation_line_indices(po: PurchaseOrder) -> list[int]:
+    indices: list[int] = []
+    for pl in po.line_items if isinstance(po.line_items, list) else []:
+        if not isinstance(pl, dict):
+            continue
+        raw = pl.get("quotation_line_index", pl.get("quotationLineIndex"))
+        if raw is None:
+            continue
+        try:
+            indices.append(int(raw))
+        except (TypeError, ValueError):
+            continue
+    return sorted(set(indices))
+
+
+def _lines_for_po_listing_category(po: PurchaseOrder) -> list[dict]:
+    """Category labels for quoted POs come from the linked quotation lines (same as quotation list)."""
+    quotation = getattr(po, "quotation", None)
+    q_lines = (
+        quotation.line_items
+        if quotation is not None and isinstance(quotation.line_items, list)
+        else []
+    )
+    if q_lines:
+        indices = _po_quotation_line_indices(po)
+        if indices:
+            subset = [
+                dict(q_lines[i])
+                for i in indices
+                if 0 <= i < len(q_lines) and isinstance(q_lines[i], dict)
+            ]
+            if subset:
+                return subset
+        return [dict(li) for li in q_lines if isinstance(li, dict)]
+
+    return [dict(li) for li in (po.line_items if isinstance(po.line_items, list) else []) if isinstance(li, dict)]
+
+
+def _listing_fields_for_po(po: PurchaseOrder, *, supplier_names: list[str] | None = None) -> dict:
+    from masters.listing_category import listing_fields_from_lines
+
+    lines = _lines_for_po_listing_category(po)
+    primary = quotation_service._primary_category_from_lines(lines) or po.primary_category or "Others"
+    return listing_fields_from_lines(lines, primary_fallback=primary)
+
+
 def _is_admin_scope(user: CurrentUser) -> bool:
     return user.tier in ("admin", "superadmin")
 
@@ -130,6 +176,9 @@ class PurchaseOrderListItem(BaseModel):
     quote_number: str | None = None
     quotation_id: str | None = None
     primary_category: str
+    category_label: str | None = None
+    sub_category: str | None = None
+    category_lines: list[dict[str, str | None]] = Field(default_factory=list)
     item_desc_short: str
     subtotal: float
     total_amount: float
@@ -237,7 +286,10 @@ async def handle_list_purchase_orders(
         created_by_user_id=scope_user_id,
     )
     supplier_names = await supplier_names_for_client(db)
-    return [
+    out: list[dict] = []
+    for po in rows:
+        listing = _listing_fields_for_po(po, supplier_names=supplier_names)
+        out.append(
         {
             "po_id": str(po.id),
             "po_number": po.po_number,
@@ -248,6 +300,9 @@ async def handle_list_purchase_orders(
             "quote_number": po.quote_number,
             "quotation_id": str(po.quotation_id) if po.quotation_id else None,
             "primary_category": po.primary_category,
+            "category_label": listing["category_label"],
+            "sub_category": listing["sub_category"],
+            "category_lines": listing.get("category_lines") or [],
             "item_desc_short": po.item_desc_short,
             "subtotal": float(po.subtotal or 0),
             "total_amount": po.total_amount,
@@ -256,8 +311,8 @@ async def handle_list_purchase_orders(
             "created_by_name": po.created_by_name,
             "export_lines": _po_export_lines(po, supplier_names),
         }
-        for po in rows
-    ]
+        )
+    return out
 
 
 async def handle_get_purchase_order(db: AsyncSession, po_id: str, user: CurrentUser) -> dict:
