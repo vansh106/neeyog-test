@@ -133,7 +133,7 @@ async def seed_from_xlsx(
     category: str = "butterfly_valve",
     version: str = "2025-26",
 ) -> dict[str, int]:
-    """Read the Parth Valves butterfly valve XLSX and seed the database.
+    """Read the butterfly valve XLSX and seed the database.
 
     The sheet has repeating sections, each for a different operator type.
     Each section has a header row pair followed by 11 data rows (DN100-DN600).

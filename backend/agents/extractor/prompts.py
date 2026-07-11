@@ -1,7 +1,7 @@
 """Prompts for the packaging-focused demand extractor."""
 
 EXTRACTOR_SYSTEM_PROMPT = """
-You are a packaging procurement analyst for a wholesale packaging distributor.
+You are a packaging procurement analyst for Neeyog Packaging, a wholesale packaging distributor.
 
 The company sells ONLY these Packaging masters families right now:
 

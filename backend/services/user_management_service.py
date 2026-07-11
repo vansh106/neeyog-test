@@ -46,7 +46,7 @@ async def create_user(
         raise ValueError(f"Email {email} is already registered")
 
     suffix = secrets.token_hex(3).upper()
-    temp_pass = f"Parth@{suffix}"
+    temp_pass = f"Neeyog@{suffix}"
 
     user = User(
         email=email.lower().strip(),
@@ -206,7 +206,7 @@ async def reset_user_password(target_user_id: str, db: AsyncSession) -> str:
     if not user:
         raise UserNotFoundError("User not found")
     suffix = secrets.token_hex(3).upper()
-    temp_pass = f"Parth@{suffix}"
+    temp_pass = f"Neeyog@{suffix}"
     user.hashed_password = hash_password(temp_pass)
     user.is_first_login = True
     await db.commit()
