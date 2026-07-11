@@ -59,7 +59,7 @@ async def calculate_price_route(
     return supplier_controller.handle_calculate_price(body)
 
 
-@router.get("/")
+@router.get("")
 async def list_suppliers_route(
     _user: CurrentUser = Depends(require_permission(Permission.MASTERS_VIEW)),
     active_only: bool = Query(False, description="If true, return only active suppliers."),
@@ -68,7 +68,7 @@ async def list_suppliers_route(
     return await supplier_controller.handle_list_suppliers(db, active_only=active_only)
 
 
-@router.post("/")
+@router.post("")
 async def create_supplier_route(
     body: CreateSupplierRequest,
     _user: CurrentUser = Depends(require_permission(Permission.MASTERS_EDIT)),

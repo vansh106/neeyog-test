@@ -964,6 +964,33 @@ async def handle_process_email_matcher(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+async def handle_extract_products_stream(
+    enquiry_id: str,
+    db: AsyncSession,
+    user: CurrentUser,
+) -> AsyncGenerator[str, None]:
+    """Start LangGraph extractor as a background task; return SSE stream."""
+    from services.extractor_service import run_extract_stream
+    from services.sse_service import SSEEventEmitter
+
+    current = await enquiry_service.get_enquiry(enquiry_id, db)
+    _ensure_enquiry_access(current, user)
+
+    emitter = SSEEventEmitter()
+    await emitter.emit(
+        {
+            "type": "agent_start",
+            "agent": "system",
+            "message": "Starting AI product extractor",
+            "detail": "LangGraph packaging demand pipeline",
+            "status": "running",
+        }
+    )
+
+    asyncio.create_task(run_extract_stream(enquiry_id=str(enquiry_id), emitter=emitter))
+    return emitter.stream()
+
+
 async def handle_revert_request_email_draft(
     enquiry_id: str,
     db: AsyncSession,

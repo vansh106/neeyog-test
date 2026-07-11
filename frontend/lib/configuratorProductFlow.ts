@@ -27,12 +27,24 @@ export function configuratorPickFromLeaf(leaf: MasterNavLeaf): ConfiguratorCatal
   }
 }
 
-/** Step-1 manual picker: Valves, Hoses, Dampers (no fittings / accessories). */
+export type ConfiguratorProductFamily = 'Valves' | 'Hoses' | 'Dampers' | 'Packaging' | 'Others'
+
+export type ConfiguratorNavProductFamily = Exclude<ConfiguratorProductFamily, 'Others'>
+
+/** Step-1 manual picker — only top-level groups present in masters nav (no fittings / accessories). */
 export const CONFIGURATOR_STEP1_PRODUCT_NAV: MasterNavNode[] = MASTER_SIDEBAR_NAV.filter(
-  (n): n is MasterNavGroup =>
-    n.kind === 'group' &&
-    (n.label === 'Valves' || n.label === 'Hoses' || n.label === 'Dampers'),
+  (n): n is MasterNavGroup => n.kind === 'group',
 )
+
+/** Families shown in manual enquiry step 1 — derived from nav, not hardcoded. */
+export const CONFIGURATOR_PRODUCT_FAMILIES: ConfiguratorProductFamily[] =
+  CONFIGURATOR_STEP1_PRODUCT_NAV.map((n) => n.label as ConfiguratorProductFamily)
+
+export function isConfiguratorNavFamily(
+  family: ConfiguratorProductFamily | null | undefined,
+): family is ConfiguratorNavProductFamily {
+  return !!family && family !== 'Others'
+}
 
 export const CONFIGURATOR_STEP1_CATEGORY_KEYS = new Set(
   flattenMasterNavLeaves(CONFIGURATOR_STEP1_PRODUCT_NAV).map((l) => l.key),
@@ -84,17 +96,17 @@ export function isOthersCatalogCategory(key: string | null | undefined): boolean
   return !!key && key.startsWith(OTHERS_CATALOG_PREFIX)
 }
 
-export type ConfiguratorProductFamily = 'Valves' | 'Hoses' | 'Dampers' | 'Others'
-
 export function configuratorProductFamilyForKey(
   key: string | null | undefined,
 ): ConfiguratorProductFamily | null {
   if (!key) return null
   if (isOthersCatalogCategory(key)) return 'Others'
   if (isDamperCatalogCategory(key)) return 'Dampers'
+  if (key === 'fp_aluminium_foil') return 'Packaging'
+  if (key === 'fp_paper_products') return 'Packaging'
   const path = findMasterNavPathForKey(key, CONFIGURATOR_STEP1_PRODUCT_NAV)
   const root = path?.[0]
-  if (root === 'Valves' || root === 'Hoses' || root === 'Dampers') return root
+  if (root === 'Valves' || root === 'Hoses' || root === 'Dampers' || root === 'Packaging') return root
   return key.startsWith('fp_hose_') ? 'Hoses' : 'Valves'
 }
 

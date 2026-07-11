@@ -746,7 +746,6 @@ export interface IndiaMartQueryListResponse {
   last_sync_at: string | null
   last_sync_status: string | null
   last_sync_message: string | null
-  using_dummy_data: boolean
 }
 
 export interface IndiaMartPrefillResponse {
@@ -1124,7 +1123,7 @@ export interface AssembledProduct {
   /** True when the main product is a free-text temporary line (not from catalog). */
   is_temporary?: boolean
   /** Product family context for temporary products. */
-  temporary_product_family?: 'Valves' | 'Hoses' | 'Dampers' | 'Others' | null
+  temporary_product_family?: 'Valves' | 'Hoses' | 'Dampers' | 'Packaging' | 'Others' | null
   quantity: number
   unit?: string | null
   customer_discount_pct?: number | null

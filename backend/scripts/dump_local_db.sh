@@ -6,12 +6,12 @@
 #
 # Requires:
 #   - Docker running
-#   - A container named "cpq_postgres" (check with: docker ps)
+#   - A container named "xyz_traders_postgres" (check with: docker ps)
 #     Override with CONTAINER=<name> bash scripts/dump_local_db.sh
 
 set -euo pipefail
 
-CONTAINER="${CONTAINER:-cpq_postgres}"
+CONTAINER="${CONTAINER:-xyz_traders_postgres}"
 DB_USER="${DB_USER:-admin}"
 DB_NAME="${DB_NAME:-quotation_system}"
 

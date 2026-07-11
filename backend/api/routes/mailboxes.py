@@ -51,7 +51,7 @@ class MailboxUpdateBody(BaseModel):
     app_password: str | None = None
 
 
-@router.get("/")
+@router.get("")
 async def list_mailboxes_route(
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -68,7 +68,7 @@ async def list_mailboxes_route(
     return [mailbox_to_dict(b) for b in boxes]
 
 
-@router.post("/")
+@router.post("")
 async def create_mailbox_route(
     body: MailboxCreateBody,
     user: CurrentUser = Depends(get_current_user),

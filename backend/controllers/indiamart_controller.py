@@ -19,17 +19,11 @@ async def handle_list_queries(
     db: AsyncSession,
     *,
     include_archived: bool = False,
-    auto_sync: bool = True,
 ) -> dict:
     return await indiamart_service.list_queries(
         db,
         include_archived=include_archived,
-        auto_sync=auto_sync,
     )
-
-
-async def handle_sync_now(db: AsyncSession) -> dict:
-    return await indiamart_service.sync_indiamart_leads(db, force=True)
 
 
 async def handle_get_prefill(query_id: str, db: AsyncSession) -> dict:

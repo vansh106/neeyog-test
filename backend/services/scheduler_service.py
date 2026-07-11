@@ -26,19 +26,6 @@ async def _sync_job() -> None:
         logger.error("Sync job failed: %s", e, exc_info=True)
 
 
-async def _indiamart_sync_job() -> None:
-    try:
-        from services.indiamart_service import sync_indiamart_leads
-
-        async with async_session_factory() as db:
-            summary = await sync_indiamart_leads(db)
-        inserted = int(summary.get("inserted") or 0)
-        if inserted > 0:
-            logger.info("IndiaMart sync job: %s new queries inserted", inserted)
-    except Exception as e:
-        logger.error("IndiaMart sync job failed: %s", e, exc_info=True)
-
-
 async def start_scheduler_async() -> None:
     started = False
 
@@ -65,21 +52,6 @@ async def start_scheduler_async() -> None:
             )
     else:
         logger.info("Email sync disabled — email sync job skipped")
-
-    if settings.indiamart_sync_enabled:
-        scheduler.add_job(
-            _indiamart_sync_job,
-            trigger=IntervalTrigger(seconds=settings.indiamart_sync_interval_seconds),
-            id="indiamart_sync",
-            name="IndiaMart Lead Delta Sync",
-            replace_existing=True,
-            max_instances=1,
-        )
-        started = True
-        logger.info(
-            "IndiaMart sync scheduler job added — interval: %ss",
-            settings.indiamart_sync_interval_seconds,
-        )
 
     if not started:
         logger.info("No background sync jobs configured — scheduler not started")

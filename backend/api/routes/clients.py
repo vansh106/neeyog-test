@@ -21,7 +21,7 @@ from core.database import get_db
 router = APIRouter(prefix="/clients", tags=["clients"])
 
 
-@router.get("/", response_model=list[CompanyResponse])
+@router.get("", response_model=list[CompanyResponse])
 async def list_clients_route(
     _user: CurrentUser = Depends(require_permission(Permission.CLIENT_VIEW)),
     search: str | None = Query(None),
@@ -40,7 +40,7 @@ async def get_company_route(
     return await client_controller.handle_get_company(company_id, db)
 
 
-@router.post("/", response_model=CompanyResponse)
+@router.post("", response_model=CompanyResponse)
 async def create_company_route(
     body: CreateCompanyRequest,
     _user: CurrentUser = Depends(require_permission(Permission.CLIENT_VERIFY)),

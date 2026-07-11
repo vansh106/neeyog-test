@@ -98,6 +98,7 @@ app = FastAPI(
     description="AI-powered quotation system for industrial manufacturing",
     version="1.0.0-mvp",
     lifespan=lifespan,
+    redirect_slashes=False,
 )
 
 app.add_middleware(

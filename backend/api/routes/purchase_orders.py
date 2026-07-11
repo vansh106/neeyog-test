@@ -18,7 +18,7 @@ from core.database import get_db
 router = APIRouter(prefix="/api/purchase-orders", tags=["purchase-orders"])
 
 
-@router.get("/", response_model=list[PurchaseOrderListItem])
+@router.get("", response_model=list[PurchaseOrderListItem])
 async def list_purchase_orders_route(
     user: CurrentUser = Depends(require_permission(Permission.VIEW_PURCHASE_ORDERS)),
     db: AsyncSession = Depends(get_db),
@@ -43,7 +43,7 @@ async def list_purchase_orders_route(
     )
 
 
-@router.post("/")
+@router.post("")
 async def create_purchase_order_route(
     body: PurchaseOrderCreateBody,
     user: CurrentUser = Depends(require_permission(Permission.CREATE_PURCHASE_ORDERS)),

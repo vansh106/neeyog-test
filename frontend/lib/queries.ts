@@ -491,20 +491,8 @@ export function useIndiaMartQueries(includeArchived = false) {
     queryFn: () =>
       indiamartApi.listQueries<IndiaMartQueryListResponse>({
         include_archived: includeArchived,
-        auto_sync: true,
       }),
     enabled: authed,
     staleTime: 30_000,
-    refetchInterval: 120_000,
-  })
-}
-
-export function useTriggerIndiaMartSync() {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: () => indiamartApi.syncNow(),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['indiamart-queries'] })
-    },
   })
 }

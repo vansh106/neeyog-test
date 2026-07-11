@@ -1,4 +1,4 @@
-/** Hierarchical Masters sidebar navigation (Product → Type → Sub-type → sheet). */
+/** Masters sidebar navigation for seeded catalog families. Starts empty for this client. */
 
 export type MasterNavLeaf = {
   kind: 'leaf'
@@ -112,499 +112,88 @@ export function isMasterNavLeafActive(
 export const MASTER_SIDEBAR_NAV: MasterNavNode[] = [
   {
     kind: 'group',
-    label: 'Valves',
+    label: 'Packaging',
     children: [
       {
         kind: 'group',
-        label: 'Butterfly Valve',
-        children: [
-          {
-            kind: 'group',
-            label: 'Hygienic Butterfly Valve',
-            children: [
-              {
-                kind: 'leaf',
-                key: 'butterfly_valve',
-                label: 'Hygienic Butterfly Valve Alfa Laval Make',
-                variantType: 'Hygienic Butterfly Valve',
-                navSlug: 'hygienic-alfa-laval',
-              },
-              {
-                kind: 'leaf',
-                key: 'butterfly_valve',
-                label: 'Hygienic Butterfly Valve PVH Make',
-                variantType: 'Hygienic Butterfly Valve',
-                navSlug: 'hygienic-pvh',
-              },
-            ],
-          },
-          {
-            kind: 'group',
-            label: 'Aluminium Butterfly Valve',
-            children: [
-              {
-                kind: 'leaf',
-                key: 'butterfly_valve',
-                label: 'Aluminium Butterfly Valve PVH Make',
-                variantType: 'Aluminium Butterfly Valve',
-                navSlug: 'aluminium-pvh',
-              },
-            ],
-          },
-          {
-            kind: 'group',
-            label: 'Industrial Butterfly Valve',
-            children: [
-              {
-                kind: 'leaf',
-                key: 'butterfly_valve',
-                label: 'Industrial Butterfly Valve Omval Make',
-                variantType: 'Industrial Butterfly Valve',
-                navSlug: 'industrial-omval',
-              },
-              {
-                kind: 'leaf',
-                key: 'butterfly_valve',
-                label: 'Industrial Butterfly Valve Delval Make',
-                variantType: 'Industrial Butterfly Valve',
-                navSlug: 'industrial-delval',
-              },
-            ],
-          },
-        ],
-      },
-      {
-        kind: 'group',
-        label: 'Ball Valve',
-        children: [
-          {
-            kind: 'group',
-            label: '1-Piece Ball Valve',
-            children: [
-              {
-                kind: 'leaf',
-                key: 'fp_ball_valve_casco_1_piece_multi_end',
-                label: '1-Piece Ball Valve Casco Make',
-              },
-              {
-                kind: 'leaf',
-                key: 'fp_ball_valve_unison_1_piece_multi_end',
-                label: '1-Piece Ball Valve Unison Make',
-              },
-            ],
-          },
-          {
-            kind: 'group',
-            label: '2-Piece Ball Valve',
-            children: [
-              { kind: 'leaf', key: 'fp_ball_valve_casco_2_piece', label: '2-Piece Ball Valve Casco Make' },
-              {
-                kind: 'leaf',
-                key: 'fp_ball_valve_unison_2_piece_iso_pads',
-                label: '2-Piece Ball Valve Unison Make',
-              },
-            ],
-          },
-          {
-            kind: 'group',
-            label: '3-Piece Ball Valve',
-            children: [
-              { kind: 'leaf', key: 'fp_ball_valve_casco_3_piece', label: '3-Piece Ball Valve Casco Make' },
-              {
-                kind: 'leaf',
-                key: 'fp_ball_valve_casco_3_piece_ext_stem',
-                label: '3-Piece Extended Stem Ball Valve Casco Make',
-              },
-              {
-                kind: 'leaf',
-                key: 'fp_ball_valve_casco_3_piece_3_way_l_port',
-                label: '3-Piece 3-Way L-Port Casco Make',
-              },
-              { kind: 'leaf', key: 'fp_ball_valve_unison_3_piece', label: '3-Piece Ball Valve Unison Make' },
-              {
-                kind: 'leaf',
-                key: 'fp_ball_valve_unison_3_piece_3_way_l_port',
-                label: '3-Piece 3-Way L-Port Unison Make',
-              },
-            ],
-          },
-        ],
-      },
-      {
-        kind: 'group',
-        label: 'Flush Bottom Valve',
-        children: [
-          {
-            kind: 'group',
-            label: 'FBV – Ball Type',
-            children: [
-              { kind: 'leaf', key: 'fp_fbv_ball_type', label: 'FBV – Ball Type Casco Make' },
-            ],
-          },
-          {
-            kind: 'group',
-            label: 'FBV – Y Type',
-            children: [{ kind: 'leaf', key: 'fp_fbv_y_type', label: 'FBV – Y Type Casco Make' }],
-          },
-        ],
-      },
-      {
-        kind: 'group',
-        label: 'Needle Valve',
-        children: [{ kind: 'leaf', key: 'fp_needle_valve', label: 'Needle Valve Aster Make' }],
-      },
-      {
-        kind: 'group',
-        label: 'Non Return Valve / Check Valve',
-        children: [
-          {
-            kind: 'group',
-            label: 'In Line Check Valve',
-            children: [
-              { kind: 'leaf', key: 'fp_nrv_inline_check', label: 'In Line Check Valve Casco Make' },
-            ],
-          },
-          {
-            kind: 'group',
-            label: 'Wafer Check Valve',
-            children: [{ kind: 'leaf', key: 'fp_nrv_wafer_check', label: 'Wafer Check Valve Casco Make' }],
-          },
-          {
-            kind: 'group',
-            label: 'Non Slam Check Valve',
-            children: [
-              { kind: 'leaf', key: 'fp_nrv_non_slam', label: 'Non Slam Check Valve Casco Make' },
-            ],
-          },
-        ],
-      },
-      {
-        kind: 'group',
-        label: 'Safety / Pressure Relief Valve',
-        children: [
-          {
-            kind: 'group',
-            label: 'SV – Screwed (BSP)',
-            children: [{ kind: 'leaf', key: 'fp_safety_sv_bsp_f', label: 'SV – Screwed (BSP) PVH Make' }],
-          },
-          {
-            kind: 'group',
-            label: 'SV – TC End',
-            children: [{ kind: 'leaf', key: 'fp_safety_sv_tc_end', label: 'SV – TC End PVH Make' }],
-          },
-        ],
-      },
-      {
-        kind: 'group',
-        label: 'Sampling Valve',
-        children: [
-          {
-            kind: 'group',
-            label: 'Sampling Valve – TC End',
-            children: [
-              {
-                kind: 'leaf',
-                key: 'fp_sampling_sv_tc_end',
-                label: 'Sampling Valve – TC End Mascon Make',
-              },
-            ],
-          },
-          {
-            kind: 'group',
-            label: 'Sampling Valve – OD Base Weld End',
-            children: [
-              {
-                kind: 'leaf',
-                key: 'fp_sampling_sv_od_base_weld',
-                label: 'Sampling Valve – OD Base Weld End PVH Make',
-              },
-            ],
-          },
-        ],
-      },
-      {
-        kind: 'group',
-        label: 'Diaphragm Valve',
-        children: [
-          {
-            kind: 'group',
-            label: 'Manual Diaphragm Valve',
-            children: [
-              { kind: 'leaf', key: 'fp_mascon_manual_tc_end', label: 'Manual – TC End Mascon Make' },
-              { kind: 'leaf', key: 'fp_mascon_manual_butt_weld', label: 'Manual – Butt Weld Mascon Make' },
-            ],
-          },
-          {
-            kind: 'group',
-            label: 'Pneumatic Diaphragm Valve',
-            children: [
-              { kind: 'leaf', key: 'fp_mascon_pneumatic_tc_end', label: 'Pneumatic – TC End Mascon Make' },
-              {
-                kind: 'leaf',
-                key: 'fp_mascon_pneumatic_butt_weld',
-                label: 'Pneumatic – Butt Weld Mascon Make',
-              },
-            ],
-          },
-          {
-            kind: 'group',
-            label: 'Spare Diaphragm',
-            children: [
-              { kind: 'leaf', key: 'fp_mascon_spare_diaphragm', label: 'Spare Diaphragm Mascon Make' },
-            ],
-          },
-        ],
-      },
-      {
-        kind: 'group',
-        label: 'Zero Dead Leg Valve',
-        children: [
-          {
-            kind: 'group',
-            label: 'Manual ZDV',
-            children: [
-              { kind: 'leaf', key: 'fp_mascon_zdvm_l_type', label: 'ZDV-M L Type Mascon Make' },
-              { kind: 'leaf', key: 'fp_mascon_zdvm_j_type', label: 'ZDV-M J Type Mascon Make' },
-            ],
-          },
-          {
-            kind: 'group',
-            label: 'Pneumatic ZDV',
-            children: [
-              { kind: 'leaf', key: 'fp_mascon_zdvp_l_type', label: 'ZDV-P L Type Mascon Make' },
-              { kind: 'leaf', key: 'fp_mascon_zdvp_j_type', label: 'ZDV-P J Type Mascon Make' },
-            ],
-          },
-        ],
-      },
-      {
-        kind: 'group',
-        label: 'Pressure Reducing Valve',
-        children: [
-          { kind: 'leaf', key: 'fp_mascon_prv', label: 'Pressure Reducing Valve Mascon Make' },
-        ],
-      },
-      {
-        kind: 'group',
-        label: 'Angle Type Valve',
+        label: 'Aluminium Foil',
         children: [
           {
             kind: 'leaf',
-            key: 'fp_mascon_angle_sc_flanged',
-            label: 'ATV – Screwed & Flanged Mascon Make',
-          },
-          { kind: 'leaf', key: 'fp_mascon_angle_butt_weld', label: 'ATV – Butt Weld Mascon Make' },
-          { kind: 'leaf', key: 'fp_mascon_angle_tc_end', label: 'ATV – TC End Mascon Make' },
-        ],
-      },
-      {
-        kind: 'group',
-        label: 'Sight Glass',
-        children: [
-          {
-            kind: 'group',
-            label: 'Double Window Sight Glass',
-            children: [
-              {
-                kind: 'leaf',
-                key: 'fp_sight_glass_double_window',
-                label: 'Sight Glass – Double Window',
-              },
-            ],
-          },
-          {
-            kind: 'group',
-            label: 'Inline Sight Glass',
-            children: [
-              {
-                kind: 'leaf',
-                key: 'fp_sight_glass_inline_ic_casted',
-                label: 'Sight Glass – Inline IC Casted',
-              },
-              {
-                kind: 'leaf',
-                key: 'fp_sight_glass_inline_solid_flange',
-                label: 'Sight Glass – Inline Solid Flange',
-              },
-            ],
-          },
-        ],
-      },
-      {
-        kind: 'group',
-        label: 'Strainer',
-        children: [
-          {
-            kind: 'group',
-            label: 'Y Type Strainer',
-            children: [
-              { kind: 'leaf', key: 'fp_strainer_y_150', label: 'Strainer – Y Type #150' },
-              { kind: 'leaf', key: 'fp_strainer_y_300', label: 'Strainer – Y Type #300' },
-            ],
-          },
-        ],
-      },
-    ],
-  },
-  {
-    kind: 'group',
-    label: 'Hoses',
-    children: [
-      {
-        kind: 'group',
-        label: 'Tuder Hoses',
-        children: [{ kind: 'leaf', key: 'fp_hose_tuder', label: 'Tuder Hoses' }],
-      },
-      {
-        kind: 'group',
-        label: 'PVC Hoses',
-        children: [
-          { kind: 'leaf', key: 'fp_hose_thunder', label: 'PVC — Thunder Hoses Jyoti Make' },
-          {
-            kind: 'leaf',
-            key: 'fp_hose_pvc_nylon_non_toxic',
-            label: 'PVC Nylon Braided – Non-Toxic Jyoti Make',
+            key: 'fp_aluminium_foil',
+            label: 'Foil Wrap',
+            variantType: 'Foil Wrap',
+            navSlug: 'foil-wrap',
           },
           {
             kind: 'leaf',
-            key: 'fp_hose_pvc_nylon_food_grade',
-            label: 'PVC Nylon Braided – Food Grade Jyoti Make',
-          },
-          { kind: 'leaf', key: 'fp_hose_red_silicon', label: 'Red Silicon Hose Jyoti Make' },
-          { kind: 'leaf', key: 'fp_hose_pu', label: 'PU Hose Jyoti Make' },
-        ],
-      },
-    ],
-  },
-  {
-    kind: 'group',
-    label: 'Dampers',
-    children: [
-      { kind: 'leaf', key: 'fp_damper_butterfly', label: 'Butterfly Damper' },
-      { kind: 'leaf', key: 'fp_damper_multi_louver', label: 'Multi-Louver Damper' },
-      { kind: 'leaf', key: 'fp_damper_slide_gate', label: 'Slide Gate Damper' },
-      { kind: 'leaf', key: 'fp_damper_guillotine', label: 'Guillotine Damper' },
-      { kind: 'leaf', key: 'fp_damper_diverter', label: 'Diverter Damper' },
-      { kind: 'leaf', key: 'fp_damper_discharge', label: 'Discharge Damper' },
-    ],
-  },
-  {
-    kind: 'group',
-    label: 'Hose Fittings',
-    children: [
-      { kind: 'leaf', key: 'fp_fittings_sms_nut', label: 'SMS Nut' },
-      { kind: 'leaf', key: 'fp_fittings_tri_clover_end', label: 'Tri-Clover End' },
-      { kind: 'leaf', key: 'fp_fittings_din_nut_11851', label: 'DIN Nut 11851' },
-      { kind: 'leaf', key: 'fp_fittings_swivel_nut', label: 'Swivel Nut' },
-      { kind: 'leaf', key: 'fp_fittings_flange_150', label: 'Flange #150' },
-    ],
-  },
-  {
-    kind: 'group',
-    label: 'Accessories',
-    children: [
-      {
-        kind: 'group',
-        label: 'Actuator',
-        children: [
-          {
-            kind: 'group',
-            label: 'Double Acting',
-            children: [
-              {
-                kind: 'leaf',
-                key: 'operator',
-                label: 'DA',
-                modelNamePrefix: 'DA',
-                navSlug: 'actuator-da',
-              },
-            ],
-          },
-          {
-            kind: 'group',
-            label: 'Single Acting',
-            children: [
-              {
-                kind: 'leaf',
-                key: 'operator',
-                label: 'SA',
-                modelNamePrefix: 'SA',
-                navSlug: 'actuator-sa',
-              },
-            ],
-          },
-        ],
-      },
-      { kind: 'leaf', key: 'brackets_coupler', label: 'Brackets & couplers' },
-      {
-        kind: 'group',
-        label: 'SOV',
-        children: [
-          {
-            kind: 'leaf',
-            key: 'sov',
-            label: 'Namur Type',
-            variantContains: 'Namur Type',
-            variantExcludeContains: 'Non Namur',
-            navSlug: 'sov-namur',
+            key: 'fp_aluminium_foil',
+            label: 'Foil Box',
+            variantType: 'Foil Box',
+            navSlug: 'foil-box',
           },
           {
             kind: 'leaf',
-            key: 'sov',
-            label: 'Non Namur Type',
-            variantContainsAny: ['Non Namur', 'Non Type'],
-            navSlug: 'sov-non-namur',
+            key: 'fp_aluminium_foil',
+            label: 'Foil Container',
+            variantType: 'Foil Container',
+            navSlug: 'foil-container',
+          },
+          {
+            kind: 'leaf',
+            key: 'fp_aluminium_foil',
+            label: 'Premium Foil Container',
+            variantType: 'Premium Foil Container',
+            navSlug: 'premium-foil-container',
+          },
+          {
+            kind: 'leaf',
+            key: 'fp_aluminium_foil',
+            label: 'Foil Paper Lids',
+            variantType: 'Foil Paper Lids',
+            navSlug: 'foil-paper-lids',
+          },
+          {
+            kind: 'leaf',
+            key: 'fp_aluminium_foil',
+            label: 'Exclusive Foil Container',
+            variantType: 'Exclusive Foil Container',
+            navSlug: 'exclusive-foil-container',
+          },
+          {
+            kind: 'leaf',
+            key: 'fp_aluminium_foil',
+            label: 'Pet Lid',
+            variantType: 'Pet Lid',
+            navSlug: 'pet-lid',
           },
         ],
       },
       {
         kind: 'group',
-        label: 'Limit Switch Box',
+        label: 'Paper Products',
         children: [
-          {
-            kind: 'leaf',
-            key: 'limit_switch_box',
-            label: 'Weather Proof',
-            variantContains: 'Wheather proof',
-            navSlug: 'lsb-weather',
-          },
-          {
-            kind: 'leaf',
-            key: 'limit_switch_box',
-            label: 'Flame proof',
-            variantContains: 'Flame proof',
-            navSlug: 'lsb-flame',
-          },
-        ],
-      },
-      {
-        kind: 'group',
-        label: 'Positioner',
-        children: [
-          {
-            kind: 'leaf',
-            key: 'positioner',
-            label: 'Electro Pneumatic Positioner Rotork Make',
-            variantContains: 'Electro- Pneumatic',
-            variantExcludeContains: 'Rotex',
-            navSlug: 'positioner-electro-rotork',
-          },
-          {
-            kind: 'leaf',
-            key: 'positioner',
-            label: 'Pneumatic Pneumatic Positioner Rotork Make',
-            variantContains: 'Pneumatic- Pneumatic',
-            variantExcludeContains: 'Rotex',
-            navSlug: 'positioner-pneumatic-rotork',
-          },
-          {
-            kind: 'leaf',
-            key: 'positioner',
-            label: 'SMART Positioner Rotork Make',
-            variantContains: 'SMART Positioner',
-            variantExcludeContains: 'Rotex',
-            navSlug: 'positioner-smart-rotork',
-          },
+          { kind: 'leaf', key: 'fp_paper_products', label: 'Eco Paper Cups', variantType: 'Eco Paper Cups', navSlug: 'eco-paper-cups' },
+          { kind: 'leaf', key: 'fp_paper_products', label: 'Clarro Cups Tall', variantType: 'Clarro Paper Cups Tall', navSlug: 'clarro-cups-tall' },
+          { kind: 'leaf', key: 'fp_paper_products', label: 'Clarro Cups', variantType: 'Clarro Paper Cups', navSlug: 'clarro-cups' },
+          { kind: 'leaf', key: 'fp_paper_products', label: 'Clarro Wati', variantType: 'Clarro Paper Wati', navSlug: 'clarro-wati' },
+          { kind: 'leaf', key: 'fp_paper_products', label: 'Dolphin Cups', variantType: 'Dolphin Paper Cups', navSlug: 'dolphin-cups' },
+          { kind: 'leaf', key: 'fp_paper_products', label: 'Export Cups', variantType: 'Export Paper Cups', navSlug: 'export-cups' },
+          { kind: 'leaf', key: 'fp_paper_products', label: 'Ripple Brown', variantType: 'Ripple Cups Brown', navSlug: 'ripple-brown' },
+          { kind: 'leaf', key: 'fp_paper_products', label: 'Ripple Black', variantType: 'Ripple Cups Black', navSlug: 'ripple-black' },
+          { kind: 'leaf', key: 'fp_paper_products', label: 'CP Double Wall', variantType: 'CP Double Wall Cups', navSlug: 'cp-double-wall' },
+          { kind: 'leaf', key: 'fp_paper_products', label: 'SI Double Wall', variantType: 'SI Double Wall Cups', navSlug: 'si-double-wall' },
+          { kind: 'leaf', key: 'fp_paper_products', label: 'HIPS Lids', variantType: 'HIPS Lids', navSlug: 'hips-lids' },
+          { kind: 'leaf', key: 'fp_paper_products', label: 'Paper Lids', variantType: 'Paper Lids', navSlug: 'paper-lids' },
+          { kind: 'leaf', key: 'fp_paper_products', label: 'Bagasse Lids', variantType: 'Bagasse Lids', navSlug: 'bagasse-lids' },
+          { kind: 'leaf', key: 'fp_paper_products', label: 'Container Kraft', variantType: 'Paper Container Kraft', navSlug: 'container-kraft' },
+          { kind: 'leaf', key: 'fp_paper_products', label: 'Salad Kraft Bowl', variantType: 'PW Salad Kraft Bowl', navSlug: 'salad-kraft' },
+          { kind: 'leaf', key: 'fp_paper_products', label: 'Salad White Bowl', variantType: 'PW Salad White Bowl', navSlug: 'salad-white' },
+          { kind: 'leaf', key: 'fp_paper_products', label: 'Salad SFP Bowl', variantType: 'Paper Salad SFP Bowl', navSlug: 'salad-sfp' },
+          { kind: 'leaf', key: 'fp_paper_products', label: 'Container White', variantType: 'Paper Container White', navSlug: 'container-white' },
+          { kind: 'leaf', key: 'fp_paper_products', label: 'Container 110Dia', variantType: 'Paper Container 110Dia', navSlug: 'container-110dia' },
+          { kind: 'leaf', key: 'fp_paper_products', label: 'Biodegradable Super', variantType: 'Biodegradable Super Paper', navSlug: 'bio-super' },
+          { kind: 'leaf', key: 'fp_paper_products', label: 'Paper Plates', variantType: 'Paper Plates', navSlug: 'paper-plates' },
         ],
       },
     ],

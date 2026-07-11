@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     # PgBouncer transaction mode does not support DDL / prepared statements.
     # Falls back to DATABASE_URL_SYNC when not explicitly configured.
     DATABASE_URL_DIRECT: str = ""
+    # PostgreSQL schema for app tables. Use a dedicated schema when the Supabase
+    # project's default `public` schema already contains unrelated tables.
+    DB_SCHEMA: str = "public"
 
     # ── Supabase API (optional — only used if Supabase is the DB) ──
     SUPABASE_URL: str = ""
@@ -85,12 +88,6 @@ class Settings(BaseSettings):
     email_portal_loose_terms: str = (
         "buyer,query,contacted,requirement,looking for,interested,message,product"
     )
-
-    # IndiaMart Lead Manager Pull API (v2 delta sync — omit start/end for incremental leads)
-    indiamart_crm_key: str = ""
-    indiamart_sync_enabled: bool = True
-    indiamart_sync_interval_seconds: int = 600
-    indiamart_use_dummy_data: bool = True
 
     model_config = {
         "env_file": str(Path(__file__).resolve().parent.parent / ".env"),

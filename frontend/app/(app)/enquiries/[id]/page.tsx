@@ -11,6 +11,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { ClientVerificationPanel } from '@/components/upload/ClientVerificationPanel'
 import ManualEntryForm from '@/components/upload/ManualEntryForm'
+import LiveAgentTimeline from '@/components/upload/LiveAgentTimeline'
 import { useEnquiry } from '@/lib/queries'
 import EnquiryProductNotesPanel from '@/components/enquiries/EnquiryProductNotesPanel'
 import EnquiryListDetailTypeEditor from '@/components/enquiries/EnquiryListDetailTypeEditor'
@@ -22,10 +23,11 @@ import {
 import EnquiryManualLineItemsTable, {
   parseManualLineItemsFromParsed,
 } from '@/components/enquiries/EnquiryManualLineItemsTable'
-import { downloadQuotationPdf, enquiriesApi, processManualDropdown } from '@/lib/api'
+import { downloadQuotationPdf, enquiriesApi, extractEnquiryProductsStream, processManualDropdown } from '@/lib/api'
 import { useQueryClient } from '@tanstack/react-query'
 import { truncateId } from '@/lib/utils'
 import type {
+  AgentEvent,
   ClientSummary,
   ClientVerificationContext,
   ClientVerificationResponse,
@@ -135,6 +137,9 @@ export default function EnquiryDetailPage() {
   const [manualError, setManualError] = useState<string | null>(null)
   const [matcherSeedVersion, setMatcherSeedVersion] = useState(0)
   const [fullManualOverride, setFullManualOverride] = useState(false)
+  const [extractEvents, setExtractEvents] = useState<AgentEvent[]>([])
+  const [extractStreaming, setExtractStreaming] = useState(false)
+  const [extractError, setExtractError] = useState<string | null>(null)
   const [revertOpen, setRevertOpen] = useState(false)
   const [revertDraft, setRevertDraft] = useState<{ subject: string; body: string } | null>(null)
   const [emailApprovalBusy, setEmailApprovalBusy] = useState(false)
@@ -392,12 +397,36 @@ export default function EnquiryDetailPage() {
   const showMatcherRail =
     !!matcher &&
     !quoteId &&
-    !isIndiaMartEnquiry &&
     !requiresEmailApproval &&
     !isEmailRejected &&
     (ext?.status === 'matcher_ready' ||
       ext?.flow_type === 'product_incomplete' ||
-      ext?.flow_type === 'product_complete')
+      ext?.flow_type === 'product_complete' ||
+      (typeof matcher.source === 'string' && matcher.source === 'langgraph_extractor'))
+
+  const runExtractWithAi = useCallback(async () => {
+    if (!id || extractStreaming) return
+    setExtractStreaming(true)
+    setExtractError(null)
+    setExtractEvents([])
+    try {
+      await extractEnquiryProductsStream(id, (event) => {
+        setExtractEvents((prev) => [...prev, event])
+        if (event.type === 'result') {
+          void qc.invalidateQueries({ queryKey: ['enquiry', id] })
+          setFullManualOverride(false)
+          setMatcherSeedVersion((n) => n + 1)
+          setShowManualCompletion(true)
+        }
+      })
+      await qc.invalidateQueries({ queryKey: ['enquiry', id] })
+      setMatcherSeedVersion((n) => n + 1)
+    } catch (e) {
+      setExtractError(e instanceof Error ? e.message : 'Extraction failed')
+    } finally {
+      setExtractStreaming(false)
+    }
+  }, [extractStreaming, id, qc])
 
   const handleEmailApproval = useCallback(
     async (decision: 'approve' | 'reject') => {
@@ -657,10 +686,38 @@ export default function EnquiryDetailPage() {
 
           {showManualQuoteForm && (
             <section className="rounded-xl border border-brand-green-200 bg-white p-5 shadow-sm">
-              <h2 className="text-[15px] font-semibold text-gray-900">Add products &amp; generate quotation</h2>
-              <p className="mt-1 text-[13px] text-surface-muted">
-                Configure products using the manual dropdown, then generate the quotation for this enquiry.
-              </p>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <h2 className="text-[15px] font-semibold text-gray-900">Add products &amp; generate quotation</h2>
+                  <p className="mt-1 text-[13px] text-surface-muted">
+                    {isIndiaMartEnquiry
+                      ? 'Extract products from the IndiaMart message with AI, then finish specs and generate the quotation.'
+                      : 'Configure products using the manual dropdown, then generate the quotation for this enquiry.'}
+                  </p>
+                </div>
+                {(isIndiaMartEnquiry || emailLikeSource) && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={extractStreaming || !(ext?.raw_input || '').trim()}
+                    onClick={() => void runExtractWithAi()}
+                    className="shrink-0 gap-1.5 bg-violet-600 hover:bg-violet-700"
+                  >
+                    {extractStreaming ? (
+                      <Loader2 className="size-3.5 animate-spin" />
+                    ) : (
+                      <Sparkles className="size-3.5" />
+                    )}
+                    {extractStreaming ? 'Extracting…' : 'Extract with AI'}
+                  </Button>
+                )}
+              </div>
+              {extractError && <p className="mt-3 text-[12px] text-red-600">{extractError}</p>}
+              {(extractStreaming || extractEvents.length > 0) && (
+                <div className="mt-4">
+                  <LiveAgentTimeline events={extractEvents} isStreaming={extractStreaming} />
+                </div>
+              )}
               {manualError && <p className="mt-3 text-[12px] text-red-600">{manualError}</p>}
               <div className="mt-4">
                 <ManualEntryForm
@@ -673,7 +730,8 @@ export default function EnquiryDetailPage() {
                   initialClientEmployeeId={initialClientEmployeeId}
                   initialSelectedBranchId={initialSelectedBranchId}
                   initialFollowUpDate={ext?.next_follow_up_date}
-                  matcherSeedVersion={0}
+                  matcherSeed={matcherSeedForForm}
+                  matcherSeedVersion={matcherSeedVersion}
                 />
               </div>
             </section>

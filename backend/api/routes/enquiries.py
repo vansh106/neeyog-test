@@ -74,7 +74,7 @@ async def manual_dropdown_process_route(
     return await enquiry_controller.handle_process_manual_dropdown(body, db, user)
 
 
-@router.get("/", response_model=list[EnquiryListItem])
+@router.get("", response_model=list[EnquiryListItem])
 async def list_enquiries_route(
     user: CurrentUser = Depends(require_permission(Permission.VIEW_ENQUIRIES)),
     status: str | None = Query(None),
@@ -191,6 +191,25 @@ async def process_email_matcher_route(
     db: AsyncSession = Depends(get_db),
 ):
     return await enquiry_controller.handle_process_email_matcher(enquiry_id, db, user)
+
+
+@router.post("/{enquiry_id}/extract-stream")
+async def extract_products_stream_route(
+    enquiry_id: str,
+    user: CurrentUser = Depends(require_permission(Permission.VIEW_ENQUIRIES)),
+    db: AsyncSession = Depends(get_db),
+):
+    """LangGraph product extractor with live SSE agent activity."""
+    stream = await enquiry_controller.handle_extract_products_stream(enquiry_id, db, user)
+    return StreamingResponse(
+        stream,
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Access-Control-Allow-Origin": "*",
+        },
+    )
 
 
 @router.get("/{enquiry_id}/revert-request-draft")

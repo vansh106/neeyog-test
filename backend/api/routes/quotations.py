@@ -194,7 +194,7 @@ async def get_quotation_route(
     return await quotation_controller.handle_get_quotation(quotation_id, db, user)
 
 
-@router.get("/", response_model=list[QuotationListItem])
+@router.get("", response_model=list[QuotationListItem])
 async def list_quotations_route(
     user: CurrentUser = Depends(require_permission(Permission.VIEW_QUOTATIONS)),
     limit: int = Query(50, le=2000),

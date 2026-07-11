@@ -255,7 +255,7 @@ export const enquiriesApi = {
       limit?: number
       offset?: number
     },
-  ) => get<T>('/api/enquiries/', params as Record<string, unknown>),
+  ) => get<T>('/api/enquiries', params as Record<string, unknown>),
   updateListingDates: <T = unknown>(
     id: string,
     body: { next_follow_up_date?: string | null; nextFollowUpNote?: string | null },
@@ -330,7 +330,7 @@ export const quotationsApi = {
       date_from?: string
       date_to?: string
     },
-  ) => get<T>('/api/quotations/', params as Record<string, unknown>),
+  ) => get<T>('/api/quotations', params as Record<string, unknown>),
   updateCrmStatus: <T = unknown>(
     id: string,
     body: { status: string; status_remarks?: string | null },
@@ -390,19 +390,18 @@ export const purchaseOrdersApi = {
       date_to?: string
       po_type?: string
     },
-  ) => get<T>('/api/purchase-orders/', params as Record<string, unknown>),
+  ) => get<T>('/api/purchase-orders', params as Record<string, unknown>),
   get: <T = unknown>(id: string) => get<T>(`/api/purchase-orders/${id}`),
   create: <T = unknown>(body: import('@/types').PurchaseOrderCreatePayload) =>
-    post<T>('/api/purchase-orders/', body),
+    post<T>('/api/purchase-orders', body),
   update: <T = unknown>(id: string, body: import('@/types').PurchaseOrderUpdatePayload) =>
     patch<T>(`/api/purchase-orders/${encodeURIComponent(id)}`, body),
   delete: <T = unknown>(id: string) => del<T>(`/api/purchase-orders/${encodeURIComponent(id)}`),
 }
 
 export const indiamartApi = {
-  listQueries: <T = unknown>(params?: { include_archived?: boolean; auto_sync?: boolean }) =>
+  listQueries: <T = unknown>(params?: { include_archived?: boolean }) =>
     get<T>('/api/indiamart/queries', params as Record<string, unknown>),
-  syncNow: <T = unknown>() => post<T>('/api/indiamart/sync', {}),
   getPrefill: <T = unknown>(queryId: string) =>
     get<T>(`/api/indiamart/queries/${encodeURIComponent(queryId)}/prefill`),
   pickupQuery: <T = unknown>(queryId: string, body: import('@/types').ManualEnquiryCreateForm) =>
@@ -507,14 +506,14 @@ export const mastersApi = {
 
 export const clientsApi = {
   searchCompanies: (search?: string, limit = 80) =>
-    get<import('@/types').CompanyResponse[]>('/api/clients/', {
+    get<import('@/types').CompanyResponse[]>('/api/clients', {
       ...(search ? { search } : {}),
       limit,
     }),
   getCompany: (companyId: string) =>
     get<import('@/types').CompanyResponse>(`/api/clients/${companyId}`),
   createCompany: (data: import('@/types').CreateCompanyRequestPayload) =>
-    post<import('@/types').CompanyResponse>('/api/clients/', data),
+    post<import('@/types').CompanyResponse>('/api/clients', data),
   updateCompany: (companyId: string, data: Partial<import('@/types').CreateCompanyRequestPayload>) =>
     patch<import('@/types').CompanyResponse>(`/api/clients/${companyId}`, data),
   addBranch: (companyId: string, data: import('@/types').AddBranchRequestPayload) =>
@@ -546,7 +545,7 @@ export const clientsApi = {
 
 export const suppliersApi = {
   getSuppliers: (activeOnly = false) =>
-    get<import('@/types').SupplierResponse[]>('/api/suppliers/', { active_only: activeOnly }),
+    get<import('@/types').SupplierResponse[]>('/api/suppliers', { active_only: activeOnly }),
   createSupplier: (data: {
     name: string
     primary_category_key?: string
@@ -558,7 +557,7 @@ export const suppliersApi = {
     email?: string | null
     address?: string | null
     notes?: string | null
-  }) => post<import('@/types').SupplierResponse>('/api/suppliers/', data),
+  }) => post<import('@/types').SupplierResponse>('/api/suppliers', data),
   updateSupplier: (
     id: string,
     data: Partial<{
@@ -727,6 +726,13 @@ export const configuratorApi = {
   /** Full masters sheet for client-side cascades (one request per category per session). */
   getFullCategoryCatalog: <T = unknown>(category: string) =>
     get<T>('/api/configurator/full-category-catalog', { category }),
+
+  /** Suppliers with list prices for a resolved catalog row (excludes TBD / missing). */
+  getSuppliersForProduct: (category: string, catalogRowId: string) =>
+    get<{ items: Array<{ supplier_id: string; supplier_name: string; list_price_inr: number }> }>(
+      '/api/configurator/suppliers-for-product',
+      { category, catalog_row_id: catalogRowId },
+    ),
 }
 
 export const syncApi = {
@@ -738,7 +744,7 @@ export const syncApi = {
 }
 
 export const mailboxesApi = {
-  list: <T = unknown[]>() => get<T>('/api/mailboxes/'),
+  list: <T = unknown[]>() => get<T>('/api/mailboxes'),
   create: <T = unknown>(body: {
     display_name: string
     email_address: string
@@ -747,7 +753,7 @@ export const mailboxesApi = {
     imap_folder?: string
     unread_only?: boolean
     app_password: string
-  }) => post<T>('/api/mailboxes/', body),
+  }) => post<T>('/api/mailboxes', body),
   update: <T = unknown>(
     id: string,
     body: Partial<{
@@ -769,7 +775,7 @@ export const usersApi = {
   permissionGroups: <T = Record<string, string[]>>() => get<T>('/api/users/permission-groups'),
   permissionPresets: <T = Record<string, string[]>>() => get<T>('/api/users/permission-presets'),
   list: <T = unknown[]>(includeInactive?: boolean) =>
-    get<T>('/api/users/', includeInactive ? ({ include_inactive: true } as Record<string, unknown>) : undefined),
+    get<T>('/api/users', includeInactive ? ({ include_inactive: true } as Record<string, unknown>) : undefined),
   getUser: <T = unknown>(id: string) => get<T>(`/api/users/${id}`),
   create: <T = { user: unknown; temp_password: string }>(body: {
     email: string
@@ -783,7 +789,7 @@ export const usersApi = {
       can_process?: boolean
       can_trigger_sync?: boolean
     }>
-  }) => post<T>('/api/users/', body),
+  }) => post<T>('/api/users', body),
   updatePermissions: <T = unknown>(id: string, permissions: string[]) =>
     patch<T>(`/api/users/${id}/permissions`, { permissions }),
   updateMailboxAccess: <T = unknown>(
@@ -1614,6 +1620,68 @@ export async function uploadEmailStream(
       if (!jsonStr) continue
       try {
         const event = JSON.parse(jsonStr)
+        onEvent(event)
+        if (event.type === 'stream_end') return
+      } catch {
+        /* malformed JSON — skip */
+      }
+    }
+  }
+}
+
+export function extractEnquiryProductsStreamUrl(enquiryId: string): string {
+  const base = (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/$/, '')
+  if (base) return `${base}/api/enquiries/${enquiryId}/extract-stream`
+  return `/api/enquiries/${enquiryId}/extract-stream`
+}
+
+/** LangGraph product extractor — live SSE agent activity on enquiry detail. */
+export async function extractEnquiryProductsStream(
+  enquiryId: string,
+  onEvent: (event: import('@/types').AgentEvent) => void,
+): Promise<void> {
+  const doFetch = () =>
+    fetch(extractEnquiryProductsStreamUrl(enquiryId), {
+      method: 'POST',
+      headers: { ...bearerHeaders(true) },
+      cache: 'no-store',
+    })
+
+  let response = await doFetch()
+  if (response.status === 401) {
+    await refreshAccessToken()
+    response = await doFetch()
+  }
+
+  if (!response.ok || !response.body) {
+    let detail = `API error: ${response.status}`
+    try {
+      const err = (await response.json()) as { detail?: string }
+      if (err?.detail) detail = err.detail
+    } catch {
+      /* ignore */
+    }
+    throw new Error(detail)
+  }
+
+  const reader = response.body.pipeThrough(new TextDecoderStream()).getReader()
+  let buffer = ''
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+
+    buffer += value
+    const parts = buffer.split('\n\n')
+    buffer = parts.pop() ?? ''
+
+    for (const part of parts) {
+      const line = part.trim()
+      if (!line.startsWith('data:')) continue
+      const jsonStr = line.slice(5).trim()
+      if (!jsonStr) continue
+      try {
+        const event = JSON.parse(jsonStr) as import('@/types').AgentEvent
         onEvent(event)
         if (event.type === 'stream_end') return
       } catch {

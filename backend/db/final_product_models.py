@@ -617,6 +617,51 @@ class CatalogFpFbvYTypeRow(_CatalogFpFbvStandardColumns, FinalProductSheetMarker
     __tablename__ = "catalog_fp_fbv_y_type"
 
 
+class CatalogFpAluminiumFoilRow(FinalProductSheetMarker, _FinalCatalogBase):
+    """Aluminium foil packaging — one row per product spec (suppliers via ``supplier_product_prices``)."""
+
+    __tablename__ = "catalog_fp_aluminium_foil"
+
+    sr_no: Mapped[float | None] = mapped_column(Float, nullable=True)
+    variant_type: Mapped[str | None] = mapped_column(Text, nullable=True)
+    product_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    size_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    size_unit: Mapped[str | None] = mapped_column(Text, nullable=True)
+    dimensions: Mapped[str | None] = mapped_column(Text, nullable=True)
+    weight_grade: Mapped[str | None] = mapped_column(Text, nullable=True)
+    product_code: Mapped[str | None] = mapped_column(Text, nullable=True)
+    hsn_code: Mapped[str | None] = mapped_column(Text, nullable=True)
+    std_pack: Mapped[str | None] = mapped_column(Text, nullable=True)
+    pack_unit: Mapped[str | None] = mapped_column(Text, nullable=True)
+    canonical_sku: Mapped[str | None] = mapped_column(Text, nullable=True, index=True)
+    source_file: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class CatalogFpPaperProductsRow(FinalProductSheetMarker, _FinalCatalogBase):
+    """Paper cups, lids, containers, plates — suppliers via ``supplier_product_prices``."""
+
+    __tablename__ = "catalog_fp_paper_products"
+
+    sr_no: Mapped[float | None] = mapped_column(Float, nullable=True)
+    variant_type: Mapped[str | None] = mapped_column(Text, nullable=True)
+    product_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    gsm: Mapped[str | None] = mapped_column(Text, nullable=True)
+    size_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    size_unit: Mapped[str | None] = mapped_column(Text, nullable=True)
+    diameter_top: Mapped[str | None] = mapped_column(Text, nullable=True)
+    diameter_bt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    height: Mapped[str | None] = mapped_column(Text, nullable=True)
+    dimensions: Mapped[str | None] = mapped_column(Text, nullable=True)
+    hsn_code: Mapped[str | None] = mapped_column(Text, nullable=True)
+    rate_per: Mapped[str | None] = mapped_column(Text, nullable=True)
+    std_pack: Mapped[str | None] = mapped_column(Text, nullable=True)
+    pack_unit: Mapped[str | None] = mapped_column(Text, nullable=True)
+    movement: Mapped[str | None] = mapped_column(Text, nullable=True)
+    primary_godown: Mapped[str | None] = mapped_column(Text, nullable=True)
+    canonical_sku: Mapped[str | None] = mapped_column(Text, nullable=True, index=True)
+    source_file: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
 FINAL_PRODUCT_SHEET_MODELS: list[tuple[str, type]] = [
     ("fp_mascon_manual_tc_end", CatalogFpMasconManualTcEndRow),
     ("fp_mascon_manual_butt_weld", CatalogFpMasconManualButtWeldRow),
@@ -668,6 +713,8 @@ FINAL_PRODUCT_SHEET_MODELS: list[tuple[str, type]] = [
     ("fp_ball_valve_unison_3_piece_3_way_l_port", CatalogFpBallValveUnison3Piece3WayLPortRow),
     ("fp_fbv_ball_type", CatalogFpFbvBallTypeRow),
     ("fp_fbv_y_type", CatalogFpFbvYTypeRow),
+    ("fp_aluminium_foil", CatalogFpAluminiumFoilRow),
+    ("fp_paper_products", CatalogFpPaperProductsRow),
 ]
 
 # Masters sidebar + cascade (ordered fields = DB column names; exclude sr_no / source_file).
@@ -722,6 +769,8 @@ FINAL_PRODUCT_LABEL_BY_KEY: dict[str, str] = {
     "fp_ball_valve_unison_3_piece_3_way_l_port": "Ball valve — Unison 3-piece (3-way L-port)",
     "fp_fbv_ball_type": "FBV — Ball Type",
     "fp_fbv_y_type": "FBV — Y Type",
+    "fp_aluminium_foil": "Aluminium Foil",
+    "fp_paper_products": "Paper Products",
     "fp_damper_butterfly": "Butterfly Damper",
     "fp_damper_multi_louver": "Multi-Louver Damper",
 }
@@ -1142,5 +1191,18 @@ FINAL_PRODUCT_CASCADE_STEPS: dict[str, list[str]] = {
         "ball",
         "stem",
         "seat",
+    ],
+    "fp_aluminium_foil": [
+        "size_value",
+        "size_unit",
+        "weight_grade",
+        "product_name",
+        "dimensions",
+    ],
+    "fp_paper_products": [
+        "size_value",
+        "gsm",
+        "diameter_top",
+        "product_name",
     ],
 }

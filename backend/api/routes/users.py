@@ -33,7 +33,7 @@ async def permission_presets_route(_: CurrentUser = Depends(get_current_user)):
     return user_controller.permission_presets_dict()
 
 
-@router.get("/")
+@router.get("")
 async def list_users_route(
     include_inactive: bool = Query(False),
     db: AsyncSession = Depends(get_db),
@@ -51,7 +51,7 @@ async def get_user_route(
     return await user_controller.handle_get_user(user_id, db)
 
 
-@router.post("/")
+@router.post("")
 async def create_user_route(
     body: CreateUserRequest,
     actor: CurrentUser = Depends(require_admin_permissions(Permission.USERS_CREATE)),

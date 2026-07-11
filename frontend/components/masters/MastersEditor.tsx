@@ -5,12 +5,14 @@ import { useMutation, useQuery } from '@tanstack/react-query'
 import { Check, Loader2, Pencil, RefreshCw, Save, X } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
+import EmptyState from '@/components/ui/EmptyState'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useMastersCatalog, computeDistinctOptions, type CatalogRow } from '@/hooks/useValveCatalog'
 import { mastersApi, suppliersApi } from '@/lib/api'
 import { cn, formatCurrency, formatPriceOrTbd } from '@/lib/utils'
 import type { SupplierPriceRow, SupplierResponse } from '@/types'
+import { Database } from 'lucide-react'
 
 const SELECT_EMPTY = '__none__'
 
@@ -266,6 +268,20 @@ export default function MastersEditor({ initialCategory }: { initialCategory?: s
     const s = (suppliers ?? []).find((x) => x.id === supplierId)
     return s?.name ?? supplierId
   }, [supplierId, suppliers])
+
+  const hasCategories = (categories?.length ?? 0) > 0
+
+  if (!catsPending && !hasCategories) {
+    return (
+      <div className="rounded-xl border border-surface-border bg-white shadow-sm">
+        <EmptyState
+          icon={Database}
+          title="No masters yet"
+          description="The old seeded catalog has been cleared. Add new masters in the next step."
+        />
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-4">

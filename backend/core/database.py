@@ -13,7 +13,7 @@ import socket
 from collections.abc import AsyncGenerator
 from typing import Any
 
-from sqlalchemy import text
+from sqlalchemy import MetaData, text
 from sqlalchemy.engine import URL, make_url
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
@@ -45,7 +45,10 @@ def _pick_async_db_url() -> str:
         # The session pooler on 5432 behaves like a normal Postgres connection.
         try:
             if u.port == 6543:
-                return u.set(port=5432).render_as_string(hide_password=False)
+                session_pooler = u.set(port=5432)
+                if "+asyncpg" not in (session_pooler.drivername or ""):
+                    session_pooler = session_pooler.set(drivername="postgresql+asyncpg")
+                return session_pooler.render_as_string(hide_password=False)
         except Exception:
             pass
 
@@ -61,9 +64,23 @@ def _pick_async_db_url() -> str:
                     return async_direct
             except Exception:
                 # No IPv4 available (or DNS restricted) → keep pooler URL.
-                return raw
+                return _ensure_asyncpg_url(raw)
 
+    return _ensure_asyncpg_url(raw)
+
+
+def _ensure_asyncpg_url(raw: str) -> str:
+    if "+asyncpg" not in raw and raw.startswith("postgresql://"):
+        return raw.replace("postgresql://", "postgresql+asyncpg://", 1)
     return raw
+
+
+def _db_schema() -> str | None:
+    schema = (settings.DB_SCHEMA or "public").strip()
+    return schema if schema and schema != "public" else None
+
+
+_schema = _db_schema()
 
 
 def _sanitize_async_database_url(raw: str) -> tuple[str, dict[str, Any]]:
@@ -125,6 +142,7 @@ def _build_engine_kwargs() -> dict[str, Any]:
                     # Fail connect early instead of hanging; seconds.
                     "timeout": 60,
                     "command_timeout": 120,
+                    **({"server_settings": {"search_path": _schema}} if _schema else {}),
                 },
             }
         )
@@ -156,7 +174,7 @@ AsyncSessionLocal = async_session_factory
 
 
 class Base(DeclarativeBase):
-    pass
+    metadata = MetaData(schema=_schema) if _schema else MetaData()
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
@@ -178,6 +196,8 @@ async def init_db() -> None:
     warning rather than aborting startup.
     """
     async with engine.begin() as conn:
+        if _schema:
+            await conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{_schema}"'))
         try:
             await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
         except Exception as exc:

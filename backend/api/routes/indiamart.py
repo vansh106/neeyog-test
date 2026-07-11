@@ -1,4 +1,4 @@
-"""IndiaMart lead listing, pickup, and sync routes."""
+"""IndiaMart lead listing and pickup routes."""
 
 from __future__ import annotations
 
@@ -20,21 +20,11 @@ async def list_indiamart_queries(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[CurrentUser, Depends(get_current_user)],
     include_archived: bool = Query(False),
-    auto_sync: bool = Query(True),
 ):
     return await indiamart_controller.handle_list_queries(
         db,
         include_archived=include_archived,
-        auto_sync=auto_sync,
     )
-
-
-@router.post("/sync")
-async def sync_indiamart_now(
-    db: Annotated[AsyncSession, Depends(get_db)],
-    _: Annotated[CurrentUser, Depends(get_current_user)],
-):
-    return await indiamart_controller.handle_sync_now(db)
 
 
 @router.get("/queries/{query_id}/prefill")

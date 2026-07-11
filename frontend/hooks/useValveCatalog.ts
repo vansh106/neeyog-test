@@ -108,6 +108,71 @@ export function computeDistinctOptions(catalog: CatalogRow[], field: string, pri
   return sortCatalogOptions(result)
 }
 
+export type CascadeStepLike = { key: string; label: string }
+
+/**
+ * Build cascade dropdown options from a (possibly sub-filtered) catalog.
+ * Steps whose column is blank for all rows matching prior picks are omitted.
+ */
+export function buildCascadeStepOptions(
+  catalog: CatalogRow[],
+  steps: CascadeStepLike[],
+  fieldValues: Record<string, string>,
+): { applicableSteps: CascadeStepLike[]; stepOptions: Record<string, string[]> } {
+  const stepOptions: Record<string, string[]> = {}
+  const applicableSteps: CascadeStepLike[] = []
+  const prior: Filters = {}
+
+  for (const step of steps) {
+    const opts = computeDistinctOptions(catalog, step.key, prior)
+    if (opts.length === 0) continue
+    applicableSteps.push(step)
+    stepOptions[step.key] = opts
+    const selected = String(fieldValues[step.key] ?? '').trim()
+    if (selected && opts.includes(selected)) {
+      prior[step.key] = selected
+    } else if (opts.length === 1) {
+      prior[step.key] = opts[0]
+    }
+  }
+
+  return { applicableSteps, stepOptions }
+}
+
+/** Resolve a catalog row from manual cascade picks; skips blank columns. */
+export function resolveCascadeRow(
+  catalog: CatalogRow[],
+  steps: CascadeStepLike[],
+  fieldValues: Record<string, string>,
+): CatalogRow | null {
+  if (catalog.length === 0 || steps.length === 0) return null
+
+  const prior: Filters = {}
+  const filters: Filters = {}
+
+  for (const step of steps) {
+    const opts = computeDistinctOptions(catalog, step.key, prior)
+    if (opts.length === 0) continue
+
+    const selected = String(fieldValues[step.key] ?? '').trim()
+    const value =
+      selected && opts.includes(selected) ? selected : opts.length === 1 ? opts[0] : ''
+    if (!value) return null
+
+    filters[step.key] = value
+    prior[step.key] = value
+  }
+
+  const entries = Object.entries(filters).filter(([, v]) => v && String(v).trim() !== '')
+  if (entries.length === 0) return null
+
+  const matches = catalog.filter((row) =>
+    entries.every(([k, v]) => cellMatchesSelected(row[k], v)),
+  )
+  if (matches.length === 1) return matches[0]
+  return null
+}
+
 /** First row matching all non-empty filters, or null if none. */
 export function resolveMatchingRow(catalog: CatalogRow[], allFilters: Filters): CatalogRow | null {
   const entries = Object.entries(allFilters).filter(([, v]) => v && String(v).trim() !== '')

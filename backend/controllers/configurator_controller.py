@@ -11,7 +11,7 @@ from starlette.requests import Request
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from services import configurator_service, masters_service
+from services import configurator_service, masters_service, pricing_service
 from services.configurator_service import VALVE_SPEC_COLUMNS, build_operator_options
 
 logger = logging.getLogger(__name__)
@@ -75,6 +75,16 @@ class FullCategoryCatalogResponse(BaseModel):
 class ValveCategoryItem(BaseModel):
     key: str
     label: str
+
+
+class PricedSupplierItem(BaseModel):
+    supplier_id: str
+    supplier_name: str
+    list_price_inr: float
+
+
+class PricedSuppliersForProductResponse(BaseModel):
+    items: list[PricedSupplierItem] = Field(default_factory=list)
 
 
 # ── Handlers ─────────────────────────────────────────────────────────────
@@ -226,3 +236,20 @@ async def handle_get_full_category_catalog(category: str, db: AsyncSession) -> F
         logger.exception("full-category-catalog failed")
         raise HTTPException(status_code=500, detail=str(e))
     return FullCategoryCatalogResponse(category=category, count=len(rows), rows=rows)
+
+
+async def handle_get_suppliers_for_product(
+    category: str,
+    catalog_row_id: str,
+    db: AsyncSession,
+) -> PricedSuppliersForProductResponse:
+    client_id = pricing_service.active_client_id()
+    items = await pricing_service.list_suppliers_with_product_prices(
+        category.strip(),
+        catalog_row_id.strip(),
+        client_id,
+        db,
+    )
+    return PricedSuppliersForProductResponse(
+        items=[PricedSupplierItem(**row) for row in items],
+    )

@@ -449,6 +449,44 @@ async def bulk_upsert_supplier_prices(
     return {"created": created, "updated": updated, "failed": failed}
 
 
+async def list_suppliers_with_product_prices(
+    catalog_table: str,
+    catalog_row_id: str,
+    client_id: str,
+    db: AsyncSession,
+) -> list[dict[str, Any]]:
+    """Active suppliers with a positive list price for one catalog row."""
+    try:
+        rid = uuid.UUID(catalog_row_id)
+    except ValueError:
+        return []
+    stmt = (
+        select(
+            Supplier.id,
+            Supplier.name,
+            SupplierProductPrice.list_price_inr,
+        )
+        .join(SupplierProductPrice, SupplierProductPrice.supplier_id == Supplier.id)
+        .where(
+            Supplier.client_id == client_id,
+            Supplier.is_active.is_(True),
+            SupplierProductPrice.catalog_table == catalog_table,
+            SupplierProductPrice.catalog_row_id == rid,
+            SupplierProductPrice.list_price_inr > 0,
+        )
+        .order_by(Supplier.name.asc())
+    )
+    rows = (await db.execute(stmt)).all()
+    return [
+        {
+            "supplier_id": str(sid),
+            "supplier_name": name,
+            "list_price_inr": float(price),
+        }
+        for sid, name, price in rows
+    ]
+
+
 async def list_supplier_prices(
     supplier_id: uuid.UUID,
     client_id: str,

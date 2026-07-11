@@ -24,6 +24,6 @@
     "account_type": "OD Account",
     "swift": "IDFBINBBMUM"
   },
-  "product_categories": ["butterfly_valve", "hose", "fitting"],
-  "active_category_for_demo": "butterfly_valve"
+  "product_categories": [],
+  "active_category_for_demo": ""
 }

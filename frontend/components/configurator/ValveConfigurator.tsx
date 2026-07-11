@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { Check, ChevronLeft, ChevronRight, Loader2, Pencil, Trash2 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
@@ -26,7 +27,7 @@ import {
   type AccessorySubcategory,
 } from '@/lib/accessoriesNav'
 import { cn, formatCurrency, formatPriceOrTbd, isPositivePrice, PRICE_TBD_LABEL } from '@/lib/utils'
-import { useValveCatalog, type CatalogRow, computeDistinctOptions } from '@/hooks/useValveCatalog'
+import { useValveCatalog, type CatalogRow, buildCascadeStepOptions, resolveCascadeRow } from '@/hooks/useValveCatalog'
 import { configuratorApi, mastersApi } from '@/lib/api'
 import {
   pickActiveSupplierId,
@@ -578,9 +579,13 @@ export function ValveConfigurator({
     }
     if (initialProduct?.valve) return valveProductToSpecs(initialProduct.valve)
     if (initialSpecSeed?.catalog_category) {
+      const fv = { ...initialSpecSeed.field_values }
+      const vt = (fv.variant_type || '').trim() || null
       return {
         catalog_category: initialSpecSeed.catalog_category,
-        field_values: { ...initialSpecSeed.field_values },
+        catalog_variant_type: vt,
+        catalog_nav_slug: null,
+        field_values: fv,
       }
     }
     return emptySpecs()
@@ -738,8 +743,6 @@ export function ValveConfigurator({
     isLoading: catalogLoading,
     error: catalogError,
     loadCatalog,
-    getOptions,
-    resolve,
     rowCount: fullRowCount,
   } = useValveCatalog(specs.catalog_category)
 
@@ -804,22 +807,10 @@ export function ValveConfigurator({
     void loadCatalog(specs.catalog_category)
   }, [specs.catalog_category, loadCatalog])
 
-  const stepOptions = useMemo(() => {
-    if (!specs.catalog_category || catalog.length === 0 || cascadeSteps.length === 0)
-      return {} as Record<string, string[]>
-    const o: Record<string, string[]> = {}
-    for (const step of cascadeSteps) {
-      const field = step.key
-      const prior: Record<string, string> = {}
-      for (const pc of cascadeSteps) {
-        if (pc.key === field) break
-        const v = specs.field_values[pc.key]
-        if (v) prior[pc.key] = v
-      }
-      o[field] = getOptions(field, prior)
-    }
-    return o
-  }, [specs, catalog, getOptions, cascadeSteps])
+  const { applicableSteps, stepOptions } = useMemo(
+    () => buildCascadeStepOptions(catalog, cascadeSteps, specs.field_values),
+    [catalog, cascadeSteps, specs.field_values],
+  )
 
   const resolvedValve = useMemo((): ValveProduct | null => {
     if (isTemporaryProduct) {
@@ -869,24 +860,101 @@ export function ValveConfigurator({
       }
     }
     if (!specs.catalog_category || catalog.length === 0 || cascadeSteps.length === 0) return null
-    const filters: Record<string, string> = {}
-    for (const step of cascadeSteps) {
-      const v = specs.field_values[step.key]
-      if (!v) return null
-      filters[step.key] = v
-    }
-    const row = resolve(filters)
+    const row = resolveCascadeRow(catalog, cascadeSteps, specs.field_values)
     if (!row) return null
     const displayType = isOthersCatalogCategory(specs.catalog_category)
       ? String(row.description ?? categoryDisplayLabel).trim() || categoryDisplayLabel
       : categoryDisplayLabel || specs.catalog_category
     return catalogRowToValveProduct(row, displayType, specs.catalog_category)
-  }, [isTemporaryProduct, temporaryDescription, specs, catalog, resolve, cascadeSteps, categoryDisplayLabel])
+  }, [isTemporaryProduct, temporaryDescription, specs, catalog, cascadeSteps, categoryDisplayLabel])
 
   const fittingsHoseSize = useMemo(
     () => resolvedValve?.size_id_mm?.trim() || specs.field_values.size_id_mm?.trim() || null,
     [resolvedValve?.size_id_mm, specs.field_values.size_id_mm],
   )
+
+  const needsSupplierPrice = Boolean(
+    resolvedValve &&
+      !isTemporaryProduct &&
+      !isDamperSelection &&
+      !resolvedValve.has_price &&
+      specs.catalog_category,
+  )
+
+  const { data: pricedSuppliersData, isPending: pricedSuppliersLoading } = useQuery({
+    queryKey: [
+      'configuratorPricedSuppliers',
+      specs.catalog_category,
+      resolvedValve?.id,
+    ],
+    queryFn: () =>
+      configuratorApi.getSuppliersForProduct(
+        specs.catalog_category!,
+        String(resolvedValve!.id),
+      ),
+    enabled: needsSupplierPrice && !!resolvedValve?.id && !!specs.catalog_category,
+    staleTime: 30_000,
+  })
+
+  const pricedSuppliers = pricedSuppliersData?.items ?? []
+
+  const selectedPricedSupplier = useMemo(
+    () => pricedSuppliers.find((s) => s.supplier_id === supplierId) ?? null,
+    [pricedSuppliers, supplierId],
+  )
+  const selectedSupplierLabel = useMemo(() => {
+    if (selectedPricedSupplier) {
+      return `${selectedPricedSupplier.supplier_name} — ${formatCurrency(selectedPricedSupplier.list_price_inr)}`
+    }
+    return (suppliers ?? []).find((s) => s.id === supplierId)?.name ?? null
+  }, [selectedPricedSupplier, suppliers, supplierId])
+
+  const pickProductSupplier = useCallback(
+    (item: { supplier_id: string; supplier_name: string; list_price_inr: number }) => {
+      setSupplierId(item.supplier_id)
+      setComponentPricing((prev) => ({
+        ...prev,
+        valve: {
+          enabled: true,
+          supplier_id: item.supplier_id,
+          supplier_name: item.supplier_name,
+          temp_price: String(item.list_price_inr),
+        },
+      }))
+      setSupplierListPrices((prev) => ({ ...prev, valve: item.list_price_inr }))
+    },
+    [],
+  )
+
+  useEffect(() => {
+    setSupplierId(null)
+    setSupplierListPrices((prev) => {
+      if (prev.valve == null) return prev
+      const { valve: _removed, ...rest } = prev
+      return rest
+    })
+    setComponentPricing((prev) =>
+      prev.valve?.supplier_id
+        ? {
+            ...prev,
+            valve: {
+              ...prev.valve,
+              supplier_id: null,
+              supplier_name: null,
+              temp_price: '',
+            },
+          }
+        : prev,
+    )
+  }, [resolvedValve?.id])
+
+  useEffect(() => {
+    if (!needsSupplierPrice || pricedSuppliers.length !== 1 || supplierId) return
+    pickProductSupplier(pricedSuppliers[0]!)
+  }, [needsSupplierPrice, pricedSuppliers, supplierId, pickProductSupplier])
+
+  const supplierPickRequired = needsSupplierPrice && pricedSuppliers.length > 0
+  const supplierPickMissing = supplierPickRequired && !supplierId
 
   const pricingCtx = useMemo(
     () => ({
@@ -1085,20 +1153,19 @@ export function ValveConfigurator({
       return
     setSpecs((prev) => {
       if (!prev.catalog_category) return prev
+      const { stepOptions: optsByField } = buildCascadeStepOptions(
+        catalog,
+        cascadeSteps,
+        prev.field_values,
+      )
       let nextFv = { ...prev.field_values }
       let changed = false
       for (const step of cascadeSteps) {
-        const field = step.key
-        if (nextFv[field]) continue
-        const prior: Record<string, string> = {}
-        for (const pc of cascadeSteps) {
-          if (pc.key === field) break
-          const v = nextFv[pc.key]
-          if (v) prior[pc.key] = v
-        }
-        const opts = computeDistinctOptions(catalog, field, prior)
+        const opts = optsByField[step.key]
+        if (!opts || opts.length === 0) continue
+        if (nextFv[step.key]) continue
         if (opts.length === 1) {
-          nextFv[field] = opts[0]
+          nextFv[step.key] = opts[0]
           changed = true
         } else {
           break
@@ -1106,7 +1173,7 @@ export function ValveConfigurator({
       }
       return changed ? { ...prev, field_values: nextFv } : prev
     })
-  }, [isTemporaryProduct, specs.catalog_category, specs.field_values, catalog, catalogLoading, cascadeSteps])
+  }, [isTemporaryProduct, isDamperSelection, specs.catalog_category, specs.field_values, catalog, catalogLoading, cascadeSteps])
 
   // ── Fetch operators once the valve is resolved (and we're past specs) ─
   useEffect(() => {
@@ -1751,14 +1818,15 @@ export function ValveConfigurator({
             !isDamperSelection &&
             specs.catalog_category &&
             !catalogLoading &&
-            cascadeSteps.length > 0 && (
+            cascadeSteps.length > 0 &&
+            applicableSteps.length > 0 && (
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              {cascadeSteps.map((step, idx) => {
+              {applicableSteps.map((step, idx) => {
                 const field = step.key
                 const opts = stepOptions[field] ?? []
                 const priorOk =
                   idx === 0 ||
-                  cascadeSteps.slice(0, idx).every((p) => {
+                  applicableSteps.slice(0, idx).every((p) => {
                     const pOpts = stepOptions[p.key] ?? []
                     if (pOpts.length <= 1) return true
                     return !!(specs.field_values[p.key] && String(specs.field_values[p.key]).trim())
@@ -1796,6 +1864,56 @@ export function ValveConfigurator({
                   </div>
                 )
               })}
+            </div>
+          )}
+
+          {needsSupplierPrice && resolvedValve && (
+            <div className="space-y-1.5">
+              <div className="text-[10px] font-medium uppercase tracking-wide text-[#8A9488]">
+                Supplier
+              </div>
+              {pricedSuppliersLoading ? (
+                <div className="flex items-center gap-2 text-[12px] text-surface-muted">
+                  <Loader2 className="size-4 animate-spin" />
+                  Loading suppliers…
+                </div>
+              ) : pricedSuppliers.length === 0 ? (
+                <p className="text-[12px] text-red-600">
+                  No supplier prices configured for this product.
+                </p>
+              ) : (
+                <Select
+                  value={toSelectValue(supplierId ?? '')}
+                  onValueChange={(raw) => {
+                    const id = fromSelectValue(raw ?? '')
+                    const item = pricedSuppliers.find((s) => s.supplier_id === id)
+                    if (item) pickProductSupplier(item)
+                  }}
+                >
+                  <SelectTrigger
+                    className={SPEC_SELECT_TRIGGER_CLASS}
+                    title={selectedSupplierLabel ?? undefined}
+                  >
+                    <SelectValue placeholder="Select supplier">
+                      {selectedSupplierLabel}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent variant="wide" align="start">
+                    <SelectItem value={SELECT_EMPTY}>
+                      <span className="text-muted-foreground">Select…</span>
+                    </SelectItem>
+                    {pricedSuppliers.map((s) => (
+                      <SelectItem
+                        key={s.supplier_id}
+                        value={s.supplier_id}
+                        title={`${s.supplier_name} — ${formatCurrency(s.list_price_inr)}`}
+                      >
+                        {s.supplier_name} — {formatCurrency(s.list_price_inr)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
             </div>
           )}
 
@@ -1909,7 +2027,9 @@ export function ValveConfigurator({
                 : isDamperSelection
                   ? 'Pick specs from each column (ME fields are optional), then choose operator.'
                   : specs.catalog_category
-                    ? 'Pick each spec to narrow down.'
+                    ? supplierPickRequired
+                      ? 'Select a supplier, then continue.'
+                      : 'Pick each spec to narrow down.'
                     : 'Choose family, then type and product sheet (one step at a time).'}
             </span>
             <Button
@@ -1925,7 +2045,11 @@ export function ValveConfigurator({
                         : 'supplier',
                 )
               }
-              disabled={!resolvedValve || (!isTemporaryProduct && !isDamperSelection && !hoseLengthValid)}
+              disabled={
+                !resolvedValve ||
+                supplierPickMissing ||
+                (!isTemporaryProduct && !isDamperSelection && !hoseLengthValid)
+              }
               className="bg-brand-green-500 text-white hover:bg-brand-green-600"
             >
               {isTemporaryProduct

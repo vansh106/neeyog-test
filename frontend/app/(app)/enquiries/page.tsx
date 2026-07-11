@@ -46,7 +46,7 @@ type Pipeline = 'all' | 'complete' | 'incomplete' | 'pending' | 'failed'
 
 const PENDING_STATUSES = ['received', 'parsing', 'matching', 'quoting'] as const
 
-/** Backend validates `limit` ≤ 500 on GET /api/enquiries/ */
+/** Backend validates `limit` ≤ 500 on GET /api/enquiries */
 const LISTING_FETCH_LIMIT = 500
 const COL_COUNT = 13
 

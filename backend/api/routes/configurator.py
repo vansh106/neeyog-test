@@ -12,6 +12,7 @@ from controllers.configurator_controller import (
     OperatorsResponse,
     PriceCalcRequest,
     PriceCalcResponse,
+    PricedSuppliersForProductResponse,
     ResolveValveResponse,
     ValveCategoryItem,
     ValveOptionsResponse,
@@ -60,6 +61,17 @@ async def full_category_catalog_route(
 ):
     """Return all catalog rows for a masters category (one-shot client-side cascade)."""
     return await configurator_controller.handle_get_full_category_catalog(category, db)
+
+
+@router.get("/suppliers-for-product", response_model=PricedSuppliersForProductResponse)
+async def suppliers_for_product_route(
+    _user: CurrentUser = Depends(require_permission(Permission.MASTERS_VIEW)),
+    category: str = Query(..., description="Catalog API key, e.g. fp_aluminium_foil"),
+    catalog_row_id: str = Query(..., description="UUID of the resolved catalog row"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Suppliers with a positive list price for one catalog product row."""
+    return await configurator_controller.handle_get_suppliers_for_product(category, catalog_row_id, db)
 
 
 @router.get(

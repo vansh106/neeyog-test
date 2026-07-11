@@ -8,11 +8,14 @@ import { cn } from '@/lib/utils'
 import { mastersApi } from '@/lib/api'
 import {
   type ConfiguratorCatalogPick,
+  type ConfiguratorNavProductFamily,
   type ConfiguratorProductFamily,
+  CONFIGURATOR_PRODUCT_FAMILIES,
   CONFIGURATOR_STEP1_PRODUCT_NAV,
   configuratorLeafLabel,
   configuratorProductFamilyForKey,
   configuratorPickFromLeaf,
+  isConfiguratorNavFamily,
   isOthersCatalogCategory,
 } from '@/lib/configuratorProductFlow'
 import {
@@ -45,15 +48,11 @@ const FAMILY_HINTS: Record<ConfiguratorProductFamily, string> = {
   Valves: 'Butterfly, ball, diaphragm, NRV, and more',
   Hoses: 'Tuder, PVC, silicon, PU hoses',
   Dampers: 'Butterfly and multi-louver dampers',
+  Packaging: 'Aluminium foil wrap, boxes, containers, and lids',
   Others: 'Custom categorisations and sheets from Masters',
 }
 
-const CONFIGURATOR_FAMILIES: ConfiguratorProductFamily[] = [
-  'Valves',
-  'Hoses',
-  'Dampers',
-  'Others',
-]
+const CONFIGURATOR_FAMILIES = CONFIGURATOR_PRODUCT_FAMILIES
 
 const EMPTY_NAV_STACK: string[] = []
 const EMPTY_OTHERS_CATEGORIES: OthersCategory[] = []
@@ -66,12 +65,12 @@ function stripMasconPrefix(label: string): string {
   return label.replace(/^Mascon\s*—\s*/i, '').trim()
 }
 
-function familyNodes(family: 'Valves' | 'Hoses' | 'Dampers'): MasterNavNode[] {
+function familyNodes(family: ConfiguratorNavProductFamily): MasterNavNode[] {
   const root = CONFIGURATOR_STEP1_PRODUCT_NAV.find((n) => n.kind === 'group' && n.label === family)
   return root?.kind === 'group' ? root.children : []
 }
 
-function nodesAtPath(family: 'Valves' | 'Hoses' | 'Dampers', pathLabels: string[]): MasterNavNode[] {
+function nodesAtPath(family: ConfiguratorNavProductFamily, pathLabels: string[]): MasterNavNode[] {
   let current = familyNodes(family)
   for (const label of pathLabels) {
     const group = current.find((n) => n.kind === 'group' && n.label === label)
@@ -137,6 +136,11 @@ export default function ConfiguratorCategoryPicker({
 
   const activeFamily = inferredFamily ?? pickedFamily
 
+  React.useEffect(() => {
+    if (CONFIGURATOR_FAMILIES.length !== 1 || selection.key || inferredFamily) return
+    setPickedFamily((prev) => prev ?? CONFIGURATOR_FAMILIES[0]!)
+  }, [selection.key, inferredFamily])
+
   const { data: othersTreeData, isPending: othersLoading } = useQuery({
     queryKey: ['othersMastersTree', 'configurator'],
     queryFn: () => mastersApi.getOthersTree<{ items: OthersCategory[] }>(),
@@ -164,10 +168,9 @@ export default function ConfiguratorCategoryPicker({
     setNavStack((prev) => (navStacksEqual(prev, nextStack) ? prev : nextStack))
   }, [selection.key, selection.variantType, selection.navSlug, othersCategories])
 
-  const currentNodes =
-    activeFamily === 'Valves' || activeFamily === 'Hoses' || activeFamily === 'Dampers'
-      ? nodesAtPath(activeFamily, navStack)
-      : []
+  const currentNodes = isConfiguratorNavFamily(activeFamily)
+    ? nodesAtPath(activeFamily, navStack)
+    : []
 
   const othersCategory =
     activeFamily === 'Others' && navStack.length > 0
@@ -416,7 +419,7 @@ export default function ConfiguratorCategoryPicker({
         </>
       )}
 
-      {navStack.length === 0 && !hasLeafSelected && otherFamilies.length > 0 ? (
+      {CONFIGURATOR_FAMILIES.length > 1 && navStack.length === 0 && !hasLeafSelected && otherFamilies.length > 0 ? (
         <div className="flex flex-wrap gap-x-3 gap-y-1">
           {otherFamilies.map((f) => (
             <button

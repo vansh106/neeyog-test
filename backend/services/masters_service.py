@@ -212,8 +212,7 @@ async def get_clients_for_dropdown(search: str | None, db: AsyncSession) -> list
 async def get_product_categories(db: AsyncSession) -> list[dict[str, str | int]]:
     """Categories backed by per-sheet product tables for the active client.
 
-    Returns sheets that have at least one row. If none have data yet, returns
-    the full catalog with zero counts so the UI can still offer choices.
+    Returns only sheets that currently have rows for the active client.
     """
     settings = get_settings()
     client_id = settings.ACTIVE_CLIENT
@@ -232,8 +231,7 @@ async def get_product_categories(db: AsyncSession) -> list[dict[str, str | int]]
     for oc in await others_masters_service.list_catalog_categories(db):
         keyed.append((str(oc["key"]), int(oc["count"])))
 
-    with_products = [(k, n) for k, n in keyed if n > 0]
-    use = with_products if with_products else keyed
+    use = [(k, n) for k, n in keyed if n > 0]
 
     out: list[dict[str, str | int]] = [
         {"key": k, "label": _category_label(k), "count": n}

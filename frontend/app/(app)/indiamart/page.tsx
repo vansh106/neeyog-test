@@ -8,8 +8,6 @@ import {
   Archive,
   ExternalLink,
   HandMetal,
-  Loader2,
-  RefreshCw,
   Store,
 } from 'lucide-react'
 
@@ -45,18 +43,6 @@ function formatQueryTime(queryTime: string | null, createdAt?: string | null): s
   })
 }
 
-function relSyncTime(iso: string | null): string {
-  if (!iso) return 'Never synced'
-  const t = new Date(iso).getTime()
-  if (Number.isNaN(t)) return 'Never synced'
-  const mins = Math.floor((Date.now() - t) / 60000)
-  if (mins < 1) return 'Synced just now'
-  if (mins < 60) return `Synced ${mins}m ago`
-  const hrs = Math.floor(mins / 60)
-  if (hrs < 48) return `Synced ${hrs}h ago`
-  return `Synced ${Math.floor(hrs / 24)}d ago`
-}
-
 function rowTone(row: IndiaMartQueryItem): string {
   if (row.is_archived) return 'bg-gray-50/80 opacity-70'
   if (row.is_picked_up) return 'bg-emerald-50/90 hover:bg-emerald-50'
@@ -71,12 +57,7 @@ export default function IndiaMartPage() {
   const [pickupTarget, setPickupTarget] = useState<IndiaMartQueryItem | null>(null)
   const [pickupOpen, setPickupOpen] = useState(false)
 
-  const { data, isPending, isFetching } = useIndiaMartQueries(showArchived)
-
-  const syncMut = useMutation({
-    mutationFn: () => indiamartApi.syncNow(),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['indiamart-queries'] }),
-  })
+  const { data, isPending } = useIndiaMartQueries(showArchived)
 
   const archiveMut = useMutation({
     mutationFn: (id: string) => indiamartApi.archiveQuery(id),
@@ -112,26 +93,6 @@ export default function IndiaMartPage() {
     <PageShell
       title="IndiaMart Leads"
       subtitle="Open leads sit in the bucket until someone picks them up and creates an enquiry."
-      actions={
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-[12px] text-surface-muted">{relSyncTime(data?.last_sync_at ?? null)}</span>
-          {data?.using_dummy_data && (
-            <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-800">
-              Demo data (set INDIAMART_CRM_KEY)
-            </span>
-          )}
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            disabled={syncMut.isPending || isFetching}
-            onClick={() => syncMut.mutate()}
-          >
-            {syncMut.isPending ? <Loader2 className="mr-2 size-4 animate-spin" /> : <RefreshCw className="mr-2 size-4" />}
-            Sync now
-          </Button>
-        </div>
-      }
     >
       <div className="mb-4 flex flex-wrap items-center gap-4 text-[12px]">
         <span className="inline-flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-amber-900">
@@ -172,7 +133,7 @@ export default function IndiaMartPage() {
           description={
             hasActiveFilters
               ? 'Try adjusting search or filters.'
-              : 'Leads appear here after the first sync. Use Sync now or wait for the background job.'
+              : 'Leads will appear here once IndiaMart sync is configured for this project.'
           }
         />
       ) : (
