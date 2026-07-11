@@ -71,7 +71,7 @@ export default function QuotationFormatPreview({
   notesPreviewText,
   onOpenHistory,
 }: Props) {
-  const companyName = clientConfig?.company_name || 'Parth Valves and Hoses LLP'
+  const companyName = clientConfig?.company_name || 'Neeyog Packaging'
   const company = companyName.toUpperCase()
   const address = (clientConfig?.address || '').trim()
   const gst = (clientConfig?.gst_number || '').trim()

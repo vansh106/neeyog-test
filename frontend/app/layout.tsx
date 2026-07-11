@@ -17,8 +17,8 @@ const jetbrains = JetBrains_Mono({
 })
 
 export const metadata: Metadata = {
-  title: 'Parth CPQ — AI Quotation System',
-  description: 'AI-powered quotation system for Parth Valves and Hoses LLP',
+  title: 'Neeyog CPQ — AI Quotation System',
+  description: 'AI-powered quotation system for Neeyog Packaging',
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

@@ -114,11 +114,11 @@ export default function Sidebar() {
         )}
       >
         <div className="w-8 h-8 rounded-lg bg-brand-green-500 flex items-center justify-center text-white font-bold text-[14px] flex-shrink-0">
-          PV
+          NP
         </div>
         {!sidebarCollapsed && (
           <div>
-            <div className="text-brand-green-300 font-semibold text-[14px] leading-tight">Parth CPQ</div>
+            <div className="text-brand-green-300 font-semibold text-[14px] leading-tight">Neeyog CPQ</div>
             <div className="text-[10px] text-[#5a7a5e]">v1.0 mvp</div>
           </div>
         )}
