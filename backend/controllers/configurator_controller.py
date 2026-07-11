@@ -7,10 +7,11 @@ import logging
 from typing import Any
 
 from fastapi import HTTPException
+from starlette.requests import Request
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from services import configurator_service
+from services import configurator_service, masters_service, pricing_service
 from services.configurator_service import VALVE_SPEC_COLUMNS, build_operator_options
 
 logger = logging.getLogger(__name__)
@@ -59,9 +60,36 @@ class PriceCalcResponse(BaseModel):
     breakdown: list[dict] = Field(default_factory=list)
 
 
+class FullValveCatalogResponse(BaseModel):
+    valve_type: str
+    count: int
+    rows: list[dict[str, Any]]
+
+
+class FullCategoryCatalogResponse(BaseModel):
+    category: str
+    count: int
+    rows: list[dict[str, Any]]
+
+
+class ValveCategoryItem(BaseModel):
+    key: str
+    label: str
+
+
+class PricedSupplierItem(BaseModel):
+    supplier_id: str
+    supplier_name: str
+    list_price_inr: float
+
+
+class PricedSuppliersForProductResponse(BaseModel):
+    items: list[PricedSupplierItem] = Field(default_factory=list)
+
+
 # ── Handlers ─────────────────────────────────────────────────────────────
-def handle_list_valve_types() -> list[str]:
-    return list(VALVE_SPEC_COLUMNS.keys())
+def handle_list_valve_types() -> list[ValveCategoryItem]:
+    return [ValveCategoryItem(**x) for x in configurator_service.list_valve_catalog_categories()]
 
 
 def _parse_filters(raw: str | None) -> dict[str, str]:
@@ -100,15 +128,24 @@ async def handle_valve_options(
     return ValveOptionsResponse(field=field, options=options)
 
 
-async def handle_resolve_valve(
-    valve_type: str,
-    specs: dict[str, Any],
-    db: AsyncSession,
-) -> ResolveValveResponse:
-    cleaned = {k: str(v) for k, v in (specs or {}).items() if v is not None and str(v).strip()}
+async def handle_resolve_valve(request: Request, db: AsyncSession) -> ResolveValveResponse:
+    qp = dict(request.query_params)
+    category = qp.get("category")
+    valve_type = qp.get("valve_type")
+    reserved = frozenset({"category", "valve_type"})
+    cleaned = {
+        k: str(v)
+        for k, v in qp.items()
+        if k not in reserved and v is not None and str(v).strip() != ""
+    }
+    if not category and not valve_type:
+        raise HTTPException(status_code=400, detail="Provide category (API key) or legacy valve_type")
     try:
         product = await configurator_service.resolve_valve(
-            valve_type=valve_type, specs=cleaned, db=db
+            category=category,
+            valve_type=valve_type,
+            specs=cleaned,
+            db=db,
         )
     except Exception as e:
         logger.exception("resolve-valve failed")
@@ -121,6 +158,7 @@ async def handle_get_operators(
     construction: str,
     valve_size: str,
     db: AsyncSession,
+    catalog_category: str | None = None,
 ) -> OperatorsResponse:
     try:
         ops = await configurator_service.get_operators_for_valve(
@@ -128,14 +166,24 @@ async def handle_get_operators(
             construction=construction,
             valve_size=valve_size,
             db=db,
+            catalog_category=catalog_category,
         )
         bracket = await configurator_service.get_bracket_for_valve(
-            valve_type=valve_type, valve_size=valve_size, db=db
+            valve_type=valve_type,
+            valve_size=valve_size,
+            db=db,
+            catalog_category=catalog_category,
         )
     except Exception as e:
         logger.exception("operators lookup failed")
         raise HTTPException(status_code=500, detail=str(e))
-    options = build_operator_options(ops["da_operators"], ops["sa_operators"])
+    from services.damper_schema import is_damper_catalog_key
+
+    options = build_operator_options(
+        ops["da_operators"],
+        ops["sa_operators"],
+        include_damper_operators=bool(catalog_category and is_damper_catalog_key(catalog_category)),
+    )
     return OperatorsResponse(
         operator_options=options,
         da_operators=ops["da_operators"],
@@ -168,3 +216,40 @@ def handle_calculate_price(body: PriceCalcRequest) -> PriceCalcResponse:
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return PriceCalcResponse(**result)
+
+
+async def handle_get_full_catalog(valve_type: str, db: AsyncSession) -> FullValveCatalogResponse:
+    try:
+        rows = await configurator_service.get_full_valve_catalog(valve_type, db)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.exception("full-catalog failed")
+        raise HTTPException(status_code=500, detail=str(e))
+    return FullValveCatalogResponse(valve_type=valve_type, count=len(rows), rows=rows)
+
+
+async def handle_get_full_category_catalog(category: str, db: AsyncSession) -> FullCategoryCatalogResponse:
+    try:
+        rows = await masters_service.get_full_category_catalog(category, db)
+    except Exception as e:
+        logger.exception("full-category-catalog failed")
+        raise HTTPException(status_code=500, detail=str(e))
+    return FullCategoryCatalogResponse(category=category, count=len(rows), rows=rows)
+
+
+async def handle_get_suppliers_for_product(
+    category: str,
+    catalog_row_id: str,
+    db: AsyncSession,
+) -> PricedSuppliersForProductResponse:
+    client_id = pricing_service.active_client_id()
+    items = await pricing_service.list_suppliers_with_product_prices(
+        category.strip(),
+        catalog_row_id.strip(),
+        client_id,
+        db,
+    )
+    return PricedSuppliersForProductResponse(
+        items=[PricedSupplierItem(**row) for row in items],
+    )

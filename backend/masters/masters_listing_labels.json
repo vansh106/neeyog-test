@@ -1,0 +1,653 @@
+[
+  {
+    "key": "butterfly_valve",
+    "navSlug": "hygienic-alfa-laval",
+    "variantType": "Hygienic Butterfly Valve",
+    "category": "Valves",
+    "subCategory": "Butterfly Valve"
+  },
+  {
+    "key": "butterfly_valve",
+    "navSlug": "hygienic-pvh",
+    "variantType": "Hygienic Butterfly Valve",
+    "category": "Valves",
+    "subCategory": "Butterfly Valve"
+  },
+  {
+    "key": "butterfly_valve",
+    "navSlug": "aluminium-pvh",
+    "variantType": "Aluminium Butterfly Valve",
+    "category": "Valves",
+    "subCategory": "Butterfly Valve"
+  },
+  {
+    "key": "butterfly_valve",
+    "navSlug": "industrial-omval",
+    "variantType": "Industrial Butterfly Valve",
+    "category": "Valves",
+    "subCategory": "Butterfly Valve"
+  },
+  {
+    "key": "butterfly_valve",
+    "navSlug": "industrial-delval",
+    "variantType": "Industrial Butterfly Valve",
+    "category": "Valves",
+    "subCategory": "Butterfly Valve"
+  },
+  {
+    "key": "fp_ball_valve_casco_1_piece_multi_end",
+    "navSlug": null,
+    "variantType": null,
+    "category": "Valves",
+    "subCategory": "Ball Valve"
+  },
+  {
+    "key": "fp_ball_valve_unison_1_piece_multi_end",
+    "navSlug": null,
+    "variantType": null,
+    "category": "Valves",
+    "subCategory": "Ball Valve"
+  },
+  {
+    "key": "fp_ball_valve_casco_2_piece",
+    "navSlug": null,
+    "variantType": null,
+    "category": "Valves",
+    "subCategory": "Ball Valve"
+  },
+  {
+    "key": "fp_ball_valve_unison_2_piece_iso_pads",
+    "navSlug": null,
+    "variantType": null,
+    "category": "Valves",
+    "subCategory": "Ball Valve"
+  },
+  {
+    "key": "fp_ball_valve_casco_3_piece",
+    "navSlug": null,
+    "variantType": null,
+    "category": "Valves",
+    "subCategory": "Ball Valve"
+  },
+  {
+    "key": "fp_ball_valve_casco_3_piece_ext_stem",
+    "navSlug": null,
+    "variantType": null,
+    "category": "Valves",
+    "subCategory": "Ball Valve"
+  },
+  {
+    "key": "fp_ball_valve_casco_3_piece_3_way_l_port",
+    "navSlug": null,
+    "variantType": null,
+    "category": "Valves",
+    "subCategory": "Ball Valve"
+  },
+  {
+    "key": "fp_ball_valve_unison_3_piece",
+    "navSlug": null,
+    "variantType": null,
+    "category": "Valves",
+    "subCategory": "Ball Valve"
+  },
+  {
+    "key": "fp_ball_valve_unison_3_piece_3_way_l_port",
+    "navSlug": null,
+    "variantType": null,
+    "category": "Valves",
+    "subCategory": "Ball Valve"
+  },
+  {
+    "key": "fp_fbv_ball_type",
+    "navSlug": null,
+    "variantType": null,
+    "category": "Valves",
+    "subCategory": "Flush Bottom Valve"
+  },
+  {
+    "key": "fp_fbv_y_type",
+    "navSlug": null,
+    "variantType": null,
+    "category": "Valves",
+    "subCategory": "Flush Bottom Valve"
+  },
+  {
+    "key": "fp_needle_valve",
+    "navSlug": null,
+    "variantType": null,
+    "category": "Valves",
+    "subCategory": "Needle Valve"
+  },
+  {
+    "key": "fp_nrv_inline_check",
+    "navSlug": null,
+    "variantType": null,
+    "category": "Valves",
+    "subCategory": "Non Return Valve / Check Valve"
+  },
+  {
+    "key": "fp_nrv_wafer_check",
+    "navSlug": null,
+    "variantType": null,
+    "category": "Valves",
+    "subCategory": "Non Return Valve / Check Valve"
+  },
+  {
+    "key": "fp_nrv_non_slam",
+    "navSlug": null,
+    "variantType": null,
+    "category": "Valves",
+    "subCategory": "Non Return Valve / Check Valve"
+  },
+  {
+    "key": "fp_safety_sv_bsp_f",
+    "navSlug": null,
+    "variantType": null,
+    "category": "Valves",
+    "subCategory": "Safety / Pressure Relief Valve"
+  },
+  {
+    "key": "fp_safety_sv_tc_end",
+    "navSlug": null,
+    "variantType": null,
+    "category": "Valves",
+    "subCategory": "Safety / Pressure Relief Valve"
+  },
+  {
+    "key": "fp_sampling_sv_tc_end",
+    "navSlug": null,
+    "variantType": null,
+    "category": "Valves",
+    "subCategory": "Sampling Valve"
+  },
+  {
+    "key": "fp_sampling_sv_od_base_weld",
+    "navSlug": null,
+    "variantType": null,
+    "category": "Valves",
+    "subCategory": "Sampling Valve"
+  },
+  {
+    "key": "fp_mascon_manual_tc_end",
+    "navSlug": null,
+    "variantType": null,
+    "category": "Valves",
+    "subCategory": "Diaphragm Valve"
+  },
+  {
+    "key": "fp_mascon_manual_butt_weld",
+    "navSlug": null,
+    "variantType": null,
+    "category": "Valves",
+    "subCategory": "Diaphragm Valve"
+  },
+  {
+    "key": "fp_mascon_pneumatic_tc_end",
+    "navSlug": null,
+    "variantType": null,
+    "category": "Valves",
+    "subCategory": "Diaphragm Valve"
+  },
+  {
+    "key": "fp_mascon_pneumatic_butt_weld",
+    "navSlug": null,
+    "variantType": null,
+    "category": "Valves",
+    "subCategory": "Diaphragm Valve"
+  },
+  {
+    "key": "fp_mascon_spare_diaphragm",
+    "navSlug": null,
+    "variantType": null,
+    "category": "Valves",
+    "subCategory": "Diaphragm Valve"
+  },
+  {
+    "key": "fp_mascon_zdvm_l_type",
+    "navSlug": null,
+    "variantType": null,
+    "category": "Valves",
+    "subCategory": "Zero Dead Leg Valve"
+  },
+  {
+    "key": "fp_mascon_zdvm_j_type",
+    "navSlug": null,
+    "variantType": null,
+    "category": "Valves",
+    "subCategory": "Zero Dead Leg Valve"
+  },
+  {
+    "key": "fp_mascon_zdvp_l_type",
+    "navSlug": null,
+    "variantType": null,
+    "category": "Valves",
+    "subCategory": "Zero Dead Leg Valve"
+  },
+  {
+    "key": "fp_mascon_zdvp_j_type",
+    "navSlug": null,
+    "variantType": null,
+    "category": "Valves",
+    "subCategory": "Zero Dead Leg Valve"
+  },
+  {
+    "key": "fp_mascon_prv",
+    "navSlug": null,
+    "variantType": null,
+    "category": "Valves",
+    "subCategory": "Pressure Reducing Valve"
+  },
+  {
+    "key": "fp_mascon_angle_sc_flanged",
+    "navSlug": null,
+    "variantType": null,
+    "category": "Valves",
+    "subCategory": "Angle Type Valve"
+  },
+  {
+    "key": "fp_mascon_angle_butt_weld",
+    "navSlug": null,
+    "variantType": null,
+    "category": "Valves",
+    "subCategory": "Angle Type Valve"
+  },
+  {
+    "key": "fp_mascon_angle_tc_end",
+    "navSlug": null,
+    "variantType": null,
+    "category": "Valves",
+    "subCategory": "Angle Type Valve"
+  },
+  {
+    "key": "fp_sight_glass_double_window",
+    "navSlug": null,
+    "variantType": null,
+    "category": "Valves",
+    "subCategory": "Sight Glass"
+  },
+  {
+    "key": "fp_sight_glass_inline_ic_casted",
+    "navSlug": null,
+    "variantType": null,
+    "category": "Valves",
+    "subCategory": "Sight Glass"
+  },
+  {
+    "key": "fp_sight_glass_inline_solid_flange",
+    "navSlug": null,
+    "variantType": null,
+    "category": "Valves",
+    "subCategory": "Sight Glass"
+  },
+  {
+    "key": "fp_strainer_y_150",
+    "navSlug": null,
+    "variantType": null,
+    "category": "Valves",
+    "subCategory": "Strainer"
+  },
+  {
+    "key": "fp_strainer_y_300",
+    "navSlug": null,
+    "variantType": null,
+    "category": "Valves",
+    "subCategory": "Strainer"
+  },
+  {
+    "key": "fp_hose_tuder",
+    "navSlug": null,
+    "variantType": null,
+    "category": "Hoses",
+    "subCategory": "Tuder Hoses"
+  },
+  {
+    "key": "fp_hose_thunder",
+    "navSlug": null,
+    "variantType": null,
+    "category": "Hoses",
+    "subCategory": "PVC Hoses"
+  },
+  {
+    "key": "fp_hose_pvc_nylon_non_toxic",
+    "navSlug": null,
+    "variantType": null,
+    "category": "Hoses",
+    "subCategory": "PVC Hoses"
+  },
+  {
+    "key": "fp_hose_pvc_nylon_food_grade",
+    "navSlug": null,
+    "variantType": null,
+    "category": "Hoses",
+    "subCategory": "PVC Hoses"
+  },
+  {
+    "key": "fp_hose_red_silicon",
+    "navSlug": null,
+    "variantType": null,
+    "category": "Hoses",
+    "subCategory": "PVC Hoses"
+  },
+  {
+    "key": "fp_hose_pu",
+    "navSlug": null,
+    "variantType": null,
+    "category": "Hoses",
+    "subCategory": "PVC Hoses"
+  },
+  {
+    "key": "fp_damper_butterfly",
+    "navSlug": null,
+    "variantType": null,
+    "category": "Dampers",
+    "subCategory": "Butterfly Damper"
+  },
+  {
+    "key": "fp_damper_multi_louver",
+    "navSlug": null,
+    "variantType": null,
+    "category": "Dampers",
+    "subCategory": "Multi-Louver Damper"
+  },
+  {
+    "key": "fp_fittings_sms_nut",
+    "navSlug": null,
+    "variantType": null,
+    "category": "Hose Fittings",
+    "subCategory": "SMS Nut"
+  },
+  {
+    "key": "fp_fittings_tri_clover_end",
+    "navSlug": null,
+    "variantType": null,
+    "category": "Hose Fittings",
+    "subCategory": "Tri-Clover End"
+  },
+  {
+    "key": "fp_fittings_din_nut_11851",
+    "navSlug": null,
+    "variantType": null,
+    "category": "Hose Fittings",
+    "subCategory": "DIN Nut 11851"
+  },
+  {
+    "key": "fp_fittings_swivel_nut",
+    "navSlug": null,
+    "variantType": null,
+    "category": "Hose Fittings",
+    "subCategory": "Swivel Nut"
+  },
+  {
+    "key": "fp_fittings_flange_150",
+    "navSlug": null,
+    "variantType": null,
+    "category": "Hose Fittings",
+    "subCategory": "Flange #150"
+  },
+  {
+    "key": "operator",
+    "navSlug": "actuator-da",
+    "variantType": null,
+    "category": "Accessories",
+    "subCategory": "Actuator"
+  },
+  {
+    "key": "operator",
+    "navSlug": "actuator-sa",
+    "variantType": null,
+    "category": "Accessories",
+    "subCategory": "Actuator"
+  },
+  {
+    "key": "brackets_coupler",
+    "navSlug": null,
+    "variantType": null,
+    "category": "Accessories",
+    "subCategory": "Brackets & couplers"
+  },
+  {
+    "key": "sov",
+    "navSlug": "sov-namur",
+    "variantType": null,
+    "category": "Accessories",
+    "subCategory": "SOV"
+  },
+  {
+    "key": "sov",
+    "navSlug": "sov-non-namur",
+    "variantType": null,
+    "category": "Accessories",
+    "subCategory": "SOV"
+  },
+  {
+    "key": "limit_switch_box",
+    "navSlug": "lsb-weather",
+    "variantType": null,
+    "category": "Accessories",
+    "subCategory": "Limit Switch Box"
+  },
+  {
+    "key": "limit_switch_box",
+    "navSlug": "lsb-flame",
+    "variantType": null,
+    "category": "Accessories",
+    "subCategory": "Limit Switch Box"
+  },
+  {
+    "key": "positioner",
+    "navSlug": "positioner-electro-rotork",
+    "variantType": null,
+    "category": "Accessories",
+    "subCategory": "Positioner"
+  },
+  {
+    "key": "positioner",
+    "navSlug": "positioner-pneumatic-rotork",
+    "variantType": null,
+    "category": "Accessories",
+    "subCategory": "Positioner"
+  },
+  {
+    "key": "positioner",
+    "navSlug": "positioner-smart-rotork",
+    "variantType": null,
+    "category": "Accessories",
+    "subCategory": "Positioner"
+  },
+  {
+    "key": "fp_aluminium_foil",
+    "navSlug": "foil-wrap",
+    "variantType": "Foil Wrap",
+    "category": "Packaging",
+    "subCategory": "Aluminium Foil"
+  },
+  {
+    "key": "fp_aluminium_foil",
+    "navSlug": "foil-box",
+    "variantType": "Foil Box",
+    "category": "Packaging",
+    "subCategory": "Aluminium Foil"
+  },
+  {
+    "key": "fp_aluminium_foil",
+    "navSlug": "foil-container",
+    "variantType": "Foil Container",
+    "category": "Packaging",
+    "subCategory": "Aluminium Foil"
+  },
+  {
+    "key": "fp_aluminium_foil",
+    "navSlug": "premium-foil-container",
+    "variantType": "Premium Foil Container",
+    "category": "Packaging",
+    "subCategory": "Aluminium Foil"
+  },
+  {
+    "key": "fp_aluminium_foil",
+    "navSlug": "foil-paper-lids",
+    "variantType": "Foil Paper Lids",
+    "category": "Packaging",
+    "subCategory": "Aluminium Foil"
+  },
+  {
+    "key": "fp_aluminium_foil",
+    "navSlug": "exclusive-foil-container",
+    "variantType": "Exclusive Foil Container",
+    "category": "Packaging",
+    "subCategory": "Aluminium Foil"
+  },
+  {
+    "key": "fp_aluminium_foil",
+    "navSlug": "pet-lid",
+    "variantType": "Pet Lid",
+    "category": "Packaging",
+    "subCategory": "Aluminium Foil"
+  },
+  {
+    "key": "fp_paper_products",
+    "navSlug": "eco-paper-cups",
+    "variantType": "Eco Paper Cups",
+    "category": "Packaging",
+    "subCategory": "Paper Products"
+  },
+  {
+    "key": "fp_paper_products",
+    "navSlug": "clarro-cups-tall",
+    "variantType": "Clarro Paper Cups Tall",
+    "category": "Packaging",
+    "subCategory": "Paper Products"
+  },
+  {
+    "key": "fp_paper_products",
+    "navSlug": "clarro-cups",
+    "variantType": "Clarro Paper Cups",
+    "category": "Packaging",
+    "subCategory": "Paper Products"
+  },
+  {
+    "key": "fp_paper_products",
+    "navSlug": "clarro-wati",
+    "variantType": "Clarro Paper Wati",
+    "category": "Packaging",
+    "subCategory": "Paper Products"
+  },
+  {
+    "key": "fp_paper_products",
+    "navSlug": "dolphin-cups",
+    "variantType": "Dolphin Paper Cups",
+    "category": "Packaging",
+    "subCategory": "Paper Products"
+  },
+  {
+    "key": "fp_paper_products",
+    "navSlug": "export-cups",
+    "variantType": "Export Paper Cups",
+    "category": "Packaging",
+    "subCategory": "Paper Products"
+  },
+  {
+    "key": "fp_paper_products",
+    "navSlug": "ripple-brown",
+    "variantType": "Ripple Cups Brown",
+    "category": "Packaging",
+    "subCategory": "Paper Products"
+  },
+  {
+    "key": "fp_paper_products",
+    "navSlug": "ripple-black",
+    "variantType": "Ripple Cups Black",
+    "category": "Packaging",
+    "subCategory": "Paper Products"
+  },
+  {
+    "key": "fp_paper_products",
+    "navSlug": "cp-double-wall",
+    "variantType": "CP Double Wall Cups",
+    "category": "Packaging",
+    "subCategory": "Paper Products"
+  },
+  {
+    "key": "fp_paper_products",
+    "navSlug": "si-double-wall",
+    "variantType": "SI Double Wall Cups",
+    "category": "Packaging",
+    "subCategory": "Paper Products"
+  },
+  {
+    "key": "fp_paper_products",
+    "navSlug": "hips-lids",
+    "variantType": "HIPS Lids",
+    "category": "Packaging",
+    "subCategory": "Paper Products"
+  },
+  {
+    "key": "fp_paper_products",
+    "navSlug": "paper-lids",
+    "variantType": "Paper Lids",
+    "category": "Packaging",
+    "subCategory": "Paper Products"
+  },
+  {
+    "key": "fp_paper_products",
+    "navSlug": "bagasse-lids",
+    "variantType": "Bagasse Lids",
+    "category": "Packaging",
+    "subCategory": "Paper Products"
+  },
+  {
+    "key": "fp_paper_products",
+    "navSlug": "container-kraft",
+    "variantType": "Paper Container Kraft",
+    "category": "Packaging",
+    "subCategory": "Paper Products"
+  },
+  {
+    "key": "fp_paper_products",
+    "navSlug": "salad-kraft",
+    "variantType": "PW Salad Kraft Bowl",
+    "category": "Packaging",
+    "subCategory": "Paper Products"
+  },
+  {
+    "key": "fp_paper_products",
+    "navSlug": "salad-white",
+    "variantType": "PW Salad White Bowl",
+    "category": "Packaging",
+    "subCategory": "Paper Products"
+  },
+  {
+    "key": "fp_paper_products",
+    "navSlug": "salad-sfp",
+    "variantType": "Paper Salad SFP Bowl",
+    "category": "Packaging",
+    "subCategory": "Paper Products"
+  },
+  {
+    "key": "fp_paper_products",
+    "navSlug": "container-white",
+    "variantType": "Paper Container White",
+    "category": "Packaging",
+    "subCategory": "Paper Products"
+  },
+  {
+    "key": "fp_paper_products",
+    "navSlug": "container-110dia",
+    "variantType": "Paper Container 110Dia",
+    "category": "Packaging",
+    "subCategory": "Paper Products"
+  },
+  {
+    "key": "fp_paper_products",
+    "navSlug": "bio-super",
+    "variantType": "Biodegradable Super Paper",
+    "category": "Packaging",
+    "subCategory": "Paper Products"
+  },
+  {
+    "key": "fp_paper_products",
+    "navSlug": "paper-plates",
+    "variantType": "Paper Plates",
+    "category": "Packaging",
+    "subCategory": "Paper Products"
+  }
+]

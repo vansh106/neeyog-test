@@ -1,14 +1,21 @@
+name: xyz_traders_backend
+
 services:
+  # ── PostgreSQL ─────────────────────────────────────────────
+  # LOCAL DEVELOPMENT ONLY. Gated behind the "local" profile so it does
+  # not start by default when the primary DB is Supabase.
+  # Start with:   docker-compose --profile local up -d
+  #        or:    docker-compose -f docker-compose.local.yml up -d
   postgres:
     image: pgvector/pgvector:pg16
-    container_name: cpq_postgres
+    container_name: xyz_traders_postgres
     restart: unless-stopped
     environment:
       POSTGRES_DB: quotation_system
       POSTGRES_USER: admin
       POSTGRES_PASSWORD: localpassword
     ports:
-      - "5433:5432"
+      - "5434:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -16,50 +23,56 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    profiles:
+      - local
 
   redis:
     image: redis:7-alpine
-    container_name: cpq_redis
+    container_name: xyz_traders_redis
     restart: unless-stopped
     ports:
-      - "6379:6379"
+      - "6380:6379"
     volumes:
       - redis_data:/data
 
+  # pgAdmin — local-only, depends on the local Postgres.
   pgadmin:
     image: dpage/pgadmin4:latest
-    container_name: cpq_pgadmin
+    container_name: xyz_traders_pgadmin
     restart: unless-stopped
     environment:
       PGADMIN_DEFAULT_EMAIL: admin@admin.com
       PGADMIN_DEFAULT_PASSWORD: admin
     ports:
-      - "5050:80"
+      - "5051:80"
     depends_on:
       postgres:
         condition: service_healthy
+    profiles:
+      - local
 
+  # The API container uses whatever DATABASE_URL is set in .env — Supabase
+  # in production, or the local Postgres when started with the "local"
+  # profile + .env.local. Do NOT override DATABASE_URL here.
   api:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: cpq_api
+    container_name: xyz_traders_api
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "8001:8000"
     env_file:
       - .env
     environment:
-      # Override host-local URLs for in-cluster service names
-      DATABASE_URL: postgresql+asyncpg://admin:localpassword@postgres:5432/quotation_system
-      DATABASE_URL_SYNC: postgresql://admin:localpassword@postgres:5432/quotation_system
+      # Redis still points at the in-cluster service name.
       REDIS_URL: redis://redis:6379/0
       PDF_OUTPUT_DIR: /app/output/pdfs
     volumes:
       - ./output:/app/output
+      # Import scripts resolve docs via Path(__file__).parents[2] → /docs in-container.
+      - ../docs:/docs:ro
     depends_on:
-      postgres:
-        condition: service_healthy
       redis:
         condition: service_started
 

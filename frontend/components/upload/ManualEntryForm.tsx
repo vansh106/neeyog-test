@@ -7,30 +7,351 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { cn, formatCurrency } from '@/lib/utils'
-import { mastersApi } from '@/lib/api'
+import { cn, formatCurrency, formatPriceOrTbd, isPositivePrice, PRICE_TBD_LABEL } from '@/lib/utils'
+import { useWarmupMatcherCatalog } from '@/hooks/useValveCatalog'
+import { clientsApi, suppliersApi } from '@/lib/api'
+import { useSheetDefaultSuppliers } from '@/lib/queries'
+import { resolveSupplierFromSheetDefaults } from '@/lib/sheetDefaultSupplier'
+import { isTemporaryCatalogCategory } from '@/lib/configuratorProductFlow'
 import { ValveConfigurator, CompletedProductCard } from '@/components/configurator/ValveConfigurator'
+import {
+  assemblyLabel,
+  assemblyPartComponentKey,
+  assemblyPartUnitMultiplier,
+  assembledToLineItem,
+  catalogPartsForAssembly,
+  isAssemblyPricingReady,
+  isManualPricedAssemblyComponent,
+  operatorLabel,
+  uuidv4,
+} from '@/lib/manualAssemblyLineItem'
+import {
+  quotationGstAmount,
+  quotationGrandTotal,
+  quotationItemTotal,
+} from '@/lib/quotationTotals'
 import type {
   AssembledProduct,
-  ClientDropdownOption,
+  BranchResponse,
+  ClientEmployeeResponse,
+  CompanyResponse,
+  ManualEnquiryCreateForm,
   ManualEnquiryForm,
   ManualLineItem,
-  OperatorKey,
+  PriceCalculationResult,
+  SupplierResponse,
 } from '@/types'
+import EnquiryNotesField from '@/components/enquiries/EnquiryNotesField'
+import { ENQUIRY_SOURCE_OPTIONS } from '@/lib/enquirySource'
+import {
+  ENQUIRY_DETAIL_TYPE_LABELS,
+  ENQUIRY_DETAIL_TYPES,
+  type EnquiryDetailType,
+} from '@/lib/enquiryDetailType'
+import {
+  buildEnquiryNotesFromProductNotes,
+  initProductNotesFromPrefill,
+  serializeProductNotes,
+  type ProductNoteEntry,
+} from '@/lib/enquiryMasterNotes'
+import { CLIENT_INDUSTRY_OPTIONS, type EnquirySource } from '@/types'
+
+const BRANCH_PRIMARY_CONTACT = '__branch_primary__'
+
+type MatcherClientHint = {
+  mode: 'existing' | 'new'
+  selectedClientId?: string | null
+  newClient?: Partial<{
+    company_name: string
+    branch_name: string
+    contact_name: string
+    phone: string
+    email: string
+    city: string
+    address_line1: string
+  }>
+}
+
+export type ManualFormStage = 'client' | 'products' | 'full'
 
 type Props = {
+  /** ``client`` = create enquiry only; ``products`` = add line items + quote; ``full`` = legacy combined form. */
+  stage?: ManualFormStage
   onSubmitManual: (form: ManualEnquiryForm) => void
+  /** Called when ``stage`` is ``client`` — creates enquiry without products. */
+  onCreateEnquiry?: (form: ManualEnquiryCreateForm) => void
   isProcessing: boolean
+  /** When opening Manual Entry from Emails → Process, pre-fills Notes once. */
+  prefillNotesFromEnquiry?: string | null
+  /** Completing an existing email enquiry — server merges quote onto this id. */
+  targetEnquiryId?: string | null
+  /** Pre-select catalog sheet + cascade (from matcher). Multiple RFQ lines → multiple configurators. */
+  matcherSeed?: {
+    catalogKey: string
+    lines?: Array<{ filledCascade: Record<string, string>; quantity?: number }>
+    /** @deprecated prefer `lines` */
+    filledCascade?: Record<string, string>
+  } | null
+  matcherClientHint?: MatcherClientHint | null
+  /** Bump to remount valve configurator (e.g. clear matcher seed for full manual). */
+  matcherSeedVersion?: number
+  /** Pre-set enquiry source (e.g. IndiaMart flow). */
+  initialEnquirySource?: EnquirySource
+  /** Links created enquiry back to IndiaMart query row. */
+  indiamartQueryId?: string | null
+  /** Override primary button label when ``stage`` is ``client``. */
+  clientStageSubmitLabel?: string
+  /** Read-only client label shown when ``stage`` is ``products``. */
+  clientSummaryLabel?: string | null
+  /** Pre-select quote contact from enquiry ``parsed_data``. */
+  initialClientEmployeeId?: string | null
+  /** Branch id from enquiry ``parsed_data`` when client picker is hidden. */
+  initialSelectedBranchId?: string | null
+  /** Pre-fill follow-up date from enquiry when creating a quotation. */
+  initialFollowUpDate?: string | null
 }
 
 const SELECT_EMPTY = '__none__'
+const DEFAULT_GST_RATE = 0.18
+const DEFAULT_PF_PERCENT = 3
+const DEFAULT_PF_RATE = DEFAULT_PF_PERCENT / 100
+
+export type ChargeMode = 'percent' | 'amount'
+/** @deprecated Use ChargeMode */
+export type FreightChargeMode = ChargeMode
+
+function roundMoney(n: number): number {
+  return Math.round(n * 100) / 100
+}
+
+function resolvePfAmount(
+  subtotal: number,
+  pfApplicable: boolean,
+  pfMode: ChargeMode,
+  pfDraft: string,
+): { pf: number; defaultPf: number; pfRate: number | null } {
+  const defaultPf = roundMoney(subtotal * DEFAULT_PF_RATE)
+  if (!pfApplicable) return { pf: 0, defaultPf, pfRate: null }
+  const raw = pfDraft.trim().replace(/,/g, '')
+  if (!raw) {
+    if (pfMode === 'percent') {
+      return { pf: defaultPf, defaultPf, pfRate: DEFAULT_PF_PERCENT }
+    }
+    return { pf: defaultPf, defaultPf, pfRate: null }
+  }
+  const n = Number(raw)
+  if (!Number.isFinite(n) || n < 0) {
+    if (pfMode === 'percent') {
+      return { pf: defaultPf, defaultPf, pfRate: DEFAULT_PF_PERCENT }
+    }
+    return { pf: defaultPf, defaultPf, pfRate: null }
+  }
+  if (pfMode === 'percent') {
+    const pf = roundMoney(subtotal * (n / 100))
+    return { pf, defaultPf, pfRate: n }
+  }
+  return { pf: roundMoney(n), defaultPf, pfRate: null }
+}
+
+function resolveFreightAmount(
+  subtotal: number,
+  freightApplicable: boolean,
+  freightMode: ChargeMode,
+  freightDraft: string,
+): { freight: number; freightRate: number | null } {
+  if (!freightApplicable) return { freight: 0, freightRate: null }
+  const raw = freightDraft.trim().replace(/,/g, '')
+  if (!raw) return { freight: 0, freightRate: null }
+  const n = Number(raw)
+  if (!Number.isFinite(n) || n < 0) return { freight: 0, freightRate: null }
+  if (freightMode === 'percent') {
+    const freight = roundMoney(subtotal * (n / 100))
+    return { freight, freightRate: n }
+  }
+  return { freight: roundMoney(n), freightRate: null }
+}
+
 const toSelectValue = (v: string | null | undefined) =>
   v != null && String(v).trim() !== '' ? String(v).trim() : SELECT_EMPTY
 const fromSelectValue = (v: string | null | undefined) => (!v || v === SELECT_EMPTY ? '' : v)
 
-function uuidv4(): string {
-  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID()
-  return Math.random().toString(16).slice(2) + '-' + Date.now().toString(16)
+function computeTaxTotals(
+  itemTotal: number,
+  pfApplicable: boolean,
+  pfMode: ChargeMode,
+  pfDraft: string,
+  freightApplicable: boolean,
+  freightMode: ChargeMode,
+  freightDraft: string,
+) {
+  const { pf, defaultPf } = resolvePfAmount(itemTotal, pfApplicable, pfMode, pfDraft)
+  const { freight } = resolveFreightAmount(itemTotal, freightApplicable, freightMode, freightDraft)
+  const taxableSubtotal = quotationItemTotal(itemTotal, pf, freight)
+  const gst = quotationGstAmount(taxableSubtotal, DEFAULT_GST_RATE * 100)
+  return {
+    subtotal: itemTotal,
+    taxableSubtotal,
+    gst,
+    pf,
+    defaultPf,
+    freight,
+    grand: quotationGrandTotal(taxableSubtotal, gst),
+  }
+}
+
+/** Right column width for subtotal / GST / P&F / freight amounts (aligned). */
+const NET_TOTAL_AMOUNT_COL =
+  'block w-full text-right font-mono text-[13px] tabular-nums leading-tight'
+
+const NET_AMOUNT_INPUT_CLASS = cn(
+  'h-6 min-h-0 w-[8ch] max-w-full min-w-0 shrink-0 rounded border border-input bg-white',
+  'px-0 py-0 text-right font-mono text-[13px] tabular-nums leading-tight',
+  'appearance-textfield [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none',
+  'outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40',
+  'disabled:cursor-not-allowed disabled:opacity-50',
+)
+
+function ChargeModeToggle({
+  mode,
+  disabled,
+  onPercent,
+  onAmount,
+}: {
+  mode: ChargeMode
+  disabled: boolean
+  onPercent: () => void
+  onAmount: () => void
+}) {
+  return (
+    <div className="flex overflow-hidden rounded-md border border-surface-border bg-white">
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={onPercent}
+        className={cn(
+          'px-2 py-0.5 text-[11px] font-semibold transition-colors',
+          mode === 'percent' ? 'bg-brand-navy-500 text-white' : 'text-gray-700 hover:bg-[#F4F5F0]',
+        )}
+      >
+        %
+      </button>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={onAmount}
+        className={cn(
+          'border-l border-surface-border px-2 py-0.5 text-[11px] font-semibold transition-colors',
+          mode === 'amount' ? 'bg-brand-navy-500 text-white' : 'text-gray-700 hover:bg-[#F4F5F0]',
+        )}
+      >
+        ₹
+      </button>
+    </div>
+  )
+}
+
+function NetChargeRow({
+  label,
+  checkboxAriaLabel,
+  checked,
+  onCheckedChange,
+  controlsDisabled,
+  mode,
+  onModePercent,
+  onModeAmount,
+  draft,
+  onDraftChange,
+  percentPlaceholder,
+  amountPlaceholder,
+  percentAriaLabel,
+  amountAriaLabel,
+  appliedAmount,
+}: {
+  label: string
+  checkboxAriaLabel: string
+  checked: boolean
+  onCheckedChange: (checked: boolean) => void
+  controlsDisabled: boolean
+  mode: ChargeMode
+  onModePercent: () => void
+  onModeAmount: () => void
+  draft: string
+  onDraftChange: (value: string) => void
+  percentPlaceholder: string
+  amountPlaceholder: string
+  percentAriaLabel: string
+  amountAriaLabel: string
+  appliedAmount: number | null | undefined
+}) {
+  const isPercent = mode === 'percent'
+  const showApplied =
+    checked && isPercent && appliedAmount != null && appliedAmount > 0
+
+  return (
+    <div className="contents text-surface-muted">
+      <div className="flex min-w-0 flex-nowrap items-center gap-2 py-0">
+        <label className="flex shrink-0 cursor-pointer items-center gap-2">
+          <input
+            type="checkbox"
+            checked={checked}
+            onChange={(e) => onCheckedChange(e.target.checked)}
+            aria-label={checkboxAriaLabel}
+            className="size-3.5 shrink-0 rounded border-[#B8BFB4] text-brand-green-600 focus:ring-brand-green-500/30"
+          />
+          <span className="whitespace-nowrap">{label}</span>
+        </label>
+        {checked && (
+          <div className="flex shrink-0 flex-nowrap items-center gap-1.5">
+            <ChargeModeToggle
+              mode={mode}
+              disabled={controlsDisabled}
+              onPercent={onModePercent}
+              onAmount={onModeAmount}
+            />
+            {isPercent && (
+              <Input
+                type="number"
+                min={0}
+                step="0.01"
+                disabled={controlsDisabled}
+                value={draft}
+                onChange={(e) => onDraftChange(e.target.value)}
+                placeholder={percentPlaceholder}
+                className="h-7 w-[3.25rem] shrink-0 px-1.5 py-0 font-mono text-[13px] tabular-nums text-right"
+                aria-label={percentAriaLabel}
+              />
+            )}
+          </div>
+        )}
+      </div>
+      <div className="flex w-full flex-col items-end justify-center self-center leading-none">
+        {checked &&
+          (isPercent ? (
+            showApplied ? (
+              <span className={cn(NET_TOTAL_AMOUNT_COL, 'whitespace-nowrap')}>
+                <span className="text-[11px] font-sans text-surface-muted">Applied: </span>
+                {formatCurrency(appliedAmount!)}
+              </span>
+            ) : null
+          ) : (
+            <div className="flex w-full items-center justify-end gap-0 font-mono text-[13px] tabular-nums">
+              <span className="shrink-0 leading-tight">₹</span>
+              <input
+                type="number"
+                min={0}
+                step="0.01"
+                disabled={controlsDisabled}
+                value={draft}
+                onChange={(e) => onDraftChange(e.target.value)}
+                placeholder={amountPlaceholder.replace(/[^\d.]/g, '') || '0.00'}
+                className={NET_AMOUNT_INPUT_CLASS}
+                aria-label={amountAriaLabel}
+              />
+            </div>
+          ))}
+      </div>
+    </div>
+  )
 }
 
 function isValidEmail(email: string): boolean {
@@ -42,131 +363,146 @@ function cleanPhone(phone: string): string {
   return phone.replace(/[^\d]/g, '').slice(-10)
 }
 
-function operatorLabel(k: OperatorKey | null): string {
-  switch (k) {
-    case 'bare_shaft':
-      return 'Bare Shaft'
-    case 'manual':
-      return 'Manual'
-    case 'gear_box':
-      return 'Gear Box'
-    case 'da':
-      return 'Double Acting (DA)'
-    case 'sa':
-      return 'Single Acting (SA)'
-    case 'electric_actuator':
-      return 'Electric Actuator'
-    default:
-      return '—'
-  }
+type ProductPricingCalc = {
+  productId: string
+  label: string
+  supplierName: string | null
+  ok: boolean
+  missing: string[]
+  rows: Array<{ component: string; calc: PriceCalculationResult; unitMult?: number }>
+  assemblyUnit: number
+  lineTotal: number
 }
 
-/** Parse leading inch size like `2"` or `1 1/2"` from valve_size text. */
-function parseSizeInch(valveSize: string | null | undefined): number | null {
-  if (!valveSize) return null
-  const m = valveSize.trim().match(/^(\d+)\s+(\d+)\/(\d+)\s*"?$/)
-  if (m) return Number(m[1]) + Number(m[2]) / Number(m[3])
-  const m2 = valveSize.trim().match(/^(\d+)\/(\d+)\s*"?$/)
-  if (m2) return Number(m2[1]) / Number(m2[2])
-  const m3 = valveSize.trim().match(/^(\d+(?:\.\d+)?)\s*"?$/)
-  if (m3) return Number(m3[1])
-  return null
-}
-function parseSizeMm(valveSize: string | null | undefined): number | null {
-  if (!valveSize) return null
-  const mDn = valveSize.match(/DN\s*(\d+)/i)
-  if (mDn) return Number(mDn[1])
-  const mMm = valveSize.match(/(\d+)\s*MM/i)
-  if (mMm) return Number(mMm[1])
-  return null
-}
-
-/** Adapt an AssembledProduct into the existing ManualLineItem request shape. */
-function assembledToLineItem(p: AssembledProduct): ManualLineItem {
-  const v = p.valve
-  const materialParts = v
-    ? [v.body, v.ball_disc ?? v.ball, v.stem, v.seat, v.fasteners].filter(Boolean)
-    : []
-  const material = materialParts.join(' / ') || ''
-  const name = v
-    ? [
-        v.type,
-        v.construction,
-        v.valve_size,
-      ]
-        .filter(Boolean)
-        .join(' — ')
-    : 'Valve Assembly'
-
-  const sel = {
-    id: v?.id ?? uuidv4(),
-    name,
-    size_inch: parseSizeInch(v?.valve_size ?? null),
-    size_mm: parseSizeMm(v?.valve_size ?? null),
-    material,
-    base_price: p.unit_price ?? 0,
-    unit: 'Nos',
-    display_label: name,
-  }
-
-  const cascade: Record<string, string> = {}
-  if (v) {
-    if (v.construction) cascade.construction = v.construction
-    if (v.valve_size) cascade.valve_size = v.valve_size
-    if (v.bore_type) cascade.bore_type = v.bore_type
-    if (v.end_connection) cascade.end_connection = v.end_connection
-    if (v.pressure) cascade.pressure = v.pressure
-    if (v.body) cascade.body = v.body
-    if (v.ball_disc) cascade.ball_disc = v.ball_disc
-    if (v.ball) cascade.ball = v.ball
-    if (v.stem) cascade.stem = v.stem
-    if (v.seat) cascade.seat = v.seat
-    if (v.fasteners) cascade.fasteners = v.fasteners
-  }
-  cascade.operator = operatorLabel(p.operator_key)
-  if (p.operator_model) {
-    cascade.operator_model = p.operator_model.model_name
-    if (p.operator_model.size) cascade.operator_size = p.operator_model.size
-  }
-  if (p.sov) cascade.sov = p.sov.type
-  if (p.limit_switch_box) cascade.limit_switch_box = p.limit_switch_box.type
-  if (p.positioner) cascade.positioner = p.positioner.type
-  if (p.include_bracket && p.bracket) cascade.bracket_coupler = `Included (${p.bracket.size})`
-
-  return {
-    id: p.id,
-    category: v?.type ?? 'Valve',
-    cascadeSelections: cascade,
-    selectedProduct: sel,
-    quantity: p.quantity,
-  }
+function dummyCompaniesForSearch(): CompanyResponse[] {
+  const mk = (
+    coId: string,
+    company_name: string,
+    bid: string,
+    contact_name: string,
+    email: string,
+    phone: string,
+    city: string,
+    erp: string,
+  ): CompanyResponse => ({
+    id: coId,
+    company_name,
+    gst_number: null,
+    industry: null,
+    erp_code: erp,
+    is_erp_synced: true,
+    total_enquiry_count: 0,
+    branch_count: 1,
+    is_active: true,
+    created_at: '',
+    branches: [
+      {
+        id: bid,
+        branch_name: 'Main',
+        is_headquarters: true,
+        contact_name,
+        designation: null,
+        phone,
+        email,
+        city,
+        state: null,
+        pincode: null,
+        address_line1: null,
+        country: 'India',
+        enquiry_count: 0,
+        is_active: true,
+      },
+    ],
+  })
+  return [
+    mk('dc-1', 'Bharat Industrial Supplies', 'dummy-001', 'Ramesh Joshi', 'ramesh@bharatind.com', '9823001001', 'Pune', 'FC0101'),
+    mk('dc-2', 'Nashik Engineering Works', 'dummy-002', 'Sunita Patil', 'sunita@nashikeng.in', '9765400200', 'Nashik', 'FC0202'),
+    mk('dc-3', 'Maharashtra Process Equipment', 'dummy-003', 'Vijay Kulkarni', 'vijay@mpequip.com', '9712300303', 'Mumbai', 'FC0303'),
+    mk('dc-4', 'Aurangabad Fluid Systems', 'dummy-004', 'Pradeep Shinde', 'pradeep@afsystems.in', '9823400404', 'Aurangabad', 'FC0404'),
+  ]
 }
 
 /** Build plain-text email for parser ingestion. */
 function buildEmailText(
   form: ManualEnquiryForm,
   products: AssembledProduct[],
-  clients: ClientDropdownOption[],
+  existingCompany: CompanyResponse | null,
+  existingBranch: BranchResponse | null,
+  productCalcs: ProductPricingCalc[],
+  quoteEmployee: ClientEmployeeResponse | null,
 ): string {
-  const client =
-    form.clientMode === 'existing'
-      ? clients.find((c) => c.id === form.selectedClientId) || null
-      : null
+  let company_name = ''
+  let branch_name = ''
+  let city = ''
+  let state = ''
+  let industry = ''
+  let contact_name = ''
+  let designation = ''
+  let phone = ''
+  let email = ''
+  let address = ''
+  let address_code = ''
+  let department = ''
 
-  const company_name =
-    form.clientMode === 'existing' ? client?.company_name || '' : form.newClient.company_name
-  const contact_name =
-    form.clientMode === 'existing' ? client?.contact_name || '' : form.newClient.contact_name
-  const phone = form.clientMode === 'existing' ? client?.phone || '' : form.newClient.phone
-  const email = form.clientMode === 'existing' ? client?.email || '' : form.newClient.email
-  const address = form.clientMode === 'existing' ? '' : form.newClient.address
+  if (form.clientMode === 'existing' && existingCompany && existingBranch) {
+    company_name = existingCompany.company_name
+    branch_name = existingBranch.branch_name
+    city = existingBranch.city
+    state = existingBranch.state || ''
+    industry = existingCompany.industry || 'N/A'
+    contact_name = existingBranch.contact_name || ''
+    designation = existingBranch.designation || ''
+    phone = existingBranch.phone || ''
+    email = existingBranch.email || ''
+    address = existingBranch.address_line1 || ''
+    if (quoteEmployee) {
+      contact_name = quoteEmployee.full_name
+      designation = quoteEmployee.designation || ''
+      phone = quoteEmployee.phone || phone
+      email = quoteEmployee.email || email
+      address_code = quoteEmployee.address_code || ''
+      department = quoteEmployee.department || ''
+    }
+  } else if (form.clientMode === 'new') {
+    const nc = form.newClient
+    if (!nc) throw new Error('New client details are required')
+    company_name = nc.company_name
+    branch_name = nc.branch_name
+    city = nc.city
+    state = nc.state
+    industry = nc.industry || 'N/A'
+    contact_name = nc.contact_name
+    designation = nc.designation
+    phone = nc.phone
+    email = nc.email
+    address = nc.address_line1 || nc.address
+    const ne = form.newClientEmployee
+    if (ne?.fullName?.trim()) {
+      contact_name = ne.fullName.trim()
+      if (ne.phone?.trim()) phone = ne.phone.trim()
+      if (ne.email?.trim()) email = ne.email.trim()
+      if (ne.designation?.trim()) designation = ne.designation.trim()
+      address_code = ne.addressCode?.trim() || ''
+      department = ne.department?.trim() || ''
+    }
+  }
 
   const subject = `Manual Enquiry — ${company_name || 'Client'}`
 
   const lines: string[] = []
   lines.push(`From: ${contact_name || 'Buyer'} <${email || 'unknown@example.com'}>`)
   if (company_name) lines.push(`Company: ${company_name}`)
+  if (branch_name) lines.push(`Branch: ${branch_name}`)
+  if (city || state) lines.push(`City: ${city}${state ? `, ${state}` : ''}`)
+  if (form.clientMode === 'new' || (form.clientMode === 'existing' && existingCompany)) {
+    lines.push(`Industry: ${industry}`)
+  }
+  if (contact_name) lines.push(`Contact: ${contact_name}`)
+  if (address_code) lines.push(`Address Code: ${address_code}`)
+  if (department) lines.push(`Department: ${department}`)
+  if (designation) lines.push(`Designation: ${designation}`)
   if (phone) lines.push(`Phone: ${phone}`)
+  if (email) lines.push(`Email: ${email}`)
   if (address) lines.push(`Address: ${address}`)
   lines.push(`Subject: ${subject}`)
   lines.push('')
@@ -196,6 +532,7 @@ function buildEmailText(
       if (v.fasteners) lines.push(`Fasteners: ${v.fasteners}`)
     }
     lines.push(`Operator: ${operatorLabel(p.operator_key)}`)
+    if (p.supplier_name) lines.push(`Supplier: ${p.supplier_name}`)
     if ((p.operator_key === 'da' || p.operator_key === 'sa') && p.operator_model) {
       lines.push(
         `  Model: ${p.operator_model.model_name}${
@@ -206,7 +543,6 @@ function buildEmailText(
     if (p.sov) lines.push(`SOV: ${p.sov.type}`)
     if (p.limit_switch_box) lines.push(`Limit Switch Box: ${p.limit_switch_box.type}`)
     if (p.positioner) lines.push(`Positioner: ${p.positioner.type}`)
-    if (p.include_bracket && p.bracket) lines.push(`Bracket & Coupler: included (${p.bracket.size})`)
     lines.push(`Quantity: ${p.quantity}`)
     if (p.unit_price != null) {
       lines.push(`Unit Price: ${formatCurrency(p.unit_price)}`)
@@ -215,6 +551,25 @@ function buildEmailText(
     }
     lines.push('')
   })
+
+  if (productCalcs.length) {
+    lines.push('')
+    lines.push('Supplier pricing breakdown:')
+    productCalcs.forEach((pc, idx) => {
+      lines.push(
+        `Assembly ${idx + 1}: ${pc.label}${pc.supplierName ? ` (Supplier: ${pc.supplierName})` : ''}`,
+      )
+      if (!pc.ok) {
+        lines.push(`  Missing prices for: ${pc.missing.join(', ')}`)
+        return
+      }
+      pc.rows.forEach((r) => {
+        lines.push(
+          `  ${r.component}: list ${formatCurrency(r.calc.list_price)} → unit ${formatCurrency(r.calc.final_unit_price)} (line ${formatCurrency(r.calc.line_total)})`,
+        )
+      })
+    })
+  }
 
   if (form.notes.trim()) {
     lines.push(`Additional notes: ${form.notes.trim()}`)
@@ -234,44 +589,590 @@ function buildEmailText(
   return lines.join('\n')
 }
 
-export default function ManualEntryForm({ onSubmitManual, isProcessing }: Props) {
+export default function ManualEntryForm({
+  stage = 'full',
+  onSubmitManual,
+  onCreateEnquiry,
+  isProcessing,
+  prefillNotesFromEnquiry,
+  targetEnquiryId,
+  matcherSeed,
+  matcherClientHint,
+  matcherSeedVersion = 0,
+  initialEnquirySource,
+  indiamartQueryId,
+  clientStageSubmitLabel,
+  clientSummaryLabel,
+  initialClientEmployeeId,
+  initialSelectedBranchId,
+  initialFollowUpDate,
+}: Props) {
+  const showClientSection = stage !== 'products'
+  const showProductsSection = stage !== 'client'
+  const showFollowUpSection = showClientSection || (showProductsSection && Boolean(targetEnquiryId))
+  useWarmupMatcherCatalog(matcherSeed?.catalogKey ?? null)
+
+  const [enquirySource, setEnquirySource] = useState<EnquirySource>(initialEnquirySource ?? 'manual')
+  const [enquiryDetailType, setEnquiryDetailType] = useState<EnquiryDetailType>('incomplete')
+  const [nextFollowUpDate, setNextFollowUpDate] = useState(() =>
+    initialFollowUpDate ? initialFollowUpDate.slice(0, 10) : '',
+  )
+  const [nextFollowUpNote, setNextFollowUpNote] = useState('')
+  const [productNotes, setProductNotes] = useState<ProductNoteEntry[]>(() =>
+    initProductNotesFromPrefill(prefillNotesFromEnquiry),
+  )
+  const enquiryNotes = useMemo(
+    () => buildEnquiryNotesFromProductNotes(productNotes),
+    [productNotes],
+  )
   const [clientMode, setClientMode] = useState<'existing' | 'new'>('existing')
-  const [selectedClientId, setSelectedClientId] = useState<string | null>(null)
   const [newClient, setNewClient] = useState({
     company_name: '',
+    industry: '',
+    branch_name: 'Head Office',
     contact_name: '',
+    designation: '',
     phone: '',
     email: '',
+    city: '',
+    state: '',
+    pincode: '',
+    address_line1: '',
+    country: 'India',
     address: '',
   })
-  const [priority, setPriority] = useState<'Normal' | 'High' | 'Urgent'>('Normal')
-  const [notes, setNotes] = useState('')
+  useEffect(() => {
+    if (!matcherClientHint) return
+    if (matcherClientHint.mode === 'existing' && matcherClientHint.selectedClientId) {
+      setClientMode('existing')
+      setSelectedBranchId(matcherClientHint.selectedClientId)
+      for (const co of dummyCompaniesForSearch()) {
+        const br = (co.branches || []).find((b) => b.id === matcherClientHint.selectedClientId)
+        if (br) {
+          setSelectedCompany(co)
+          setCompanyQuery(co.company_name)
+          break
+        }
+      }
+      return
+    }
+    if (matcherClientHint.mode === 'new' && matcherClientHint.newClient) {
+      setClientMode('new')
+      const nc = matcherClientHint.newClient
+      setNewClient((prev) => ({
+        ...prev,
+        company_name: nc.company_name ?? prev.company_name,
+        branch_name: nc.branch_name ?? prev.branch_name,
+        contact_name: nc.contact_name ?? prev.contact_name,
+        phone: nc.phone ?? prev.phone,
+        email: nc.email ?? prev.email,
+        city: nc.city ?? prev.city,
+        address_line1: nc.address_line1 ?? prev.address_line1,
+        address: nc.address_line1 ?? prev.address,
+      }))
+    }
+  }, [matcherClientHint])
 
-  const [clients, setClients] = useState<ClientDropdownOption[]>([])
+  useEffect(() => {
+    if (!initialSelectedBranchId?.trim()) return
+    setClientMode('existing')
+    setSelectedBranchId(initialSelectedBranchId.trim())
+  }, [initialSelectedBranchId])
+
+  useEffect(() => {
+    if (!initialFollowUpDate?.trim()) return
+    setNextFollowUpDate(initialFollowUpDate.slice(0, 10))
+  }, [initialFollowUpDate])
+
+  useEffect(() => {
+    if (initialEnquirySource) setEnquirySource(initialEnquirySource)
+  }, [initialEnquirySource])
+
+  useEffect(() => {
+    setProductNotes(initProductNotesFromPrefill(prefillNotesFromEnquiry))
+  }, [prefillNotesFromEnquiry])
+
+  useEffect(() => {
+    if (!initialClientEmployeeId || stage === 'client') return
+    setSelectedClientEmployeeId(initialClientEmployeeId)
+  }, [initialClientEmployeeId, stage])
+
+  const [companyQuery, setCompanyQuery] = useState('')
+  const [debouncedCompanyQuery, setDebouncedCompanyQuery] = useState('')
+  const [companyOptions, setCompanyOptions] = useState<CompanyResponse[]>([])
+  const [companyMenuOpen, setCompanyMenuOpen] = useState(false)
+  const [selectedCompany, setSelectedCompany] = useState<CompanyResponse | null>(null)
+  const [selectedBranchId, setSelectedBranchId] = useState<string | null>(null)
+  const [showAddBranch, setShowAddBranch] = useState(false)
+  const [addBranchSaving, setAddBranchSaving] = useState(false)
+  const [inlineBranch, setInlineBranch] = useState({
+    branch_name: '',
+    contact_name: '',
+    designation: '',
+    phone: '',
+    email: '',
+    city: '',
+    state: '',
+    pincode: '',
+    address_line1: '',
+    country: 'India',
+  })
+
   const [assembledProducts, setAssembledProducts] = useState<AssembledProduct[]>([])
   const [activeConfigIds, setActiveConfigIds] = useState<string[]>([uuidv4()])
   const [editingId, setEditingId] = useState<string | null>(null)
 
+  useEffect(() => {
+    if (!matcherSeed?.catalogKey) {
+      if (matcherSeedVersion > 0) setActiveConfigIds([uuidv4()])
+      return
+    }
+    const n = matcherSeed.lines && matcherSeed.lines.length > 0 ? matcherSeed.lines.length : 1
+    setActiveConfigIds(Array.from({ length: n }, () => uuidv4()))
+  }, [matcherSeed, matcherSeedVersion])
+
   const [errors, setErrors] = useState<Record<string, string>>({})
 
+  const [branchEmployees, setBranchEmployees] = useState<ClientEmployeeResponse[]>([])
+  const [employeesLoading, setEmployeesLoading] = useState(false)
+  const [selectedClientEmployeeId, setSelectedClientEmployeeId] = useState<string | null>(null)
+  const [inlineNewEmployeeAddressCode, setInlineNewEmployeeAddressCode] = useState('')
+  const [inlineNewEmployeeName, setInlineNewEmployeeName] = useState('')
+  const [inlineNewEmployeePhone, setInlineNewEmployeePhone] = useState('')
+  const [inlineNewEmployeeEmail, setInlineNewEmployeeEmail] = useState('')
+  const [inlineNewEmployeeDepartment, setInlineNewEmployeeDepartment] = useState('')
+  const [inlineNewEmployeeDesignation, setInlineNewEmployeeDesignation] = useState('')
+  const [addEmployeeSaving, setAddEmployeeSaving] = useState(false)
+  const [addEmployeeErr, setAddEmployeeErr] = useState<string | null>(null)
+  const [newClientQuoteEmployeeAddressCode, setNewClientQuoteEmployeeAddressCode] = useState('')
+  const [newClientQuoteEmployeeName, setNewClientQuoteEmployeeName] = useState('')
+  const [newClientQuoteEmployeePhone, setNewClientQuoteEmployeePhone] = useState('')
+  const [newClientQuoteEmployeeEmail, setNewClientQuoteEmployeeEmail] = useState('')
+  const [newClientQuoteEmployeeDepartment, setNewClientQuoteEmployeeDepartment] = useState('')
+  const [newClientQuoteEmployeeDesignation, setNewClientQuoteEmployeeDesignation] = useState('')
+
+  const [suppliers, setSuppliers] = useState<SupplierResponse[]>([])
+  const [suppliersLoading, setSuppliersLoading] = useState(true)
+  const { data: sheetDefaultSuppliers = [] } = useSheetDefaultSuppliers()
+  const [productCalcs, setProductCalcs] = useState<ProductPricingCalc[]>([])
+  const [pricingLoading, setPricingLoading] = useState(false)
+  const [tempQuoteUnitByProduct, setTempQuoteUnitByProduct] = useState<Record<string, string>>({})
+  const [customerDiscountByProduct, setCustomerDiscountByProduct] = useState<Record<string, string>>({})
+  const [pfApplicable, setPfApplicable] = useState(true)
+  const [pfMode, setPfMode] = useState<ChargeMode>('percent')
+  const [pfAmountDraft, setPfAmountDraft] = useState('')
+  const [freightApplicable, setFreightApplicable] = useState(false)
+  const [freightMode, setFreightMode] = useState<ChargeMode>('amount')
+  const [freightDraft, setFreightDraft] = useState('')
+
   useEffect(() => {
-    mastersApi
-      .getClientsForDropdown<ClientDropdownOption[]>()
-      .then(setClients)
-      .catch(() => setClients([]))
+    const t = setTimeout(() => setDebouncedCompanyQuery(companyQuery), 300)
+    return () => clearTimeout(t)
+  }, [companyQuery])
+
+  useEffect(() => {
+    let cancelled = false
+    clientsApi
+      .searchCompanies(debouncedCompanyQuery.trim() || undefined, 40)
+      .then((rows) => {
+        if (!cancelled) setCompanyOptions(rows)
+      })
+      .catch(() => {
+        if (!cancelled) setCompanyOptions([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [debouncedCompanyQuery])
+
+  const mergedCompanyOptions = useMemo(() => {
+    const q = debouncedCompanyQuery.trim().toLowerCase()
+    const dummies = dummyCompaniesForSearch().filter((co) => !q || co.company_name.toLowerCase().includes(q))
+    return [...dummies, ...companyOptions]
+  }, [companyOptions, debouncedCompanyQuery])
+
+  useEffect(() => {
+    if (!selectedCompany) {
+      setSelectedBranchId(null)
+      return
+    }
+    const active = (selectedCompany.branches || []).filter((b) => b.is_active)
+    if (active.length === 1) {
+      setSelectedBranchId(active[0].id)
+      return
+    }
+    setSelectedBranchId((cur) => {
+      if (cur && active.some((b) => b.id === cur)) return cur
+      return null
+    })
+  }, [selectedCompany])
+
+  useEffect(() => {
+    if (clientMode === 'new') {
+      setSelectedCompany(null)
+      setSelectedBranchId(null)
+      setCompanyQuery('')
+      setCompanyMenuOpen(false)
+    }
+  }, [clientMode])
+
+  useEffect(() => {
+    setSelectedClientEmployeeId(null)
+    setBranchEmployees([])
+    setAddEmployeeErr(null)
+    if (clientMode !== 'existing' || !selectedCompany || !selectedBranchId) return
+    if (selectedBranchId.startsWith('dummy-')) return
+    let cancelled = false
+    setEmployeesLoading(true)
+    clientsApi
+      .listBranchEmployees(selectedCompany.id, selectedBranchId)
+      .then((rows) => {
+        if (!cancelled) setBranchEmployees(rows)
+      })
+      .catch(() => {
+        if (!cancelled) setBranchEmployees([])
+      })
+      .finally(() => {
+        if (!cancelled) setEmployeesLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [clientMode, selectedCompany?.id, selectedBranchId])
+
+  const selectedQuoteEmployee = useMemo((): ClientEmployeeResponse | null => {
+    if (!selectedClientEmployeeId) return null
+    const sid = selectedClientEmployeeId.toLowerCase()
+    return branchEmployees.find((e) => e.id.toLowerCase() === sid) ?? null
+  }, [branchEmployees, selectedClientEmployeeId])
+
+  const quoteContactSelectLabel = useMemo(() => {
+    if (!selectedClientEmployeeId) return 'Branch primary contact (above)'
+    if (selectedQuoteEmployee) {
+      const n = selectedQuoteEmployee.full_name?.trim() || 'Contact'
+      return selectedQuoteEmployee.email ? `${n} · ${selectedQuoteEmployee.email}` : n
+    }
+    return employeesLoading ? 'Loading…' : 'Saved contact'
+  }, [selectedClientEmployeeId, selectedQuoteEmployee, employeesLoading])
+
+  useEffect(() => {
+    let cancelled = false
+    setSuppliersLoading(true)
+    ;(async () => {
+      try {
+        const [sList] = await Promise.all([
+          suppliersApi.getSuppliers(true),
+        ])
+        if (cancelled) return
+        setSuppliers(sList)
+      } catch {
+        if (!cancelled) {
+          setSuppliers([])
+        }
+      } finally {
+        if (!cancelled) setSuppliersLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
   }, [])
 
-  const selectedClient = useMemo(() => {
-    if (!selectedClientId) return null
-    return clients.find((c) => c.id === selectedClientId) || null
-  }, [clients, selectedClientId])
+  /** Backfill supplier on products added before the suppliers list finished loading. */
+  useEffect(() => {
+    if (suppliersLoading || suppliers.length === 0) return
+    setAssembledProducts((prev) => {
+      let changed = false
+      const next = prev.map((p) => {
+        if (p.supplier_id) return p
+        const valveCat = p.valve?.catalog_category
+        if (!valveCat || isTemporaryCatalogCategory(valveCat)) return p
+        const sid = resolveSupplierFromSheetDefaults(
+          sheetDefaultSuppliers,
+          valveCat,
+          null,
+          suppliers,
+        )
+        if (!sid) return p
+        const sname = suppliers.find((s) => s.id === sid)?.name ?? null
+        const cp = { ...(p.component_pricing ?? {}) }
+        for (const [key, entry] of Object.entries(cp)) {
+          if (!entry?.enabled || entry.supplier_id) continue
+          cp[key] = { ...entry, supplier_id: sid, supplier_name: sname }
+        }
+        changed = true
+        return { ...p, supplier_id: sid, supplier_name: sname, component_pricing: cp }
+      })
+      return changed ? next : prev
+    })
+  }, [suppliersLoading, suppliers, sheetDefaultSuppliers])
+
+  const selectedBranch = useMemo((): BranchResponse | null => {
+    if (!selectedCompany || !selectedBranchId) return null
+    return (selectedCompany.branches || []).find((b) => b.id === selectedBranchId) ?? null
+  }, [selectedCompany, selectedBranchId])
+
+  const effectiveBranchId = useMemo((): string | null => {
+    if (selectedBranchId) return selectedBranchId
+    if (matcherClientHint?.mode === 'existing' && matcherClientHint.selectedClientId) {
+      return matcherClientHint.selectedClientId
+    }
+    if (initialSelectedBranchId?.trim()) return initialSelectedBranchId.trim()
+    return null
+  }, [selectedBranchId, matcherClientHint, initialSelectedBranchId])
+
+  const defaultClientDiscount = useMemo(() => {
+    if (clientMode !== 'existing') return null
+    const v = selectedCompany?.default_discount_pct
+    return typeof v === 'number' && Number.isFinite(v) ? v : null
+  }, [clientMode, selectedCompany?.default_discount_pct])
 
   const totalEstimate = useMemo(() => {
+    const parseOverride = (id: string): number | null => {
+      const raw = (tempQuoteUnitByProduct[id] ?? '').trim()
+      if (!raw) return null
+      const n = Number(raw)
+      if (!Number.isFinite(n) || n <= 0) return null
+      return n
+    }
+
+    const parseDiscount = (id: string): number => {
+      const raw = (customerDiscountByProduct[id] ?? '').trim()
+      if (raw) {
+        const n = Number(raw)
+        if (Number.isFinite(n) && n >= 0) return Math.min(n, 100)
+      }
+      return defaultClientDiscount ?? 0
+    }
+
+    const discountedUnit = (id: string, unit: number): number => {
+      const pct = parseDiscount(id)
+      return unit * (1 - pct / 100)
+    }
+
+    if (productCalcs.length && productCalcs.every((c) => c.ok)) {
+      return assembledProducts.reduce((sum, p) => {
+        const ov = parseOverride(p.id)
+        if (ov != null) return sum + discountedUnit(p.id, ov) * p.quantity
+        const pc = productCalcs.find((c) => c.productId === p.id)
+        return sum + discountedUnit(p.id, pc?.assemblyUnit ?? 0) * p.quantity
+      }, 0)
+    }
     return assembledProducts.reduce((sum, p) => {
+      const ov = parseOverride(p.id)
+      if (ov != null) return sum + discountedUnit(p.id, ov) * p.quantity
       if (p.unit_price == null) return sum
-      return sum + p.unit_price * p.quantity
+      return sum + discountedUnit(p.id, p.unit_price) * p.quantity
     }, 0)
-  }, [assembledProducts])
+  }, [assembledProducts, customerDiscountByProduct, defaultClientDiscount, productCalcs, tempQuoteUnitByProduct])
+
+  useEffect(() => {
+    if (assembledProducts.length === 0) {
+      setProductCalcs([])
+      setPricingLoading(false)
+      return
+    }
+    let cancelled = false
+    setPricingLoading(true)
+    ;(async () => {
+      const out: ProductPricingCalc[] = []
+      for (const p of assembledProducts) {
+        const supplierId = p.supplier_id
+        const componentKeyForPart = assemblyPartComponentKey
+        const parts = catalogPartsForAssembly(p)
+        const missing: string[] = []
+        if (parts.length === 0) missing.push('Valve configuration')
+        if (suppliers.length > 0 && !isAssemblyPricingReady(p, true) && !supplierId) {
+          missing.push('Supplier selection')
+        }
+        const rows: Array<{ component: string; calc: PriceCalculationResult; unitMult?: number }> = []
+        if (supplierId || p.component_pricing) {
+          for (const part of parts) {
+            const compKey = componentKeyForPart(part.label)
+            const partSupplierId = compKey
+              ? (p.component_pricing?.[compKey]?.supplier_id ?? supplierId)
+              : supplierId
+            if (!partSupplierId) {
+              missing.push(`${part.label} supplier`)
+              continue
+            }
+            const pr = await suppliersApi.getProductPrice(
+              partSupplierId,
+              part.catalog_table,
+              part.catalog_row_id,
+            )
+            if (!pr) {
+              missing.push(part.label)
+              continue
+            }
+            const vars = await suppliersApi.getResolvedCategoryPricing(partSupplierId, part.catalog_table)
+            const calc = await suppliersApi.calculatePrice({
+              list_price: pr.list_price_inr,
+              supplier_discount_pct: vars.supplier_discount_pct,
+              margin_multiplier: vars.margin_multiplier,
+              customer_discount_pct: 0,
+              quantity: p.quantity,
+            })
+            const unitMult = assemblyPartUnitMultiplier(part.label, p)
+            rows.push({ component: part.label, calc, unitMult })
+          }
+        }
+        for (const key of ['fitting_end_1', 'fitting_end_2'] as const) {
+          if (!isManualPricedAssemblyComponent(key, p)) continue
+          const entry = p.component_pricing?.[key]
+          if (!entry?.enabled) continue
+          const manualUnit = entry.final_price ?? entry.temp_price
+          if (!isPositivePrice(manualUnit)) {
+            missing.push(key === 'fitting_end_1' ? 'Fitting (End 1)' : 'Fitting (End 2)')
+            continue
+          }
+          const unitMult =
+            key === 'fitting_end_1' && (p.fitting_end_1_qty ?? 1) === 2 ? 2 : 1
+          const unitPrice = Number(manualUnit)
+          rows.push({
+            component: key === 'fitting_end_1' ? 'Fitting (End 1)' : 'Fitting (End 2)',
+            calc: {
+              list_price: unitPrice,
+              supplier_discount_pct: 0,
+              cost_to_parth: unitPrice,
+              margin_multiplier: 1,
+              parth_selling_price: unitPrice,
+              customer_discount_pct: 0,
+              customer_discount_amount: 0,
+              final_unit_price: unitPrice,
+              quantity: p.quantity,
+              line_total: unitPrice * unitMult * p.quantity,
+            },
+            unitMult,
+          })
+        }
+        const ok = parts.length > 0 && missing.length === 0
+        const assemblyUnit = ok
+          ? rows.reduce((sum, r) => sum + r.calc.final_unit_price * (r.unitMult ?? 1), 0)
+          : 0
+        const lineTotal = ok ? rows.reduce((sum, r) => sum + r.calc.line_total, 0) : 0
+        out.push({
+          productId: p.id,
+          label: assemblyLabel(p),
+          supplierName: p.supplier_name ?? null,
+          ok,
+          missing,
+          rows,
+          assemblyUnit,
+          lineTotal,
+        })
+      }
+      if (!cancelled) setProductCalcs(out)
+    })()
+      .catch(() => {
+        if (!cancelled) setProductCalcs([])
+      })
+      .finally(() => {
+        if (!cancelled) setPricingLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [assembledProducts, suppliers.length])
+
+  const pricingTotals = useMemo(() => {
+    const parseOverride = (id: string): number | null => {
+      const raw = (tempQuoteUnitByProduct[id] ?? '').trim()
+      if (!raw) return null
+      const n = Number(raw)
+      if (!Number.isFinite(n) || n <= 0) return null
+      return n
+    }
+
+    if (!productCalcs.length) return null
+    if (assembledProducts.length === 0) return null
+
+    const parseDiscount = (id: string): number => {
+      const raw = (customerDiscountByProduct[id] ?? '').trim()
+      if (raw) {
+        const n = Number(raw)
+        if (Number.isFinite(n) && n >= 0) return Math.min(n, 100)
+      }
+      return defaultClientDiscount ?? 0
+    }
+
+    let subtotal = 0
+    for (const p of assembledProducts) {
+      const ov = parseOverride(p.id)
+      const discountFactor = 1 - parseDiscount(p.id) / 100
+      if (ov != null) {
+        subtotal += ov * discountFactor * p.quantity
+        continue
+      }
+      const pc = productCalcs.find((c) => c.productId === p.id)
+      if (!pc?.ok) return null
+      subtotal += pc.assemblyUnit * discountFactor * p.quantity
+    }
+    return computeTaxTotals(
+      subtotal,
+      pfApplicable,
+      pfMode,
+      pfAmountDraft,
+      freightApplicable,
+      freightMode,
+      freightDraft,
+    )
+  }, [
+    assembledProducts,
+    customerDiscountByProduct,
+    defaultClientDiscount,
+    pfApplicable,
+    pfMode,
+    pfAmountDraft,
+    freightApplicable,
+    freightMode,
+    freightDraft,
+    productCalcs,
+    tempQuoteUnitByProduct,
+  ])
+
+  const supplierRequired = suppliers.length > 0
+  const pricingReady = useMemo(() => {
+    if (assembledProducts.length === 0) return false
+    if (suppliersLoading) return false
+    return assembledProducts.every((p) => isAssemblyPricingReady(p, supplierRequired))
+  }, [assembledProducts, supplierRequired, suppliersLoading])
+
+  /** Subtotal = Σ (quoted unit × qty); taxes match quotation rules (GST 18%, P&amp;F 3% on subtotal). */
+  const netOrderTotals = useMemo(() => {
+    if (assembledProducts.length === 0) return null
+    let subtotal = 0
+    let hasUnpriced = false
+    for (const p of assembledProducts) {
+      const u = p.unit_price
+      if (!isPositivePrice(u)) {
+        hasUnpriced = true
+        continue
+      }
+      subtotal += Number(u) * p.quantity
+    }
+    return {
+      ...computeTaxTotals(
+        subtotal,
+        pfApplicable,
+        pfMode,
+        pfAmountDraft,
+        freightApplicable,
+        freightMode,
+        freightDraft,
+      ),
+      allPriced: !hasUnpriced,
+      hasUnpriced,
+    }
+  }, [
+    assembledProducts,
+    pfApplicable,
+    pfMode,
+    pfAmountDraft,
+    freightApplicable,
+    freightMode,
+    freightDraft,
+  ])
 
   const handleProductComplete = useCallback(
     (configId: string) => (product: AssembledProduct) => {
@@ -307,17 +1208,52 @@ export default function ManualEntryForm({ onSubmitManual, isProcessing }: Props)
 
   function validate(): boolean {
     const e: Record<string, string> = {}
-    if (clientMode === 'existing') {
-      if (!selectedClientId) e.client = 'Please select a client'
-    } else {
-      if ((newClient.company_name || '').trim().length < 2) e.company_name = 'Company name is required'
-      if (!(newClient.contact_name || '').trim()) e.contact_name = 'Contact name is required'
-      const ph = cleanPhone(newClient.phone || '')
-      if (ph.length !== 10) e.phone = 'Enter a valid 10-digit phone number'
-      if (!isValidEmail((newClient.email || '').trim())) e.email = 'Enter a valid email'
+    if (showClientSection) {
+      if (clientMode === 'existing') {
+        if (!selectedCompany) e.client = 'Please search and select a company'
+        else if (!selectedBranchId) e.client = 'Please select a branch'
+      } else {
+        if ((newClient.company_name || '').trim().length < 2) e.company_name = 'Company name is required'
+        if (!(newClient.industry || '').trim()) e.industry = 'Industry is required'
+        if (!(newClient.branch_name || '').trim()) e.branch_name = 'Branch name is required'
+        if (!(newClient.city || '').trim()) e.city = 'City is required'
+        if (!(newClient.state || '').trim()) e.state = 'State is required'
+        if (!(newClient.contact_name || '').trim()) e.contact_name = 'Contact name is required'
+        const ph = cleanPhone(newClient.phone || '')
+        if (ph.length !== 10) e.phone = 'Enter a valid 10-digit phone number'
+        if ((newClient.email || '').trim() && !isValidEmail((newClient.email || '').trim())) {
+          e.email = 'Enter a valid email'
+        }
+      }
     }
-    if (assembledProducts.length === 0) {
-      e.products = 'Please complete at least one valve configurator'
+    if (showProductsSection) {
+      if (stage === 'products') {
+        const branchId = effectiveBranchId
+        if (clientMode === 'existing' && !branchId && !targetEnquiryId) {
+          e.client = 'Client could not be loaded — refresh the enquiry page'
+        }
+        if (clientMode === 'existing' && !branchId && targetEnquiryId) {
+          e.client =
+            'Client branch is missing on this enquiry — re-link the client on the enquiry or upload flow'
+        }
+        if (clientMode === 'new' && (newClient.company_name || '').trim().length < 2) {
+          e.client = 'Client could not be loaded — refresh the enquiry page'
+        }
+      }
+      if (assembledProducts.length === 0) {
+        e.products = 'Please complete at least one valve configurator'
+      }
+      if (supplierRequired) {
+        const missingPricing = assembledProducts.some(
+          (p) => !isAssemblyPricingReady(p, supplierRequired),
+        )
+        if (missingPricing) {
+          e.supplier = 'Complete supplier and pricing for each product before generating the quotation'
+        }
+      }
+    }
+    if (showFollowUpSection && !nextFollowUpDate.trim()) {
+      e.nextFollowUpDate = 'Follow-up date is required'
     }
     setErrors(e)
     return Object.keys(e).length === 0
@@ -325,36 +1261,336 @@ export default function ManualEntryForm({ onSubmitManual, isProcessing }: Props)
 
   const summaryText = useMemo(() => {
     const clientLabel =
-      clientMode === 'existing'
-        ? selectedClient?.company_name || 'Select client'
-        : newClient.company_name || 'New client'
+      clientSummaryLabel ||
+      (clientMode === 'existing'
+        ? selectedCompany && selectedBranch
+          ? `${selectedCompany.company_name} — ${selectedBranch.branch_name}`
+          : 'Select company & branch'
+        : newClient.company_name || 'New client')
+    if (stage === 'client') {
+      return clientLabel && clientLabel !== 'Select company & branch'
+        ? `${clientLabel} — ready to create enquiry`
+        : 'Select or add a client above'
+    }
     if (!clientLabel || assembledProducts.length === 0) {
-      return 'Fill in client and product details above'
+      return stage === 'products'
+        ? 'Configure at least one product above'
+        : 'Fill in client and product details above'
     }
-    return `${clientLabel} — ${assembledProducts.length} product(s) — Est. ${formatCurrency(totalEstimate)}`
-  }, [clientMode, newClient.company_name, assembledProducts.length, selectedClient, totalEstimate])
+    const est = netOrderTotals?.grand ?? totalEstimate
+    const hasTbd = assembledProducts.some(
+      (p) => p.has_unknown_prices || !isPositivePrice(p.unit_price),
+    )
+    const estLabel = hasTbd
+      ? `Est. ${formatCurrency(est)} (+ ${PRICE_TBD_LABEL} items)`
+      : `Est. ${formatCurrency(est)}`
+    return `${clientLabel} — ${assembledProducts.length} product(s) — ${estLabel}`
+  }, [
+    clientMode,
+    clientSummaryLabel,
+    newClient.company_name,
+    assembledProducts.length,
+    selectedCompany,
+    selectedBranch,
+    stage,
+    totalEstimate,
+    netOrderTotals?.grand,
+  ])
 
-  function submit() {
-    if (!validate()) return
-    const form: ManualEnquiryForm = {
+  function buildClientPayload() {
+    const newClientPayload =
+      clientMode === 'new'
+        ? {
+            ...newClient,
+            address: newClient.address_line1 || newClient.address,
+          }
+        : undefined
+    const base = {
       clientMode,
-      selectedClientId,
-      newClient,
-      lineItems: assembledProducts.map(assembledToLineItem),
-      priority,
-      notes,
+      selectedClientId: effectiveBranchId,
+      ...(newClientPayload ? { newClient: newClientPayload } : {}),
+      priority: 'Normal' as const,
+      notes: enquiryNotes,
+      productNotes: serializeProductNotes(productNotes),
+      enquiryDetailType,
+      nextFollowUpDate: nextFollowUpDate.trim(),
+      nextFollowUpNote: nextFollowUpNote.trim() || null,
+      source: enquirySource,
+      ...(indiamartQueryId ? { indiamartQueryId } : {}),
     }
+    if (
+      clientMode === 'existing' &&
+      effectiveBranchId &&
+      !effectiveBranchId.startsWith('dummy-') &&
+      selectedClientEmployeeId
+    ) {
+      return { ...base, clientEmployeeId: selectedClientEmployeeId }
+    }
+    const nqName = newClientQuoteEmployeeName.trim()
+    if (clientMode === 'new' && nqName) {
+      return {
+        ...base,
+        newClientEmployee: {
+          addressCode: newClientQuoteEmployeeAddressCode.trim() || undefined,
+          fullName: nqName,
+          phone: newClientQuoteEmployeePhone.trim() || undefined,
+          email: newClientQuoteEmployeeEmail.trim() || undefined,
+          department: newClientQuoteEmployeeDepartment.trim() || undefined,
+          designation: newClientQuoteEmployeeDesignation.trim() || undefined,
+        },
+      }
+    }
+    const inlineEmpName = inlineNewEmployeeName.trim()
+    if (
+      clientMode === 'existing' &&
+      effectiveBranchId &&
+      !effectiveBranchId.startsWith('dummy-') &&
+      inlineEmpName &&
+      !selectedClientEmployeeId
+    ) {
+      return {
+        ...base,
+        newClientEmployee: {
+          addressCode: inlineNewEmployeeAddressCode.trim() || undefined,
+          fullName: inlineEmpName,
+          phone: inlineNewEmployeePhone.trim() || undefined,
+          email: inlineNewEmployeeEmail.trim() || undefined,
+          department: inlineNewEmployeeDepartment.trim() || undefined,
+          designation: inlineNewEmployeeDesignation.trim() || undefined,
+        },
+      }
+    }
+    return base
+  }
+
+  function buildQuotationForm(): ManualEnquiryForm {
+    const newClientPayload =
+      clientMode === 'new'
+        ? {
+            ...newClient,
+            address: newClient.address_line1 || newClient.address,
+          }
+        : undefined
+    const form: ManualEnquiryForm = {
+      ...(targetEnquiryId ? { targetEnquiryId } : {}),
+      clientMode,
+      selectedClientId: effectiveBranchId,
+      ...(newClientPayload ? { newClient: newClientPayload } : {}),
+      lineItems: assembledProducts.map((p) =>
+        assembledToLineItem(
+          p,
+          null,
+          p.customer_discount_pct ?? defaultClientDiscount,
+        ),
+      ),
+      priority: 'Normal',
+      notes: enquiryNotes,
+      nextFollowUpDate: nextFollowUpDate.trim(),
+      nextFollowUpNote: nextFollowUpNote.trim() || null,
+    }
+    if (netOrderTotals?.subtotal != null) {
+      const { pf, pfRate } = resolvePfAmount(
+        netOrderTotals.subtotal,
+        pfApplicable,
+        pfMode,
+        pfAmountDraft,
+      )
+      const { freight, freightRate } = resolveFreightAmount(
+        netOrderTotals.subtotal,
+        freightApplicable,
+        freightMode,
+        freightDraft,
+      )
+      form.orderTotals = {
+        pfApplicable,
+        pfMode,
+        pfAmount: pf,
+        pfRate,
+        freightApplicable,
+        freightMode,
+        freightAmount: freight,
+        freightRate,
+      }
+    }
+    if (
+      clientMode === 'existing' &&
+      effectiveBranchId &&
+      !effectiveBranchId.startsWith('dummy-') &&
+      selectedClientEmployeeId
+    ) {
+      form.clientEmployeeId = selectedClientEmployeeId
+    }
+    const nqName = newClientQuoteEmployeeName.trim()
+    if (clientMode === 'new' && nqName) {
+      form.newClientEmployee = {
+        addressCode: newClientQuoteEmployeeAddressCode.trim() || undefined,
+        fullName: nqName,
+        phone: newClientQuoteEmployeePhone.trim() || undefined,
+        email: newClientQuoteEmployeeEmail.trim() || undefined,
+        department: newClientQuoteEmployeeDepartment.trim() || undefined,
+        designation: newClientQuoteEmployeeDesignation.trim() || undefined,
+      }
+    }
+    const inlineEmpName = inlineNewEmployeeName.trim()
+    if (
+      clientMode === 'existing' &&
+      effectiveBranchId &&
+      !effectiveBranchId.startsWith('dummy-') &&
+      inlineEmpName &&
+      !selectedClientEmployeeId
+    ) {
+      form.newClientEmployee = {
+        addressCode: inlineNewEmployeeAddressCode.trim() || undefined,
+        fullName: inlineEmpName,
+        phone: inlineNewEmployeePhone.trim() || undefined,
+        email: inlineNewEmployeeEmail.trim() || undefined,
+        department: inlineNewEmployeeDepartment.trim() || undefined,
+        designation: inlineNewEmployeeDesignation.trim() || undefined,
+      }
+    }
+    return form
+  }
+
+  function submitQuotationForm(form: ManualEnquiryForm) {
     if (typeof window !== 'undefined' && typeof console !== 'undefined') {
       console.log(
-        '[ManualEntryForm] buildEmailText:\n' + buildEmailText(form, assembledProducts, clients),
+        '[ManualEntryForm] buildEmailText:\n' +
+          buildEmailText(
+            form,
+            assembledProducts,
+            selectedCompany,
+            selectedBranch,
+            productCalcs,
+            selectedQuoteEmployee,
+          ),
       )
     }
     onSubmitManual(form)
   }
 
+  function submit() {
+    if (!validate()) return
+    if (stage === 'client') {
+      onCreateEnquiry?.(buildClientPayload())
+      return
+    }
+    const form = buildQuotationForm()
+    if (targetEnquiryId) {
+      submitQuotationForm({ ...form, enquiryQuoteStatus: 'quoted' })
+      return
+    }
+    submitQuotationForm(form)
+  }
+
+  const submitLabel =
+    stage === 'client'
+      ? isProcessing
+        ? 'Working…'
+        : (clientStageSubmitLabel ?? 'Create Enquiry →')
+      : stage === 'products'
+        ? isProcessing
+          ? 'Generating…'
+          : 'Generate Quotation →'
+        : isProcessing
+          ? 'Processing…'
+          : 'Process →'
+
   return (
     <div className="space-y-5">
+      {stage === 'products' && clientSummaryLabel ? (
+        <div className="rounded-lg border border-brand-navy-200 bg-brand-navy-50/40 px-4 py-3">
+          <p className="text-[10px] font-medium uppercase tracking-wide text-[#8A9488]">Client</p>
+          <p className="mt-1 text-[14px] font-semibold text-gray-900">{clientSummaryLabel}</p>
+        </div>
+      ) : null}
+
+      {stage === 'client' ? (
+        <>
+        <section className="rounded-xl border border-surface-border bg-white p-5 shadow-sm">
+          <div className="text-[10px] font-medium uppercase tracking-wide text-[#8A9488]">Source</div>
+          <p className="mt-1 text-[12px] text-surface-muted">
+            How did this enquiry reach you?
+          </p>
+          <Select
+            value={enquirySource}
+            onValueChange={(v) => setEnquirySource((v as EnquirySource) || 'manual')}
+          >
+            <SelectTrigger className="mt-3 h-10 w-full border-surface-border bg-white text-[13px]">
+              <SelectValue placeholder="Select source" />
+            </SelectTrigger>
+            <SelectContent>
+              {ENQUIRY_SOURCE_OPTIONS.map((o) => (
+                <SelectItem key={o.value} value={o.value}>
+                  {o.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </section>
+
+        <section className="rounded-xl border border-surface-border bg-white p-5 shadow-sm">
+          <div className="text-[10px] font-medium uppercase tracking-wide text-[#8A9488]">
+            Enquiry type
+          </div>
+          <p className="mt-1 text-[12px] text-surface-muted">
+            Does this enquiry from the client include complete details, or is more information still
+            needed?
+          </p>
+          <Select
+            value={enquiryDetailType}
+            onValueChange={(v) => setEnquiryDetailType((v as EnquiryDetailType) || 'incomplete')}
+          >
+            <SelectTrigger className="mt-3 h-10 w-full border-surface-border bg-white text-[13px]">
+              <SelectValue placeholder="Select enquiry type" />
+            </SelectTrigger>
+            <SelectContent>
+              {ENQUIRY_DETAIL_TYPES.map((type) => (
+                <SelectItem key={type} value={type}>
+                  {ENQUIRY_DETAIL_TYPE_LABELS[type]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </section>
+        </>
+      ) : null}
+
+      {showFollowUpSection ? (
+        <section className="rounded-xl border border-surface-border bg-white p-5 shadow-sm">
+          <div className="text-[10px] font-medium uppercase tracking-wide text-[#8A9488]">
+            Next follow-up
+          </div>
+          <p className="mt-1 text-[12px] text-surface-muted">
+            When should this {targetEnquiryId ? 'quotation' : 'enquiry'} be followed up?
+          </p>
+          <label className="mt-3 block text-[12px] font-medium text-gray-900">
+            Follow-up date <span className="text-red-600">*</span>
+          </label>
+          <input
+            type="date"
+            value={nextFollowUpDate}
+            onChange={(e) => setNextFollowUpDate(e.target.value)}
+            className="mt-1.5 h-10 w-full rounded-md border border-surface-border bg-white px-3 text-[13px] text-gray-900"
+          />
+          {errors.nextFollowUpDate ? (
+            <p className="mt-1 text-[12px] text-red-600">{errors.nextFollowUpDate}</p>
+          ) : null}
+          <label className="mt-3 block text-[12px] font-medium text-gray-900">
+            Follow-up note (optional)
+          </label>
+          <textarea
+            value={nextFollowUpNote}
+            onChange={(e) => setNextFollowUpNote(e.target.value)}
+            rows={2}
+            placeholder="e.g. Call client about pricing"
+            className="mt-1.5 w-full resize-y rounded-md border border-surface-border bg-white px-3 py-2 text-[13px] text-gray-900 placeholder:text-surface-muted"
+          />
+        </section>
+      ) : null}
+
       {/* ── Client Details ─────────────────────────────────────────── */}
+      {showClientSection ? (
+      <>
       <section className="rounded-xl border border-surface-border bg-white p-5 shadow-sm border-t-2 border-t-brand-navy-200">
         <div className="flex items-center justify-between gap-3">
           <h2 className="text-[15px] font-semibold text-gray-900">Client Details</h2>
@@ -387,104 +1623,586 @@ export default function ManualEntryForm({ onSubmitManual, isProcessing }: Props)
         </div>
 
         {clientMode === 'existing' ? (
-          <div className="mt-4 space-y-3">
-            <div className="space-y-1.5">
-              <div className="text-[10px] font-medium uppercase tracking-wide text-[#8A9488]">Client</div>
-              <Select
-                value={toSelectValue(selectedClientId ?? '')}
-                onValueChange={(v) => setSelectedClientId(fromSelectValue(v) || null)}
-              >
-                <SelectTrigger className={cn('h-10 w-full min-w-0', errors.client && 'border-red-300')}>
-                  <SelectValue placeholder="Search clients..." />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={SELECT_EMPTY}>
-                    <span className="text-muted-foreground">Select client…</span>
-                  </SelectItem>
-                  {clients.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>
-                      {c.company_name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+          <div className="mt-4 space-y-4">
+            <div className="relative space-y-1.5">
+              <div className="text-[10px] font-medium uppercase tracking-wide text-[#8A9488]">
+                Search company
+              </div>
+              <Input
+                value={companyQuery}
+                onChange={(e) => {
+                  setCompanyQuery(e.target.value)
+                  setCompanyMenuOpen(true)
+                }}
+                onFocus={() => setCompanyMenuOpen(true)}
+                placeholder="Type to search…"
+                className={cn('h-10', errors.client && 'border-red-300')}
+              />
+              {companyMenuOpen && (
+                <div className="absolute z-20 mt-1 max-h-64 w-full overflow-y-auto rounded-lg border border-surface-border bg-white py-1 shadow-md">
+                  {mergedCompanyOptions.length === 0 ? (
+                    <p className="px-3 py-2 text-[13px] text-surface-muted">No matches</p>
+                  ) : (
+                    mergedCompanyOptions.map((co) => (
+                      <button
+                        key={co.id}
+                        type="button"
+                        className="flex w-full flex-col gap-0.5 px-3 py-2 text-left text-[13px] hover:bg-surface-page"
+                        onClick={() => {
+                          setSelectedCompany(co)
+                          setCompanyQuery(co.company_name)
+                          setCompanyMenuOpen(false)
+                        }}
+                      >
+                        <span className="font-medium text-gray-900">{co.company_name}</span>
+                        <span className="text-[12px] text-surface-muted">
+                          {co.branch_count} branches
+                        </span>
+                      </button>
+                    ))
+                  )}
+                </div>
+              )}
               {errors.client && <p className="text-[12px] text-red-600">{errors.client}</p>}
             </div>
 
-            {selectedClient && (
-              <div className="rounded-lg border border-surface-border bg-surface-page p-3 text-[13px]">
-                <p className="font-semibold text-gray-900">{selectedClient.company_name}</p>
-                <p className="mt-1 text-surface-muted">
-                  {selectedClient.contact_name || '—'} | {selectedClient.phone || '—'}
-                </p>
-                <p className="text-surface-muted">
-                  {selectedClient.email || '—'} | {selectedClient.city || '—'}
-                </p>
+            {selectedCompany ? (
+              <div className="space-y-3">
+                <div className="text-[10px] font-medium uppercase tracking-wide text-[#8A9488]">
+                  Select branch
+                </div>
+                {(selectedCompany.branches || []).filter((b) => b.is_active).length === 1 ? (
+                  <div className="rounded-lg border border-surface-border bg-surface-page p-3 text-[13px] text-surface-muted">
+                    {(selectedCompany.branches || []).filter((b) => b.is_active).map((b) => (
+                      <span key={b.id}>
+                        <span className="font-medium text-gray-900">{b.branch_name}</span>
+                        {' — '}
+                        {b.city}
+                        {b.state ? `, ${b.state}` : ''}
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {(selectedCompany.branches || [])
+                      .filter((b) => b.is_active)
+                      .map((b) => (
+                        <button
+                          key={b.id}
+                          type="button"
+                          onClick={() => setSelectedBranchId(b.id)}
+                          className={cn(
+                            'rounded-lg border p-3 text-left text-[13px] transition-colors',
+                            selectedBranchId === b.id
+                              ? 'border-2 border-brand-green-500 bg-brand-green-50'
+                              : 'border-surface-border hover:bg-surface-page',
+                          )}
+                        >
+                          <div className="flex items-center gap-1 font-semibold text-gray-900">
+                            {b.is_headquarters ? '🏢' : '📍'} {b.branch_name}
+                          </div>
+                          <p className="mt-1 text-surface-muted">
+                            {[b.city, b.state].filter(Boolean).join(', ') || '—'}
+                          </p>
+                          <p className="mt-1 text-surface-muted">{b.contact_name || '—'}</p>
+                          <p className="text-surface-muted">{b.phone || '—'}</p>
+                        </button>
+                      ))}
+                  </div>
+                )}
+
+                {!selectedCompany.id.startsWith('dc-') && (
+                  <div>
+                    {!showAddBranch ? (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        className="h-9 px-0 text-brand-green-600 hover:text-brand-green-700"
+                        onClick={() => setShowAddBranch(true)}
+                      >
+                        + Add New Branch to This Company
+                      </Button>
+                    ) : (
+                      <div className="rounded-lg border border-dashed border-brand-green-300 bg-surface-page p-4">
+                        <p className="mb-2 text-[12px] font-medium text-gray-900">New branch</p>
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          <Input
+                            placeholder="Branch name *"
+                            value={inlineBranch.branch_name}
+                            onChange={(e) => setInlineBranch({ ...inlineBranch, branch_name: e.target.value })}
+                          />
+                          <Input
+                            placeholder="City *"
+                            value={inlineBranch.city}
+                            onChange={(e) => setInlineBranch({ ...inlineBranch, city: e.target.value })}
+                          />
+                          <Input
+                            placeholder="Contact"
+                            value={inlineBranch.contact_name}
+                            onChange={(e) => setInlineBranch({ ...inlineBranch, contact_name: e.target.value })}
+                          />
+                          <Input
+                            placeholder="Designation"
+                            value={inlineBranch.designation}
+                            onChange={(e) => setInlineBranch({ ...inlineBranch, designation: e.target.value })}
+                          />
+                          <Input
+                            placeholder="Phone"
+                            value={inlineBranch.phone}
+                            onChange={(e) => setInlineBranch({ ...inlineBranch, phone: e.target.value })}
+                          />
+                          <Input
+                            placeholder="Email"
+                            value={inlineBranch.email}
+                            onChange={(e) => setInlineBranch({ ...inlineBranch, email: e.target.value })}
+                          />
+                          <Input
+                            placeholder="State *"
+                            value={inlineBranch.state}
+                            onChange={(e) => setInlineBranch({ ...inlineBranch, state: e.target.value })}
+                            className="sm:col-span-1"
+                          />
+                          <Input
+                            placeholder="Pincode"
+                            value={inlineBranch.pincode}
+                            onChange={(e) => setInlineBranch({ ...inlineBranch, pincode: e.target.value })}
+                          />
+                          <Textarea
+                            placeholder="Address"
+                            className="min-h-[56px] sm:col-span-2"
+                            value={inlineBranch.address_line1}
+                            onChange={(e) => setInlineBranch({ ...inlineBranch, address_line1: e.target.value })}
+                          />
+                        </div>
+                        <div className="mt-3 flex gap-2">
+                          <Button
+                            type="button"
+                            size="sm"
+                            disabled={addBranchSaving}
+                            onClick={async () => {
+                              if (!inlineBranch.branch_name.trim() || !inlineBranch.city.trim() || !inlineBranch.state.trim()) return
+                              setAddBranchSaving(true)
+                              try {
+                                await clientsApi.addBranch(selectedCompany.id, {
+                                  branch_name: inlineBranch.branch_name.trim(),
+                                  contact_name: inlineBranch.contact_name.trim() || null,
+                                  designation: inlineBranch.designation.trim() || null,
+                                  phone: inlineBranch.phone.trim() || null,
+                                  email: inlineBranch.email.trim() || null,
+                                  city: inlineBranch.city.trim(),
+                                  state: inlineBranch.state.trim(),
+                                  pincode: inlineBranch.pincode.trim() || null,
+                                  address_line1: inlineBranch.address_line1.trim() || null,
+                                  country: inlineBranch.country.trim() || 'India',
+                                })
+                                const refreshed = await clientsApi.getCompany(selectedCompany.id)
+                                setSelectedCompany(refreshed)
+                                setShowAddBranch(false)
+                                setInlineBranch({
+                                  branch_name: '',
+                                  contact_name: '',
+                                  designation: '',
+                                  phone: '',
+                                  email: '',
+                                  city: '',
+                                  state: '',
+                                  pincode: '',
+                                  address_line1: '',
+                                  country: 'India',
+                                })
+                              } finally {
+                                setAddBranchSaving(false)
+                              }
+                            }}
+                          >
+                            {addBranchSaving ? 'Adding…' : 'Add Branch'}
+                          </Button>
+                          <Button type="button" size="sm" variant="outline" onClick={() => setShowAddBranch(false)}>
+                            Cancel
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {selectedCompany && selectedBranch ? (
+                  <div className="rounded-lg border border-surface-border bg-white p-4 text-[13px] shadow-sm">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <p className="font-semibold text-gray-900">{selectedCompany.company_name}</p>
+                        <p className="mt-0.5 text-brand-green-700">{selectedBranch.branch_name}</p>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 shrink-0 text-[12px]"
+                        onClick={() => {
+                          setSelectedCompany(null)
+                          setSelectedBranchId(null)
+                          setCompanyQuery('')
+                        }}
+                      >
+                        Change
+                      </Button>
+                    </div>
+                    <p className="mt-2 text-surface-muted">
+                      {selectedBranch.contact_name || '—'}
+                      {selectedBranch.designation ? ` · ${selectedBranch.designation}` : ''}
+                    </p>
+                    <p className="mt-1 text-surface-muted">
+                      {selectedBranch.phone ? `📞 ${selectedBranch.phone}` : ''}
+                      {selectedBranch.email ? ` · ✉ ${selectedBranch.email}` : ''}
+                    </p>
+                    <p className="mt-1 text-surface-muted">
+                      📍{' '}
+                      {[selectedBranch.address_line1, [selectedBranch.city, selectedBranch.state].filter(Boolean).join(', '), selectedBranch.pincode]
+                        .filter(Boolean)
+                        .join(' · ')}
+                    </p>
+
+                    {!selectedBranch.id.startsWith('dummy-') && selectedCompany ? (
+                      <div className="mt-4 space-y-3 border-t border-surface-border pt-4">
+                        <div className="text-[10px] font-medium uppercase tracking-wide text-[#8A9488]">
+                          Quote for (contact at this branch)
+                        </div>
+                        <Select
+                          value={selectedClientEmployeeId ?? BRANCH_PRIMARY_CONTACT}
+                          onValueChange={(v) =>
+                            setSelectedClientEmployeeId(v === BRANCH_PRIMARY_CONTACT ? null : v)
+                          }
+                          disabled={employeesLoading}
+                        >
+                          <SelectTrigger className="h-10 w-full min-w-0">
+                            <SelectValue placeholder={employeesLoading ? 'Loading contacts…' : 'Select contact'}>
+                              {quoteContactSelectLabel}
+                            </SelectValue>
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value={BRANCH_PRIMARY_CONTACT}>
+                              Branch primary contact (above)
+                            </SelectItem>
+                            {branchEmployees.map((e) => (
+                              <SelectItem key={e.id} value={e.id}>
+                                {e.full_name}
+                                {e.email ? ` · ${e.email}` : ''}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <div className="rounded-md bg-surface-page p-3">
+                          <p className="mb-2 text-[11px] font-medium text-gray-800">Add contact to this branch</p>
+                          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                            <Input
+                              value={inlineNewEmployeeAddressCode}
+                              onChange={(e) => setInlineNewEmployeeAddressCode(e.target.value)}
+                              placeholder="Address Code"
+                              className="h-9 text-[13px]"
+                            />
+                            <Input
+                              value={inlineNewEmployeeName}
+                              onChange={(e) => setInlineNewEmployeeName(e.target.value)}
+                              placeholder="Person Name *"
+                              className="h-9 text-[13px]"
+                            />
+                            <Input
+                              value={inlineNewEmployeePhone}
+                              onChange={(e) => setInlineNewEmployeePhone(e.target.value)}
+                              placeholder="Contact No."
+                              className="h-9 text-[13px]"
+                            />
+                            <Input
+                              value={inlineNewEmployeeEmail}
+                              onChange={(e) => setInlineNewEmployeeEmail(e.target.value)}
+                              placeholder="Email"
+                              type="email"
+                              className="h-9 text-[13px]"
+                            />
+                            <Input
+                              value={inlineNewEmployeeDepartment}
+                              onChange={(e) => setInlineNewEmployeeDepartment(e.target.value)}
+                              placeholder="Department"
+                              className="h-9 text-[13px]"
+                            />
+                            <Input
+                              value={inlineNewEmployeeDesignation}
+                              onChange={(e) => setInlineNewEmployeeDesignation(e.target.value)}
+                              placeholder="Designation"
+                              className="h-9 text-[13px]"
+                            />
+                          </div>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="secondary"
+                            className="mt-2 h-8 text-[12px]"
+                            disabled={
+                              addEmployeeSaving ||
+                              !inlineNewEmployeeName.trim() ||
+                              (inlineNewEmployeeEmail.trim() !== '' &&
+                                !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(inlineNewEmployeeEmail.trim()))
+                            }
+                            onClick={async () => {
+                              const name = inlineNewEmployeeName.trim()
+                              if (!name || !selectedCompany || selectedBranch.id.startsWith('dummy-')) return
+                              setAddEmployeeSaving(true)
+                              setAddEmployeeErr(null)
+                              try {
+                                const created = await clientsApi.createBranchEmployee(
+                                  selectedCompany.id,
+                                  selectedBranch.id,
+                                  {
+                                    address_code: inlineNewEmployeeAddressCode.trim() || undefined,
+                                    full_name: name,
+                                    phone: inlineNewEmployeePhone.trim() || undefined,
+                                    email: inlineNewEmployeeEmail.trim() || undefined,
+                                    department: inlineNewEmployeeDepartment.trim() || undefined,
+                                    designation: inlineNewEmployeeDesignation.trim() || undefined,
+                                  },
+                                )
+                                const rows = await clientsApi.listBranchEmployees(
+                                  selectedCompany.id,
+                                  selectedBranch.id,
+                                )
+                                setBranchEmployees(rows)
+                                setSelectedClientEmployeeId(created.id)
+                                setInlineNewEmployeeAddressCode('')
+                                setInlineNewEmployeeName('')
+                                setInlineNewEmployeePhone('')
+                                setInlineNewEmployeeEmail('')
+                                setInlineNewEmployeeDepartment('')
+                                setInlineNewEmployeeDesignation('')
+                              } catch (e) {
+                                setAddEmployeeErr(
+                                  e instanceof Error ? e.message : 'Could not save contact — try again or use Process quote to save.',
+                                )
+                              } finally {
+                                setAddEmployeeSaving(false)
+                              }
+                            }}
+                          >
+                            {addEmployeeSaving ? 'Saving…' : 'Save & select for this quote'}
+                          </Button>
+                          {addEmployeeErr ? (
+                            <p className="mt-2 text-[12px] text-red-600">{addEmployeeErr}</p>
+                          ) : null}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
-            )}
+            ) : null}
           </div>
         ) : (
-          <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div className="space-y-1.5">
-              <div className="text-[10px] font-medium uppercase tracking-wide text-[#8A9488]">
-                Company Name<span className="text-red-600"> *</span>
+          <div className="mt-4 space-y-4">
+            <div className="rounded-lg bg-surface-page p-4">
+              <h3 className="mb-3 text-[13px] font-semibold text-gray-900">Company Information</h3>
+              <div className="space-y-3">
+                <div>
+                  <div className="text-[10px] font-medium uppercase tracking-wide text-[#8A9488]">
+                    Company Name<span className="text-red-600"> *</span>
+                  </div>
+                  <Input
+                    value={newClient.company_name}
+                    onChange={(e) => setNewClient({ ...newClient, company_name: e.target.value })}
+                    className={cn('mt-1 h-10', errors.company_name && 'border-red-300')}
+                    placeholder="e.g. ABC Engineering Pvt. Ltd."
+                  />
+                  {errors.company_name && <p className="text-[12px] text-red-600">{errors.company_name}</p>}
+                </div>
+                <div>
+                  <div className="text-[10px] font-medium uppercase tracking-wide text-[#8A9488]">
+                    Industry<span className="text-red-600"> *</span>
+                  </div>
+                  <Select
+                      value={newClient.industry || SELECT_EMPTY}
+                      onValueChange={(v) =>
+                        setNewClient({
+                          ...newClient,
+                          industry: !v || v === SELECT_EMPTY ? '' : v,
+                        })
+                      }
+                    >
+                      <SelectTrigger className={cn('mt-1 h-10', errors.industry && 'border-red-300')}>
+                        <SelectValue placeholder="Select industry" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {CLIENT_INDUSTRY_OPTIONS.map((x) => (
+                          <SelectItem key={x} value={x}>
+                            {x}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {errors.industry && <p className="text-[12px] text-red-600">{errors.industry}</p>}
+                </div>
               </div>
-              <Input
-                value={newClient.company_name}
-                onChange={(e) => setNewClient({ ...newClient, company_name: e.target.value })}
-                className={cn('h-10', errors.company_name && 'border-red-300')}
-                placeholder="e.g. ABC Engineering Pvt. Ltd."
-              />
-              {errors.company_name && <p className="text-[12px] text-red-600">{errors.company_name}</p>}
             </div>
-            <div className="space-y-1.5">
-              <div className="text-[10px] font-medium uppercase tracking-wide text-[#8A9488]">
-                Contact Name<span className="text-red-600"> *</span>
+
+            <div className="rounded-lg bg-surface-page p-4">
+              <h3 className="mb-1 text-[13px] font-semibold text-gray-900">Branch / Location</h3>
+              <p className="mb-3 text-[12px] text-surface-muted">You can add more branches later from Masters.</p>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="sm:col-span-2">
+                  <div className="text-[10px] font-medium uppercase tracking-wide text-[#8A9488]">
+                    Branch Name<span className="text-red-600"> *</span>
+                  </div>
+                  <Input
+                    value={newClient.branch_name}
+                    onChange={(e) => setNewClient({ ...newClient, branch_name: e.target.value })}
+                    className={cn('mt-1 h-10', errors.branch_name && 'border-red-300')}
+                    placeholder="e.g. Head Office, Pune Branch"
+                  />
+                  {errors.branch_name && <p className="text-[12px] text-red-600">{errors.branch_name}</p>}
+                </div>
+                <div>
+                  <div className="text-[10px] font-medium uppercase tracking-wide text-[#8A9488]">
+                    Contact Name<span className="text-red-600"> *</span>
+                  </div>
+                  <Input
+                    value={newClient.contact_name}
+                    onChange={(e) => setNewClient({ ...newClient, contact_name: e.target.value })}
+                    className={cn('mt-1 h-10', errors.contact_name && 'border-red-300')}
+                  />
+                  {errors.contact_name && <p className="text-[12px] text-red-600">{errors.contact_name}</p>}
+                </div>
+                <div>
+                  <div className="text-[10px] font-medium uppercase tracking-wide text-[#8A9488]">Designation</div>
+                  <Input
+                    value={newClient.designation}
+                    onChange={(e) => setNewClient({ ...newClient, designation: e.target.value })}
+                    className="mt-1 h-10"
+                    placeholder="e.g. Purchase Manager"
+                  />
+                </div>
+                <div>
+                  <div className="text-[10px] font-medium uppercase tracking-wide text-[#8A9488]">
+                    Phone<span className="text-red-600"> *</span>
+                  </div>
+                  <Input
+                    value={newClient.phone}
+                    onChange={(e) => setNewClient({ ...newClient, phone: e.target.value })}
+                    className={cn('mt-1 h-10', errors.phone && 'border-red-300')}
+                  />
+                  {errors.phone && <p className="text-[12px] text-red-600">{errors.phone}</p>}
+                </div>
+                <div>
+                  <div className="text-[10px] font-medium uppercase tracking-wide text-[#8A9488]">Email</div>
+                  <Input
+                    value={newClient.email}
+                    onChange={(e) => setNewClient({ ...newClient, email: e.target.value })}
+                    className={cn('mt-1 h-10', errors.email && 'border-red-300')}
+                  />
+                  {errors.email && <p className="text-[12px] text-red-600">{errors.email}</p>}
+                </div>
+                <div className="sm:col-span-2 rounded-lg border border-dashed border-surface-border bg-white/60 p-3">
+                  <div className="text-[10px] font-medium uppercase tracking-wide text-[#8A9488]">
+                    Quote for — different contact (optional)
+                  </div>
+                  <p className="mb-2 mt-1 text-[11px] text-surface-muted">
+                    Saves as a branch contact person and uses them on this quotation. Leave blank to use the branch
+                    contact above.
+                  </p>
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                    <Input
+                      value={newClientQuoteEmployeeAddressCode}
+                      onChange={(e) => setNewClientQuoteEmployeeAddressCode(e.target.value)}
+                      className="h-9 text-[13px]"
+                      placeholder="Address Code"
+                    />
+                    <Input
+                      value={newClientQuoteEmployeeName}
+                      onChange={(e) => setNewClientQuoteEmployeeName(e.target.value)}
+                      className="h-9 text-[13px]"
+                      placeholder="Person Name"
+                    />
+                    <Input
+                      value={newClientQuoteEmployeePhone}
+                      onChange={(e) => setNewClientQuoteEmployeePhone(e.target.value)}
+                      className="h-9 text-[13px]"
+                      placeholder="Contact No."
+                    />
+                    <Input
+                      value={newClientQuoteEmployeeEmail}
+                      onChange={(e) => setNewClientQuoteEmployeeEmail(e.target.value)}
+                      className="h-9 text-[13px]"
+                      placeholder="Email"
+                      type="email"
+                    />
+                    <Input
+                      value={newClientQuoteEmployeeDepartment}
+                      onChange={(e) => setNewClientQuoteEmployeeDepartment(e.target.value)}
+                      className="h-9 text-[13px]"
+                      placeholder="Department"
+                    />
+                    <Input
+                      value={newClientQuoteEmployeeDesignation}
+                      onChange={(e) => setNewClientQuoteEmployeeDesignation(e.target.value)}
+                      className="h-9 text-[13px]"
+                      placeholder="Designation"
+                    />
+                  </div>
+                </div>
+                <div className="sm:col-span-2">
+                  <div className="text-[10px] font-medium uppercase tracking-wide text-[#8A9488]">
+                    City<span className="text-red-600"> *</span>
+                  </div>
+                  <Input
+                    value={newClient.city}
+                    onChange={(e) => setNewClient({ ...newClient, city: e.target.value })}
+                    className={cn('mt-1 h-10', errors.city && 'border-red-300')}
+                  />
+                  {errors.city && <p className="text-[12px] text-red-600">{errors.city}</p>}
+                </div>
+                <div>
+                  <div className="text-[10px] font-medium uppercase tracking-wide text-[#8A9488]">
+                    State<span className="text-red-600"> *</span>
+                  </div>
+                  <Input
+                    value={newClient.state}
+                    onChange={(e) => setNewClient({ ...newClient, state: e.target.value })}
+                    className={cn('mt-1 h-10', errors.state && 'border-red-300')}
+                  />
+                  {errors.state && <p className="text-[12px] text-red-600">{errors.state}</p>}
+                </div>
+                <div>
+                  <div className="text-[10px] font-medium uppercase tracking-wide text-[#8A9488]">Pincode</div>
+                  <Input
+                    value={newClient.pincode}
+                    onChange={(e) => setNewClient({ ...newClient, pincode: e.target.value })}
+                    className="mt-1 h-10"
+                  />
+                </div>
+                <div className="sm:col-span-2">
+                  <div className="text-[10px] font-medium uppercase tracking-wide text-[#8A9488]">Address</div>
+                  <Textarea
+                    value={newClient.address_line1}
+                    onChange={(e) =>
+                      setNewClient({ ...newClient, address_line1: e.target.value, address: e.target.value })
+                    }
+                    className="mt-1 min-h-[70px]"
+                    placeholder="Street address, landmark"
+                  />
+                </div>
               </div>
-              <Input
-                value={newClient.contact_name}
-                onChange={(e) => setNewClient({ ...newClient, contact_name: e.target.value })}
-                className={cn('h-10', errors.contact_name && 'border-red-300')}
-                placeholder="e.g. Suresh Mehta"
-              />
-              {errors.contact_name && <p className="text-[12px] text-red-600">{errors.contact_name}</p>}
-            </div>
-            <div className="space-y-1.5">
-              <div className="text-[10px] font-medium uppercase tracking-wide text-[#8A9488]">
-                Phone Number<span className="text-red-600"> *</span>
-              </div>
-              <Input
-                value={newClient.phone}
-                onChange={(e) => setNewClient({ ...newClient, phone: e.target.value })}
-                className={cn('h-10', errors.phone && 'border-red-300')}
-                placeholder="9823456789"
-              />
-              {errors.phone && <p className="text-[12px] text-red-600">{errors.phone}</p>}
-            </div>
-            <div className="space-y-1.5">
-              <div className="text-[10px] font-medium uppercase tracking-wide text-[#8A9488]">Email Address</div>
-              <Input
-                value={newClient.email}
-                onChange={(e) => setNewClient({ ...newClient, email: e.target.value })}
-                className={cn('h-10', errors.email && 'border-red-300')}
-                placeholder="suresh@abc.com"
-              />
-              {errors.email && <p className="text-[12px] text-red-600">{errors.email}</p>}
-            </div>
-            <div className="space-y-1.5 sm:col-span-2">
-              <div className="text-[10px] font-medium uppercase tracking-wide text-[#8A9488]">Address</div>
-              <Textarea
-                value={newClient.address}
-                onChange={(e) => setNewClient({ ...newClient, address: e.target.value })}
-                className="min-h-[70px]"
-                placeholder="City, State — for shipping"
-              />
             </div>
           </div>
         )}
       </section>
 
+      <EnquiryNotesField
+        productNotes={productNotes}
+        onProductNotesChange={setProductNotes}
+        className="mt-4"
+      />
+      </>
+      ) : null}
+
       {/* ── Products (valve configurator) ───────────────────────────── */}
+      {showProductsSection ? (
+      <>
       <section className="rounded-xl border border-surface-border bg-white p-5 shadow-sm border-t-2 border-t-brand-gold-200">
         <h2 className="text-[15px] font-semibold text-gray-900">Products Requested</h2>
 
@@ -495,6 +2213,8 @@ export default function ManualEntryForm({ onSubmitManual, isProcessing }: Props)
                 key={p.id}
                 productIndex={idx}
                 initialProduct={p}
+                suppliers={suppliers}
+                suppliersLoading={suppliersLoading}
                 onProductComplete={(updated) => {
                   setAssembledProducts((prev) =>
                     prev.map((x) => (x.id === p.id ? updated : x)),
@@ -517,20 +2237,47 @@ export default function ManualEntryForm({ onSubmitManual, isProcessing }: Props)
             ),
           )}
 
-          {activeConfigIds.map((cid, idx) => (
-            <ValveConfigurator
-              key={cid}
-              productIndex={assembledProducts.length + idx}
-              onProductComplete={handleProductComplete(cid)}
-              onProductRemove={
-                assembledProducts.length > 0 || activeConfigIds.length > 1
-                  ? () => removeActiveConfig(cid)
-                  : undefined
+          {activeConfigIds.map((cid, idx) => {
+            let initialSpecSeed:
+              | { catalog_category: string; field_values: Record<string, string>; quantity?: number }
+              | undefined
+            if (matcherSeed?.catalogKey) {
+              const lines = matcherSeed.lines
+              if (lines && lines.length > 0) {
+                const L = lines[idx] ?? { filledCascade: {} as Record<string, string> }
+                const q = L.quantity
+                initialSpecSeed = {
+                  catalog_category: matcherSeed.catalogKey,
+                  field_values: L.filledCascade ?? {},
+                  ...(typeof q === 'number' && q > 0 ? { quantity: Math.floor(q) } : {}),
+                }
+              } else if (idx === 0) {
+                initialSpecSeed = {
+                  catalog_category: matcherSeed.catalogKey,
+                  field_values: matcherSeed.filledCascade ?? {},
+                }
               }
-            />
-          ))}
+            }
+            return (
+              <ValveConfigurator
+                key={`${cid}-${matcherSeedVersion}`}
+                productIndex={assembledProducts.length + idx}
+                suppliers={suppliers}
+                suppliersLoading={suppliersLoading}
+                initialSpecSeed={initialSpecSeed}
+                onProductComplete={handleProductComplete(cid)}
+                onProductRemove={
+                  assembledProducts.length > 0 || activeConfigIds.length > 1
+                    ? () => removeActiveConfig(cid)
+                    : undefined
+                }
+              />
+            )
+          })}
 
           {errors.products && <p className="text-[12px] text-red-600">{errors.products}</p>}
+          {errors.supplier && <p className="text-[12px] text-red-600">{errors.supplier}</p>}
+          {errors.pricing && <p className="text-[12px] text-red-600">{errors.pricing}</p>}
 
           {canAddMore && activeConfigIds.length === 0 && (
             <Button
@@ -546,49 +2293,337 @@ export default function ManualEntryForm({ onSubmitManual, isProcessing }: Props)
         </div>
       </section>
 
-      {/* ── Additional Options ──────────────────────────────────────── */}
-      <section className="rounded-xl border border-surface-border bg-white p-5 shadow-sm">
-        <h2 className="text-[15px] font-semibold text-gray-900">Additional Options</h2>
-        <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <div className="space-y-1.5">
-            <div className="text-[10px] font-medium uppercase tracking-wide text-[#8A9488]">Priority</div>
-            <Select
-              value={priority}
-              onValueChange={(v) => setPriority(v as 'Normal' | 'High' | 'Urgent')}
-            >
-              <SelectTrigger className="h-10 w-full min-w-0">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {(['Normal', 'High', 'Urgent'] as const).map((p) => (
-                  <SelectItem key={p} value={p}>
-                    {p}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+      {/* ── Net total & taxes ─────────────────────────────────────── */}
+      {assembledProducts.length > 0 && (
+        <section className="rounded-xl border border-surface-border bg-white p-5 shadow-sm border-t-2 border-t-brand-navy-200">
+          <h2 className="text-[15px] font-semibold text-gray-900">Net total &amp; taxes</h2>
+          <p className="mt-1 text-[13px] text-surface-muted">
+            Item total is the sum of quoted line prices. P&amp;F and freight (when enabled) are added to
+            form the subtotal; GST @ 18% is calculated on that subtotal. P&amp;F and freight can each be
+            entered as a flat amount (₹) or as a percentage of item total; leave blank to use the default
+            3% for P&amp;F when enabled.
+          </p>
+          <div className="mt-4 space-y-3 text-[13px]">
+            <div className="rounded-lg border border-surface-border bg-surface-page p-3">
+              <p className="text-[11px] font-medium uppercase tracking-wide text-[#8A9488]">Line totals</p>
+              <ul className="mt-2 space-y-2">
+                {assembledProducts.map((p) => {
+                  const u = p.unit_price
+                  const ok = isPositivePrice(u)
+                  const line = ok ? Number(u) * p.quantity : null
+                  return (
+                    <li key={p.id} className="flex flex-col gap-0.5 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
+                      <span className="min-w-0 font-medium text-gray-900">{assemblyLabel(p)}</span>
+                      <span className="shrink-0 font-mono text-[12px] sm:text-[13px]">
+                        {ok ? (
+                          <>
+                            {p.quantity} {p.unit || 'Nos'} × {formatCurrency(Number(u))} ={' '}
+                            {formatCurrency(line!)}
+                          </>
+                        ) : (
+                          <span className="text-brand-gold-700">{PRICE_TBD_LABEL}</span>
+                        )}
+                      </span>
+                    </li>
+                  )
+                })}
+              </ul>
+            </div>
+            <div className="rounded-lg border border-surface-border bg-[#FAFAF8] p-4">
+              <div className="grid grid-cols-[1fr_8.5rem] items-center gap-x-3 gap-y-0.5 text-[13px]">
+                <span className="text-surface-muted">Item total</span>
+                <span className={NET_TOTAL_AMOUNT_COL}>
+                  {netOrderTotals?.subtotal != null ? formatCurrency(netOrderTotals.subtotal) : '—'}
+                </span>
+                <NetChargeRow
+                  label="P&amp;F"
+                  checkboxAriaLabel="Apply P and F charges"
+                  checked={pfApplicable}
+                  onCheckedChange={setPfApplicable}
+                  controlsDisabled={!pfApplicable || netOrderTotals?.subtotal == null}
+                  mode={pfMode}
+                  onModePercent={() => setPfMode('percent')}
+                  onModeAmount={() => setPfMode('amount')}
+                  draft={pfAmountDraft}
+                  onDraftChange={setPfAmountDraft}
+                  percentPlaceholder={String(DEFAULT_PF_PERCENT)}
+                  amountPlaceholder={
+                    netOrderTotals?.defaultPf != null
+                      ? netOrderTotals.defaultPf.toFixed(2)
+                      : '0.00'
+                  }
+                  percentAriaLabel="P and F as percent of item total"
+                  amountAriaLabel="P and F amount in INR"
+                  appliedAmount={netOrderTotals?.pf}
+                />
+                <NetChargeRow
+                  label="Freight"
+                  checkboxAriaLabel="Apply freight"
+                  checked={freightApplicable}
+                  onCheckedChange={setFreightApplicable}
+                  controlsDisabled={!freightApplicable || netOrderTotals?.subtotal == null}
+                  mode={freightMode}
+                  onModePercent={() => setFreightMode('percent')}
+                  onModeAmount={() => setFreightMode('amount')}
+                  draft={freightDraft}
+                  onDraftChange={setFreightDraft}
+                  percentPlaceholder="e.g. 2"
+                  amountPlaceholder="0.00"
+                  percentAriaLabel="Freight as percent of item total"
+                  amountAriaLabel="Freight amount in INR"
+                  appliedAmount={netOrderTotals?.freight}
+                />
+                <span className="pt-1 font-medium text-gray-900">Subtotal (before tax)</span>
+                <span className={cn(NET_TOTAL_AMOUNT_COL, 'pt-1 font-medium text-gray-900')}>
+                  {netOrderTotals?.taxableSubtotal != null
+                    ? formatCurrency(netOrderTotals.taxableSubtotal)
+                    : '—'}
+                </span>
+                <span className="text-surface-muted">GST @ 18%</span>
+                <span className={NET_TOTAL_AMOUNT_COL}>
+                  {netOrderTotals?.gst != null ? formatCurrency(netOrderTotals.gst) : '—'}
+                </span>
+              </div>
+              <div className="mt-3 grid grid-cols-[1fr_8.5rem] items-center gap-x-3 border-t border-surface-border pt-3 text-[13px] font-semibold text-gray-900">
+                <span>Net total (incl. taxes)</span>
+                <span className={cn(NET_TOTAL_AMOUNT_COL, 'text-brand-green-700')}>
+                  {netOrderTotals?.grand != null ? formatCurrency(netOrderTotals.grand) : '—'}
+                </span>
+              </div>
+            </div>
+            {netOrderTotals?.hasUnpriced && (
+              <p className="text-[12px] text-brand-gold-700">
+                Items marked {PRICE_TBD_LABEL} are excluded from item total and net total until a list price is available.
+              </p>
+            )}
           </div>
-          <div className="space-y-1.5 sm:col-span-2">
-            <div className="text-[10px] font-medium uppercase tracking-wide text-[#8A9488]">Notes</div>
-            <Textarea
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              className="min-h-[90px]"
-              placeholder="Any special requirements, delivery location, deadline..."
-            />
-          </div>
-        </div>
-      </section>
+        </section>
+      )}
+
+      {false && assembledProducts.length > 0 && (
+        <section className="rounded-xl border border-surface-border bg-white p-5 shadow-sm border-t-2 border-t-brand-navy-200">
+          <h2 className="text-[15px] font-semibold text-gray-900">Pricing &amp; supplier</h2>
+          <p className="mt-1 text-[13px] text-surface-muted">
+            Totals use margin / supplier discount from supplier pricing. Customer discount is set per quote line.
+          </p>
+          {suppliers.length === 0 ? (
+            <p className="mt-3 text-[13px] text-surface-muted">
+              No active suppliers configured — quotes use assembly estimates only. Add suppliers under Masters.
+            </p>
+          ) : (
+            <div className="mt-4 space-y-4">
+              {pricingLoading ? (
+                <p className="text-[13px] text-surface-muted">Loading supplier prices…</p>
+              ) : (
+                <div className="overflow-x-auto rounded-lg border border-surface-border">
+                  <table className="w-full min-w-[640px] border-collapse text-left text-[12px]">
+                    <thead>
+                      <tr className="bg-[#F4F5F0] text-[11px] font-medium uppercase tracking-wide text-[#8A9488]">
+                        <th className="px-3 py-2">Product</th>
+                        <th className="px-3 py-2">Supplier price</th>
+                        <th className="px-3 py-2">Cost to Parth</th>
+                        <th className="px-3 py-2">Selling (unit)</th>
+                        <th className="px-3 py-2">Quote unit (temp)</th>
+                        <th className="px-3 py-2">Customer discount (%)</th>
+                        <th className="px-3 py-2 text-right">Line total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {assembledProducts.map((p) => {
+                        const pc = productCalcs.find((c) => c.productId === p.id)
+                        const overrideRaw = (tempQuoteUnitByProduct[p.id] ?? '').trim()
+                        const overrideNum =
+                          overrideRaw && Number.isFinite(Number(overrideRaw)) && Number(overrideRaw) > 0
+                            ? Number(overrideRaw)
+                            : null
+                        if (!pc) {
+                          return (
+                            <tr key={p.id} className="border-b border-[#E2E6DC]">
+                              <td className="px-3 py-2">{assemblyLabel(p)}</td>
+                              <td colSpan={6} className="px-3 py-2 text-surface-muted">
+                                —
+                              </td>
+                            </tr>
+                          )
+                        }
+                        if (!pc.ok) {
+                          return (
+                            <tr key={p.id} className="border-b border-[#E2E6DC]">
+                              <td className="px-3 py-2">{pc.label}</td>
+                              <td colSpan={3} className="px-3 py-2 text-amber-800">
+                                Price not configured for this supplier — {pc.missing.join(', ')}
+                              </td>
+                              <td className="px-3 py-2">
+                                <Input
+                                  value={tempQuoteUnitByProduct[p.id] ?? ''}
+                                  onChange={(e) =>
+                                    setTempQuoteUnitByProduct((cur) => ({ ...cur, [p.id]: e.target.value }))
+                                  }
+                                  className="h-8 w-32 font-mono"
+                                  placeholder="e.g. 12500"
+                                />
+                                <p className="mt-1 text-[10px] text-surface-muted">
+                                  Temporary quote price (doesn&apos;t change Masters)
+                                </p>
+                              </td>
+                              <td className="px-3 py-2">
+                                <Input
+                                  value={customerDiscountByProduct[p.id] ?? ''}
+                                  onChange={(e) =>
+                                    setCustomerDiscountByProduct((cur) => ({ ...cur, [p.id]: e.target.value }))
+                                  }
+                                  className="h-8 w-32 font-mono"
+                                  placeholder={defaultClientDiscount != null ? String(defaultClientDiscount) : '0'}
+                                />
+                              </td>
+                              <td className="px-3 py-2 text-right font-mono text-surface-muted">
+                                {overrideNum != null
+                                  ? formatCurrency(
+                                      overrideNum *
+                                        p.quantity *
+                                        (1 -
+                                          ((Number(customerDiscountByProduct[p.id]) || defaultClientDiscount || 0) /
+                                            100)),
+                                    )
+                                  : '—'}
+                              </td>
+                            </tr>
+                          )
+                        }
+                        const listSum = pc.rows.reduce((s, r) => s + r.calc.list_price, 0)
+                        const costSum = pc.rows.reduce((s, r) => s + r.calc.cost_to_parth, 0)
+                        const discountPct = Math.min(
+                          100,
+                          Math.max(0, Number(customerDiscountByProduct[p.id] ?? '') || defaultClientDiscount || 0),
+                        )
+                        const effectiveUnit = (overrideNum ?? pc.assemblyUnit) * (1 - discountPct / 100)
+                        const effectiveLine = effectiveUnit * p.quantity
+                        return (
+                          <tr key={p.id} className="border-b border-[#E2E6DC]">
+                            <td className="px-3 py-2 font-medium text-gray-900">{pc.label}</td>
+                            <td className="px-3 py-2 font-mono">{formatCurrency(listSum)}</td>
+                            <td className="px-3 py-2 font-mono">{formatCurrency(costSum)}</td>
+                            <td className="px-3 py-2 font-mono">{formatCurrency(pc.assemblyUnit)}</td>
+                            <td className="px-3 py-2">
+                              <Input
+                                value={tempQuoteUnitByProduct[p.id] ?? ''}
+                                onChange={(e) =>
+                                  setTempQuoteUnitByProduct((cur) => ({ ...cur, [p.id]: e.target.value }))
+                                }
+                                className="h-8 w-32 font-mono"
+                                placeholder="(optional)"
+                              />
+                            </td>
+                            <td className="px-3 py-2">
+                              <Input
+                                value={customerDiscountByProduct[p.id] ?? ''}
+                                onChange={(e) =>
+                                  setCustomerDiscountByProduct((cur) => ({ ...cur, [p.id]: e.target.value }))
+                                }
+                                className="h-8 w-32 font-mono"
+                                placeholder={defaultClientDiscount != null ? String(defaultClientDiscount) : '0'}
+                              />
+                            </td>
+                            <td className="px-3 py-2 text-right font-mono">
+                              {formatCurrency(effectiveLine)}
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {errors.pricing && <p className="text-[12px] text-red-600">{errors.pricing}</p>}
+
+              {pricingTotals && (
+                <div className="rounded-lg border border-surface-border bg-surface-page p-4 text-[13px]">
+                  <div className="flex justify-between">
+                    <span>Subtotal</span>
+                    <span className="font-mono">{formatCurrency(pricingTotals?.subtotal ?? 0)}</span>
+                  </div>
+                  <div className="mt-1 flex justify-between text-surface-muted">
+                    <span>GST @ 18%</span>
+                    <span className="font-mono">{formatCurrency(pricingTotals?.gst ?? 0)}</span>
+                  </div>
+                  <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-surface-muted">
+                    <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={pfApplicable}
+                        onChange={(e) => setPfApplicable(e.target.checked)}
+                        aria-label="Apply P and F charges"
+                        className="size-3.5 shrink-0 rounded border-[#B8BFB4] text-brand-green-600 focus:ring-brand-green-500/30"
+                      />
+                      <span>P&amp;F @ 3%</span>
+                    </label>
+                    <Input
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      disabled={!pfApplicable}
+                      value={pfAmountDraft}
+                      onChange={(e) => setPfAmountDraft(e.target.value)}
+                      placeholder={
+                        pricingTotals?.defaultPf != null
+                          ? pricingTotals?.defaultPf.toFixed(2)
+                          : '0.00'
+                      }
+                      className="h-8 w-32 shrink-0 font-mono text-right"
+                      aria-label="P and F amount in INR"
+                    />
+                  </div>
+                  <div className="mt-2 flex justify-between border-t border-surface-border pt-2 font-semibold text-gray-900">
+                    <span>Grand total</span>
+                    <span className="font-mono">{formatCurrency(pricingTotals?.grand ?? 0)}</span>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </section>
+      )}
+      </>
+      ) : null}
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <p className="text-[13px] text-surface-muted">{summaryText}</p>
+        <div className="min-w-0">
+          <p className="text-[13px] text-surface-muted">{summaryText}</p>
+          {showProductsSection &&
+            assembledProducts.length > 0 &&
+            !pricingReady &&
+            !suppliersLoading && (
+              <p className="mt-1 text-[12px] text-red-600">
+                {errors.supplier ||
+                  'Complete supplier and pricing for each product before generating the quotation.'}
+              </p>
+            )}
+          {suppliersLoading && assembledProducts.length > 0 && (
+            <p className="mt-1 text-[12px] text-surface-muted">Loading suppliers…</p>
+          )}
+          {Object.keys(errors).length > 0 && (
+            <div className="mt-1 space-y-0.5">
+              {Object.values(errors).map((msg) => (
+                <p key={msg} className="text-[12px] text-red-600">
+                  {msg}
+                </p>
+              ))}
+            </div>
+          )}
+        </div>
         <Button
           type="button"
           onClick={submit}
-          disabled={isProcessing}
+          disabled={
+            isProcessing ||
+            suppliersLoading ||
+            (showProductsSection && supplierRequired && !pricingReady) ||
+            (stage === 'client' && !onCreateEnquiry)
+          }
           className="h-12 bg-brand-green-500 text-white hover:bg-brand-green-600"
         >
-          {isProcessing ? 'Processing…' : 'Process →'}
+          {submitLabel}
         </Button>
       </div>
     </div>

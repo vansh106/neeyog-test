@@ -1,0 +1,478 @@
+/**
+ * Shared helpers: manual configurator (AssembledProduct) ↔ API ManualLineItem shape.
+ */
+
+import type {
+  AssembledProduct,
+  ManualLineItem,
+  OperatorKey,
+  ProductSizeOption,
+  ValveProduct,
+} from '@/types'
+import { isPositivePrice } from '@/lib/utils'
+import { isTemporaryAccessory } from '@/lib/accessoriesNav'
+import {
+  isHoseCatalogCategory,
+  isFittingCatalogCategory,
+  isOthersCatalogCategory,
+  isTemporaryCatalogCategory,
+  isTemporaryFittingSelection,
+  fittingCategoryLabel,
+} from '@/lib/configuratorProductFlow'
+import {
+  damperDisplayTitle,
+  damperFieldsForKey,
+  isDamperCatalogCategory,
+} from '@/lib/damperSchema'
+import {
+  formatHoseLength,
+  hoseLengthToMeters,
+  type HoseLengthUnit,
+} from '@/lib/hoseLengthPricing'
+
+const HOSE_CASCADE_KEYS = [
+  'variant_type',
+  'size_id_mm',
+  'temperature_range',
+  'wall_thickness',
+] as const
+
+const VALVE_CASCADE_KEYS = [
+  'variant_type',
+  'product_sheet',
+  'construction',
+  'valve_size',
+  'bore_type',
+  'end_connection',
+  'pressure',
+  'body',
+  'ball_disc',
+  'ball',
+  'stem',
+  'seat',
+  'fasteners',
+] as const
+
+import {
+  FITTING_CASCADE_KEYS,
+  collapseDuplicateFittingCascade,
+  fittingCascadeFields,
+} from '@/lib/hoseFittingDescription'
+
+function productCascadeFields(
+  product: ValveProduct,
+  keys: readonly string[],
+  keyPrefix = '',
+): Record<string, string> {
+  const out: Record<string, string> = {}
+  const row = product as unknown as Record<string, string | null | undefined>
+  for (const field of keys) {
+    const raw = row[field]
+    if (raw == null || String(raw).trim() === '') continue
+    const cascadeKey = keyPrefix ? `${keyPrefix}_${field}` : field
+    out[cascadeKey] = String(raw).trim()
+  }
+  return out
+}
+
+function assemblyProductTitle(p: AssembledProduct): string {
+  const v = p.valve
+  if (!v) return 'Assembly'
+  if (p.is_temporary || isTemporaryCatalogCategory(v.catalog_category)) {
+    return (v.temporary_description ?? v.type).trim() || 'Temporary product'
+  }
+  if (isOthersCatalogCategory(v.catalog_category)) {
+    return v.type?.trim() || 'Other product'
+  }
+  if (v.catalog_category && isDamperCatalogCategory(v.catalog_category)) {
+    return damperDisplayTitle(v.catalog_category, v.damper_field_values ?? {})
+  }
+  if (isHoseCatalogCategory(v.catalog_category)) {
+    const parts = [v.type, v.variant_type, v.size_id_mm].filter(Boolean)
+    if (p.hose_length != null) {
+      parts.push(formatHoseLength(p.hose_length, (p.hose_length_unit ?? 'm') as HoseLengthUnit))
+    }
+    return parts.join(' — ') || 'Hose'
+  }
+  if (isFittingCatalogCategory(v.catalog_category)) {
+    const parts = [
+      fittingCategoryLabel(v.catalog_category),
+      v.variant_type,
+      v.size_mm,
+    ].filter(Boolean)
+    return parts.join(' — ') || 'Hose fitting'
+  }
+  return [v.type, v.construction, v.valve_size].filter(Boolean).join(' — ') || 'Product'
+}
+
+export function uuidv4(): string {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID()
+  return Math.random().toString(16).slice(2) + '-' + Date.now().toString(16)
+}
+
+export function operatorLabel(k: OperatorKey | null): string {
+  switch (k) {
+    case 'bare_shaft':
+      return 'Bare Shaft'
+    case 'manual':
+      return 'Manual'
+    case 'gear_box':
+      return 'Gear Box'
+    case 'da':
+      return 'Double Acting (DA)'
+    case 'sa':
+      return 'Single Acting (SA)'
+    case 'electric_actuator':
+      return 'Electric Actuator'
+    case 'pneumatic_rack_pinion':
+      return 'Pneumatic Rack and Pinion Actuator'
+    case 'pneumatic_cylinder':
+      return 'Pneumatic Cylinder'
+    default:
+      return '—'
+  }
+}
+
+export type CatalogPart = { label: string; catalog_table: string; catalog_row_id: string }
+
+export function valveTypeToLegacyCatalogTable(
+  valveType: string | null | undefined,
+): 'butterfly_valve' | 'ball_valve' | null {
+  const t = (valveType || '').toLowerCase()
+  if (t.includes('butterfly')) return 'butterfly_valve'
+  if (t.includes('ball')) return 'ball_valve'
+  return null
+}
+
+export function valveCatalogTable(v: ValveProduct | null | undefined): string | null {
+  if (v?.catalog_category) return v.catalog_category
+  return valveTypeToLegacyCatalogTable(v?.type)
+}
+
+type AssemblyComponentPricingEntry = {
+  enabled?: boolean
+  supplier_id?: string | null
+  supplier_name?: string | null
+  final_price?: number | null
+  temp_price?: number | null
+}
+
+/** Hose fitting ingested as free-text (priced manually on review). */
+export function isManualPricedAssemblyComponent(
+  key: string,
+  p: AssembledProduct,
+): boolean {
+  if (key !== 'fitting_end_1' && key !== 'fitting_end_2') return false
+  const fit = key === 'fitting_end_1' ? (p.fitting_end_1 ?? p.fitting) : p.fitting_end_2
+  return fit != null && isTemporaryFittingSelection(fit.catalog_category)
+}
+
+function assemblyComponentPricingReady(
+  key: string,
+  entry: AssemblyComponentPricingEntry,
+  p: AssembledProduct,
+): boolean {
+  if (!entry.enabled) return true
+  if (entry.supplier_id) return true
+  if (isManualPricedAssemblyComponent(key, p)) {
+    return isPositivePrice(entry.final_price ?? entry.temp_price)
+  }
+  return isPositivePrice(entry.final_price ?? entry.temp_price)
+}
+
+/** Whether an assembled line can proceed to quotation (supplier + pricing rules). */
+export function isAssemblyPricingReady(
+  p: AssembledProduct,
+  supplierRequired: boolean,
+): boolean {
+  if (!supplierRequired) return true
+  if (p.supplier_id) return true
+  if (!isPositivePrice(p.unit_price)) return false
+  const cp = p.component_pricing
+  if (!cp) return isPositivePrice(p.unit_price)
+  const enabled = Object.entries(cp).filter(([, c]) => c?.enabled)
+  if (enabled.length === 0) return isPositivePrice(p.unit_price)
+  return enabled.every(([key, c]) => assemblyComponentPricingReady(key, c, p))
+}
+
+/** Maps ``catalogPartsForAssembly`` label → ``component_pricing`` key. */
+export function assemblyPartComponentKey(label: string): string {
+  const l = label.toLowerCase()
+  if (l === 'valve' || l === 'hose') return 'valve'
+  if (l.includes('fitting (end 1')) return 'fitting_end_1'
+  if (l.includes('fitting (end 2')) return 'fitting_end_2'
+  if (l === 'operator') return 'operator'
+  if (l === 'sov') return 'sov'
+  if (l.includes('limit switch')) return 'lsb'
+  if (l === 'positioner') return 'positioner'
+  if (l.includes('bracket')) return 'bracket'
+  return ''
+}
+
+/** Unit count for a catalog part on one hose assembly (End 1 qty 2 → multiplier 2). */
+export function assemblyPartUnitMultiplier(label: string, p: AssembledProduct): number {
+  const l = label.toLowerCase()
+  if (l === 'hose' && p.hose_length != null && p.hose_length > 0) {
+    return hoseLengthToMeters(p.hose_length, (p.hose_length_unit ?? 'm') as HoseLengthUnit)
+  }
+  if (l.includes('fitting (end 1') && (p.fitting_end_1_qty ?? 1) === 2) return 2
+  return 1
+}
+
+export function catalogPartsForAssembly(p: AssembledProduct): CatalogPart[] {
+  const parts: CatalogPart[] = []
+  const v = p.valve
+  if (v?.id && !isTemporaryCatalogCategory(v.catalog_category)) {
+    const ct = valveCatalogTable(v)
+    if (ct) parts.push({ label: 'Hose', catalog_table: ct, catalog_row_id: v.id })
+  }
+  const f1 = p.fitting_end_1 ?? p.fitting
+  if (f1?.id && f1.catalog_category && !isTemporaryFittingSelection(f1.catalog_category)) {
+    const qty = p.fitting_end_1_qty ?? 1
+    parts.push({
+      label: qty === 2 ? 'Fitting (End 1 ×2)' : 'Fitting (End 1)',
+      catalog_table: f1.catalog_category,
+      catalog_row_id: f1.id,
+    })
+  }
+  const f2 = p.fitting_end_2
+  if (f2?.id && f2.catalog_category && !isTemporaryFittingSelection(f2.catalog_category)) {
+    parts.push({
+      label: 'Fitting (End 2)',
+      catalog_table: f2.catalog_category,
+      catalog_row_id: f2.id,
+    })
+  }
+  if ((p.operator_key === 'da' || p.operator_key === 'sa') && p.operator_model?.id) {
+    parts.push({ label: 'Operator', catalog_table: 'operator', catalog_row_id: p.operator_model.id })
+  }
+  if (p.sov?.id && !isTemporaryAccessory(p.sov)) {
+    parts.push({ label: 'SOV', catalog_table: 'sov', catalog_row_id: p.sov.id })
+  }
+  if (p.limit_switch_box?.id && !isTemporaryAccessory(p.limit_switch_box)) {
+    parts.push({
+      label: 'Limit switch',
+      catalog_table: 'limit_switch_box',
+      catalog_row_id: p.limit_switch_box.id,
+    })
+  }
+  if (p.positioner?.id && !isTemporaryAccessory(p.positioner)) {
+    parts.push({
+      label: 'Positioner',
+      catalog_table: 'positioner',
+      catalog_row_id: p.positioner.id,
+    })
+  }
+  if (p.include_bracket && p.bracket?.id) {
+    parts.push({
+      label: 'Bracket / coupler',
+      catalog_table: 'brackets_coupler',
+      catalog_row_id: p.bracket.id,
+    })
+  }
+  return parts
+}
+
+export function assemblyLabel(p: AssembledProduct): string {
+  const v = p.valve
+  const f1 = p.fitting_end_1 ?? p.fitting
+  const f2 = p.fitting_end_2
+  if (!v && !f1 && !f2) return 'Assembly'
+  if (p.is_temporary || (v && isTemporaryCatalogCategory(v.catalog_category))) {
+    return (v?.temporary_description ?? v?.type ?? 'Temporary product').trim()
+  }
+  const hosePart = v
+    ? [
+        [v.type, v.construction, v.valve_size ?? v.size_id_mm].filter(Boolean).join(' — '),
+        p.hose_length != null
+          ? formatHoseLength(p.hose_length, (p.hose_length_unit ?? 'm') as HoseLengthUnit)
+          : null,
+      ]
+        .filter(Boolean)
+        .join(' — ')
+    : ''
+  const fit1Part = p.fitting_end_1_bare
+    ? 'Bare fitting'
+    : f1
+      ? [f1.variant_type, f1.size_mm as string | undefined].filter(Boolean).join(' — ')
+      : ''
+  const fit2Part = p.fitting_end_2_bare
+    ? 'Bare fitting'
+    : f2
+      ? [f2.variant_type, f2.size_mm as string | undefined].filter(Boolean).join(' — ')
+      : ''
+  const fitPart =
+    fit1Part && fit2Part
+      ? `${fit1Part} + ${fit2Part}`
+      : fit1Part
+        ? `${fit1Part}${(p.fitting_end_1_qty ?? 1) === 2 ? ' (×2)' : ''}`
+        : fit2Part
+  if (hosePart && fitPart) return `${hosePart} + ${fitPart}`
+  return hosePart || fitPart || 'Assembly'
+}
+
+/** Parse leading inch size like `2"` or `1 1/2"` from valve_size text. */
+export function parseSizeInch(valveSize: string | null | undefined): number | null {
+  if (!valveSize) return null
+  const m = valveSize.trim().match(/^(\d+)\s+(\d+)\/(\d+)\s*"?$/)
+  if (m) return Number(m[1]) + Number(m[2]) / Number(m[3])
+  const m2 = valveSize.trim().match(/^(\d+)\/(\d+)\s*"?$/)
+  if (m2) return Number(m2[1]) / Number(m2[2])
+  const m3 = valveSize.trim().match(/^(\d+(?:\.\d+)?)\s*"?$/)
+  if (m3) return Number(m3[1])
+  return null
+}
+
+export function parseSizeMm(valveSize: string | null | undefined): number | null {
+  if (!valveSize) return null
+  const mDn = valveSize.match(/DN\s*(\d+)/i)
+  if (mDn) return Number(mDn[1])
+  const mMm = valveSize.match(/(\d+)\s*MM/i)
+  if (mMm) return Number(mMm[1])
+  return null
+}
+
+/** Adapt an AssembledProduct into the ManualLineItem request shape. */
+export function assembledToLineItem(
+  p: AssembledProduct,
+  unitPriceOverride: number | null,
+  customerDiscountPct: number | null = null,
+): ManualLineItem {
+  const v = p.valve
+  const materialParts = v
+    ? [v.body, v.ball_disc ?? v.ball, v.stem, v.seat, v.fasteners].filter(Boolean)
+    : []
+  const material = materialParts.join(' / ') || ''
+  const name = assemblyProductTitle(p)
+
+  const catalogTable = v ? valveCatalogTable(v) : null
+  const rawCatalogId = v?.id ?? uuidv4()
+  const catalogId =
+    typeof rawCatalogId === 'string' && rawCatalogId.includes(':')
+      ? rawCatalogId
+      : catalogTable && rawCatalogId
+        ? `${catalogTable}:${rawCatalogId}`
+        : rawCatalogId
+
+  const resolvedUnit =
+    unitPriceOverride != null && isPositivePrice(unitPriceOverride)
+      ? unitPriceOverride
+      : isPositivePrice(p.unit_price)
+        ? p.unit_price
+        : null
+  const priceTbd = p.has_unknown_prices || !isPositivePrice(resolvedUnit)
+
+  const sel: ProductSizeOption = {
+    id: catalogId,
+    name,
+    size_inch: parseSizeInch(v?.valve_size ?? null),
+    size_mm: parseSizeMm(v?.valve_size ?? v?.size_id_mm ?? null),
+    material,
+    base_price: resolvedUnit,
+    unit: p.unit || 'Nos',
+    display_label: name,
+  }
+
+  const cascade: Record<string, string> = {}
+  if (v) {
+    if (p.is_temporary || isTemporaryCatalogCategory(v.catalog_category)) {
+      const desc = (v.temporary_description ?? v.type).trim()
+      if (desc) cascade.description = desc
+      if (p.temporary_product_family) cascade.product_family = p.temporary_product_family
+    } else if (isOthersCatalogCategory(v.catalog_category)) {
+      if (v.type) cascade.description = v.type.trim()
+    } else if (isDamperCatalogCategory(v.catalog_category)) {
+      const fv = v.damper_field_values ?? {}
+      for (const f of damperFieldsForKey(v.catalog_category!)) {
+        const val = fv[f.key]?.trim()
+        if (!val) continue
+        const cascadeKey = f.sub_label ? `${f.key}` : f.key
+        cascade[cascadeKey] = val
+      }
+    } else if (isHoseCatalogCategory(v.catalog_category)) {
+      Object.assign(cascade, productCascadeFields(v, HOSE_CASCADE_KEYS))
+    } else if (isFittingCatalogCategory(v.catalog_category)) {
+      Object.assign(cascade, productCascadeFields(v, FITTING_CASCADE_KEYS))
+    } else {
+      Object.assign(cascade, productCascadeFields(v, VALVE_CASCADE_KEYS))
+    }
+  }
+  if (p.hose_length != null) {
+    cascade.hose_length = formatHoseLength(
+      p.hose_length,
+      (p.hose_length_unit ?? 'm') as HoseLengthUnit,
+    )
+  }
+  if (p.fitting_end_1_bare) {
+    cascade.fitting_end_1 = 'Bare fitting'
+  } else {
+    const fit1 = p.fitting_end_1 ?? p.fitting
+    if (fit1) {
+      if (isTemporaryFittingSelection(fit1.catalog_category)) {
+        cascade.fitting_end_1 = (fit1.temporary_description ?? fit1.type).trim()
+      } else {
+        Object.assign(cascade, fittingCascadeFields(fit1, 'fitting_end_1'))
+      }
+      if ((p.fitting_end_1_qty ?? 1) === 2) cascade.fitting_end_1_qty = '2'
+    }
+  }
+  if (p.fitting_end_2_bare) {
+    cascade.fitting_end_2 = 'Bare fitting'
+  } else {
+    const fit2 = p.fitting_end_2
+    if (fit2) {
+      if (isTemporaryFittingSelection(fit2.catalog_category)) {
+        cascade.fitting_end_2 = (fit2.temporary_description ?? fit2.type).trim()
+      } else {
+        Object.assign(cascade, fittingCascadeFields(fit2, 'fitting_end_2'))
+      }
+    }
+  }
+
+  Object.assign(cascade, collapseDuplicateFittingCascade(cascade))
+
+  if (p.operator_key) {
+    cascade.operator = operatorLabel(p.operator_key)
+    if (p.operator_model) {
+      cascade.operator_model = p.operator_model.model_name
+      if (p.operator_model.size) cascade.operator_size = p.operator_model.size
+    }
+  }
+  if (p.sov) {
+    cascade.sov = isTemporaryAccessory(p.sov)
+      ? `${p.sov.temporary_description ?? p.sov.type} (custom)`
+      : p.sov.type
+  }
+  if (p.limit_switch_box) {
+    cascade.limit_switch_box = isTemporaryAccessory(p.limit_switch_box)
+      ? `${p.limit_switch_box.temporary_description ?? p.limit_switch_box.type} (custom)`
+      : p.limit_switch_box.type
+  }
+  if (p.positioner) {
+    cascade.positioner = isTemporaryAccessory(p.positioner)
+      ? `${p.positioner.temporary_description ?? p.positioner.type} (custom)`
+      : p.positioner.type
+  }
+  if (p.include_bracket && p.bracket) cascade.bracket_coupler = `Included (${p.bracket.size})`
+
+  const category =
+    p.is_temporary || isTemporaryCatalogCategory(v?.catalog_category)
+      ? 'temporary_product'
+      : isOthersCatalogCategory(v?.catalog_category)
+        ? v?.catalog_category ?? 'others'
+        : isDamperCatalogCategory(v?.catalog_category)
+          ? v?.catalog_category ?? 'fp_damper'
+          : catalogTable ?? 'unknown'
+
+  return {
+    id: p.id,
+    category,
+    cascadeSelections: cascade,
+    selectedProduct: sel,
+    quantity: p.quantity,
+    customer_discount_pct:
+      customerDiscountPct != null && Number.isFinite(customerDiscountPct) ? customerDiscountPct : undefined,
+    price_tbd: priceTbd,
+    component_pricing: p.component_pricing ?? undefined,
+  }
+}

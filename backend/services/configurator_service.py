@@ -1,7 +1,7 @@
 """Valve configurator service — cascading selection + assembly pricing.
 
 Powers the ManualEntryForm valve product builder. All reads go against the
-existing `catalog_*` tables (butterfly + ball valves, operators, brackets &
+existing `catalog_*` tables (butterfly valves, operators, brackets &
 couplers, SOV, limit switch box, positioner).
 """
 
@@ -10,12 +10,12 @@ from __future__ import annotations
 import re
 from typing import Any
 
+import sqlalchemy as sa
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import get_settings
 from db.sheet_models import (
-    CatalogBallValveRow,
     CatalogBracketsCouplerRow,
     CatalogButterflyValveRow,
     CatalogLimitSwitchRow,
@@ -23,6 +23,8 @@ from db.sheet_models import (
     CatalogPositionerRow,
     CatalogSovRow,
 )
+from masters import product_master
+from services import masters_service
 
 
 # ── Valve spec columns ────────────────────────────────────────────────────
@@ -40,24 +42,56 @@ VALVE_SPEC_COLUMNS: dict[str, list[str]] = {
         "seat",
         "fasteners",
     ],
-    "Ball Valve": [
-        "construction",
-        "valve_size",
-        "bore_type",
-        "end_connection",
-        "pressure",
-        "body",
-        "ball",
-        "stem",
-        "seat",
-        "fasteners",
-    ],
 }
 
 _VALVE_MODEL_BY_TYPE: dict[str, type] = {
     "Butterfly Valve": CatalogButterflyValveRow,
-    "Ball Valve": CatalogBallValveRow,
 }
+
+# First-step configurator: every sheet-backed product family except accessories / operators.
+_CONFIGURATOR_EXCLUDED_CATEGORIES = frozenset(
+    {
+        "operator",
+        "brackets_coupler",
+        "sov",
+        "limit_switch_box",
+        "positioner",
+        *masters_service.MASTERS_HIDDEN_SHEET_KEYS,
+    },
+)
+
+
+def list_valve_catalog_categories() -> list[dict[str, str]]:
+    """Stable API keys + labels for the manual valve picker (step 1).
+
+    Fittings (``fp_fittings_*``) are excluded — they are add-ons after qualifying hose sheets.
+    """
+    out: list[dict[str, str]] = []
+    for key, _model in product_master.SHEET_TABLES:
+        if key in _CONFIGURATOR_EXCLUDED_CATEGORIES:
+            continue
+        if key.startswith("fp_fittings_"):
+            continue
+        label = masters_service.CATEGORY_LABEL_BY_KEY.get(key, key.replace("_", " ").title())
+        out.append({"key": key, "label": label})
+    return out
+
+
+def _operator_sheet_filter_for_category(catalog_category: str | None, valve_type: str) -> str | None:
+    """Return ``operator_for`` ILIKE pattern for ``CatalogOperatorRow``, or None = no filter."""
+    if catalog_category == "butterfly_valve":
+        return "Butterfly Valve"
+    if catalog_category and catalog_category.startswith("fp_ball_valve_"):
+        return "Ball Valve"
+    if catalog_category:
+        return None
+    key = _valve_type_key(valve_type)
+    if key == "Butterfly Valve":
+        return "Butterfly Valve"
+    t = (valve_type or "").strip().lower()
+    if "ball" in t and "butterfly" not in t:
+        return "Ball Valve"
+    return None
 
 # Human-readable label per valve type for operator_options. Excel stores
 # inconsistent casing ("Ball Valve" vs "Ball valve"), so we normalize via ILIKE.
@@ -70,8 +104,6 @@ def _valve_type_key(valve_type: str) -> str:
     t = valve_type.strip().lower()
     if "butterfly" in t:
         return "Butterfly Valve"
-    if "ball" in t:
-        return "Ball Valve"
     return valve_type.strip()
 
 
@@ -168,47 +200,84 @@ async def get_distinct_values(
     return out
 
 
+async def get_full_valve_catalog(valve_type: str, db: AsyncSession) -> list[dict[str, Any]]:
+    """Return every catalog row for a legacy display valve type (maps to API category).
+
+    Delegates to ``masters_service.get_full_category_catalog`` so the configurator
+    stays aligned with Masters / Final_Products tables.
+    """
+    cat = _category_from_legacy_valve_display(valve_type)
+    if not cat:
+        raise ValueError(f"Unknown valve_type: {valve_type!r}")
+    rows = await masters_service.get_full_category_catalog(cat, db)
+    for r in rows:
+        rid = r.get("row_id")
+        if rid is not None and "id" not in r:
+            r["id"] = str(rid)
+        r["price_inr"] = None
+    return rows
+
+
+def _category_from_legacy_valve_display(valve_type: str) -> str | None:
+    key = _valve_type_key(valve_type)
+    if key == "Butterfly Valve":
+        return "butterfly_valve"
+    return None
+
+
+def _normalize_configurator_category(category: str | None, valve_type: str | None) -> str | None:
+    c = (category or "").strip()
+    if c and c in masters_service.SHEET_MODEL_BY_KEY and c not in _CONFIGURATOR_EXCLUDED_CATEGORIES:
+        return c
+    if valve_type:
+        return _category_from_legacy_valve_display(valve_type)
+    return None
+
+
 # ── FUNCTION 2: resolve_valve ─────────────────────────────────────────────
 async def resolve_valve(
-    valve_type: str,
+    *,
+    category: str | None,
+    valve_type: str | None,
     specs: dict[str, str],
     db: AsyncSession,
 ) -> dict | None:
-    """Find the matching valve row given all specs. Returns the first match."""
-    key = _valve_type_key(valve_type)
-    allowed = VALVE_SPEC_COLUMNS.get(key)
+    """Find the matching valve row given cascade field values (API category key)."""
+    cat = _normalize_configurator_category(category, valve_type)
+    if not cat:
+        return None
+    model = masters_service.SHEET_MODEL_BY_KEY.get(cat)
+    if model is None:
+        return None
+    allowed = masters_service.CASCADE_STEPS.get(cat, [])
     if not allowed:
         return None
-    model = _model_for_valve_type(valve_type)
 
-    stmt = select(model).where(
-        model.client_id == _active_client_id(),
-        model.variant_type.ilike(key),
-    )
-    for k, v in (specs or {}).items():
-        if k not in allowed:
-            continue
-        if v is None or not str(v).strip():
-            continue
-        col = getattr(model, k, None)
+    stmt = select(model).where(model.client_id == _active_client_id())
+    for field in allowed:
+        raw = (specs or {}).get(field)
+        if raw is None or not str(raw).strip():
+            return None
+        col = getattr(model, field, None)
         if col is None:
-            continue
-        stmt = stmt.where(col == v)
+            return None
+        stmt = stmt.where(col == str(raw).strip())
 
-    result = await db.execute(stmt.limit(1))
-    row = result.scalar_one_or_none()
-    if row is None:
+    rows = (await db.execute(stmt.limit(2))).scalars().all()
+    if not rows:
         return None
+    row = rows[0]
 
+    label = masters_service.CATEGORY_LABEL_BY_KEY.get(cat, cat)
     out: dict[str, Any] = {
         "id": str(row.row_id),
-        "type": key,
+        "type": label,
+        "catalog_category": cat,
+        "base_price": None,
+        "has_price": False,
     }
     for col_name in allowed:
         out[col_name] = getattr(row, col_name, None)
-    price = getattr(row, "price_inr", None)
-    out["base_price"] = float(price) if price is not None else None
-    out["has_price"] = price is not None
     return out
 
 
@@ -221,56 +290,69 @@ def _row_to_operator(r: CatalogOperatorRow) -> dict | None:
         "id": str(r.row_id),
         "model_name": r.model_name,
         "size": r.size_text,
-        "base_price": float(r.price_inr) if r.price_inr is not None else None,
+        "base_price": None,
         "operator_type": otype,
     }
 
 
+def _is_ball_or_butterfly_configurator_category(catalog_category: str | None) -> bool:
+    if catalog_category == "butterfly_valve":
+        return True
+    if catalog_category and catalog_category.startswith("fp_ball_valve_"):
+        return True
+    from services.damper_schema import is_damper_catalog_key
+
+    return bool(catalog_category and is_damper_catalog_key(catalog_category))
+
+
 async def get_operators_for_valve(
     valve_type: str,
-    construction: str,
+    construction: str,  # noqa: ARG001 — kept in signature for route compatibility
     valve_size: str,  # noqa: ARG001 — kept in signature for route compatibility
     db: AsyncSession,
+    *,
+    catalog_category: str | None = None,
 ) -> dict:
-    """Return every DA/SA actuator row that matches the valve's construct-way.
+    """Return DA/SA actuator models for the manual configurator.
 
-    The only link between a valve and an actuator row is the ``construct``
-    (2 Way vs 3 Way) — sizes don't line up cleanly (valves use mm/DN/bore,
-    actuators are imperial-only). So we *never* auto-match by size; instead
-    we hand the UI the full list for the construct and let the user pick the
-    actuator model + size they want.
+    Ball-valve and butterfly-valve flows list the full actuator master (no
+    construct-way or size_text matching). Legacy callers without a catalog
+    category still filter by ``operator_for`` when applicable.
     """
-    key = _valve_type_key(valve_type)
-    way = _extract_construct_way(construction)
+    op_pattern = _operator_sheet_filter_for_category(catalog_category, valve_type)
+    full_actuator_list = _is_ball_or_butterfly_configurator_category(catalog_category)
 
     da_operators: list[dict] = []
     sa_operators: list[dict] = []
 
-    if way:
-        stmt = (
-            select(CatalogOperatorRow)
-            .where(
-                CatalogOperatorRow.client_id == _active_client_id(),
-                CatalogOperatorRow.operator_for.ilike(key),
-                CatalogOperatorRow.construct.ilike(way),
+    stmt = select(CatalogOperatorRow).where(CatalogOperatorRow.client_id == _active_client_id())
+
+    if op_pattern and not full_actuator_list:
+        stmt = stmt.where(
+            sa.or_(
+                CatalogOperatorRow.operator_for.ilike(op_pattern),
+                CatalogOperatorRow.operator_for.ilike("all valves"),
+                CatalogOperatorRow.operator_for.is_(None),
+                CatalogOperatorRow.operator_for == "",
             )
-            .order_by(CatalogOperatorRow.size_text, CatalogOperatorRow.model_name)
         )
-        for r in (await db.execute(stmt)).scalars().all():
-            item = _row_to_operator(r)
-            if item is None:
-                continue
-            if item["operator_type"] == "da":
-                da_operators.append(item)
-            else:
-                sa_operators.append(item)
+    stmt = stmt.order_by(CatalogOperatorRow.model_name, CatalogOperatorRow.row_id).limit(600)
+
+    for r in (await db.execute(stmt)).scalars().all():
+        item = _row_to_operator(r)
+        if item is None:
+            continue
+        if item["operator_type"] == "da":
+            da_operators.append(item)
+        else:
+            sa_operators.append(item)
 
     return {
         "da_operators": da_operators,
         "sa_operators": sa_operators,
         "has_da": bool(da_operators),
         "has_sa": bool(sa_operators),
-        "construct_way": way,
+        "construct_way": None,
     }
 
 
@@ -279,8 +361,13 @@ async def get_bracket_for_valve(
     valve_type: str,
     valve_size: str,
     db: AsyncSession,
+    *,
+    catalog_category: str | None = None,
 ) -> dict | None:
-    key = _valve_type_key(valve_type)
+    eff_cat = catalog_category or _category_from_legacy_valve_display(valve_type)
+    if eff_cat != "butterfly_valve":
+        return None
+    key = "Butterfly Valve"
     if not valve_size:
         return None
     stmt = select(CatalogBracketsCouplerRow).where(
@@ -294,7 +381,7 @@ async def get_bracket_for_valve(
     return {
         "id": str(row.row_id),
         "size": row.size_text,
-        "price": float(row.price_inr) if row.price_inr is not None else None,
+        "price": None,
     }
 
 
@@ -312,7 +399,7 @@ async def get_all_accessories(db: AsyncSession) -> dict:
                     "id": str(r.row_id),
                     "sr_no": int(r.sr_no) if r.sr_no is not None else 0,
                     "type": r.variant_type or "",
-                    "price": float(r.price_inr) if r.price_inr is not None else None,
+                    "price": None,
                 }
             )
         return out
@@ -394,9 +481,11 @@ def calculate_assembly_price(
 def build_operator_options(
     da_operators: list[dict],
     sa_operators: list[dict],
+    *,
+    include_damper_operators: bool = False,
 ) -> list[dict]:
-    """Build the six fixed operator cards with current availability info."""
-    return [
+    """Build fixed operator cards with current availability info."""
+    options = [
         {
             "key": "bare_shaft",
             "label": "Bare Shaft",
@@ -448,3 +537,25 @@ def build_operator_options(
             "unlocks_accessories": True,
         },
     ]
+    if include_damper_operators:
+        options.extend(
+            [
+                {
+                    "key": "pneumatic_rack_pinion",
+                    "label": "Pneumatic Rack and Pinion Actuator",
+                    "description": "Pneumatic rack and pinion — price on request",
+                    "has_price": False,
+                    "price": None,
+                    "unlocks_accessories": True,
+                },
+                {
+                    "key": "pneumatic_cylinder",
+                    "label": "Pneumatic Cylinder",
+                    "description": "Pneumatic cylinder — price on request",
+                    "has_price": False,
+                    "price": None,
+                    "unlocks_accessories": True,
+                },
+            ]
+        )
+    return options

@@ -1,7 +1,8 @@
+import enum
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func, text
 from sqlalchemy.dialects.postgresql import JSON, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -10,6 +11,113 @@ from core.database import Base
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+class ClientCompany(Base):
+    __tablename__ = "client_companies"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    client_config: Mapped[str] = mapped_column(String(100), nullable=False, default="parth_valves", index=True)
+
+    company_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    gst_number: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    industry: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    website: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    erp_code: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    is_erp_synced: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    source: Mapped[str] = mapped_column(String(50), default="manual")
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    default_discount_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    total_enquiry_count: Mapped[int] = mapped_column(Integer, default=0)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
+    )
+
+    branches: Mapped[list["ClientBranch"]] = relationship(
+        "ClientBranch",
+        back_populates="company",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
+
+
+class ClientBranch(Base):
+    __tablename__ = "client_branches"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("client_companies.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    branch_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    is_headquarters: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    contact_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    designation: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+
+    address_line1: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    address_line2: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    city: Mapped[str] = mapped_column(String(100), nullable=False)
+    state: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    pincode: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    country: Mapped[str] = mapped_column(String(100), nullable=False, default="India")
+
+    branch_erp_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
+
+    enquiry_count: Mapped[int] = mapped_column(Integer, default=0)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
+    )
+
+    company: Mapped["ClientCompany"] = relationship("ClientCompany", back_populates="branches")
+    employees: Mapped[list["ClientEmployee"]] = relationship(
+        "ClientEmployee",
+        back_populates="branch",
+        cascade="all, delete-orphan",
+    )
+
+
+class ClientEmployee(Base):
+    """Contact person at a client branch (quotes can be attributed per employee)."""
+
+    __tablename__ = "client_employees"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    branch_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("client_branches.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    address_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    full_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    department: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    designation: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
+    )
+
+    branch: Mapped["ClientBranch"] = relationship("ClientBranch", back_populates="employees")
 
 
 class Enquiry(Base):
@@ -21,15 +129,22 @@ class Enquiry(Base):
     input_type: Mapped[str] = mapped_column(String(50), nullable=False)
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="received")
 
-    # Client identification (resolved during pipeline, before quoting)
-    client_id: Mapped[uuid.UUID | None] = mapped_column(
+    company_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("client_records.id"),
+        ForeignKey("client_companies.id", ondelete="SET NULL"),
         nullable=True,
+        index=True,
+    )
+    branch_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("client_branches.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
     )
     erp_export_path: Mapped[str | None] = mapped_column(String, nullable=True)
 
-    client: Mapped["ClientRecord | None"] = relationship()
+    company: Mapped["ClientCompany | None"] = relationship("ClientCompany")
+    branch: Mapped["ClientBranch | None"] = relationship("ClientBranch")
     parsed_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     matched_products: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     confidence_score: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -37,6 +152,14 @@ class Enquiry(Base):
     missing_fields: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     assigned_to: Mapped[str | None] = mapped_column(String(255), nullable=True)
     flow_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    #: Whether client/product details were complete at intake: ``complete`` | ``incomplete``.
+    enquiry_detail_type: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="incomplete", server_default="incomplete"
+    )
+    #: Listing quote status: ``not_quoted`` | ``quoted``.
+    enquiry_quote_status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="not_quoted", server_default="not_quoted"
+    )
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     processing_started_at: Mapped[datetime | None] = mapped_column(
@@ -46,6 +169,34 @@ class Enquiry(Base):
         DateTime(timezone=True), nullable=True
     )
     # Tracks when background processing started and finished
+
+    mailbox_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("mailboxes.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    #: Snapshot for listing (set when enquiry is first persisted).
+    created_by_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_by_user: Mapped["User | None"] = relationship("User", foreign_keys=[created_by_user_id])
+
+    #: Human-readable ref: FY + 5-digit serial (e.g. ``262700089``); UUID ``id`` remains the primary key.
+    enquiry_number: Mapped[str | None] = mapped_column(String(20), nullable=True, unique=True, index=True)
+    #: Next CRM follow-up (editable from enquiry list).
+    next_follow_up_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    next_follow_up_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    follow_up_history: Mapped[list] = mapped_column(JSON, nullable=False, default=list, server_default=text("'[]'"))
+
+    is_archived: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false"), index=True
+    )
 
     quotations: Mapped[list["Quotation"]] = relationship(back_populates="enquiry")
 
@@ -70,29 +221,194 @@ class Quotation(Base):
     pf_rate: Mapped[float] = mapped_column(Float, nullable=False, default=3.0)
     pf_amount: Mapped[float] = mapped_column(Float, nullable=False)
     freight_note: Mapped[str] = mapped_column(String(255), nullable=False, default="Extra at actual")
+    freight_amount: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    freight_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
     total_amount: Mapped[float] = mapped_column(Float, nullable=False)
     validity_days: Mapped[int] = mapped_column(Integer, nullable=False, default=15)
-    status: Mapped[str] = mapped_column(String(50), nullable=False, default="draft")
+    #: Offer valid until (editable from quotation list).
+    validity_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    #: Next CRM follow-up (editable from quotation list).
+    next_follow_up_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    next_follow_up_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    follow_up_history: Mapped[list] = mapped_column(JSON, nullable=False, default=list, server_default=text("'[]'"))
+    #: CRM: po_received | lost | hold | ongoing
+    status: Mapped[str] = mapped_column(String(50), nullable=False, default="ongoing")
+    status_remarks: Mapped[str | None] = mapped_column(Text, nullable=True)
     pdf_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: PDF-only display tweaks (line descriptions/size, optional notes); does not change catalog / quote math.
+    pdf_display_overrides: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+    client_employee_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("client_employees.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
 
     enquiry: Mapped["Enquiry"] = relationship(back_populates="quotations")
+    client_employee: Mapped["ClientEmployee | None"] = relationship("ClientEmployee")
+
+    created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    #: Snapshot for listing (set at quote creation; kept if user is renamed or removed).
+    created_by_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_by_phone: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    created_by_user: Mapped["User | None"] = relationship("User", foreign_keys=[created_by_user_id])
+
+    is_archived: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false"), index=True
+    )
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+
+
+class QuotationTermTemplate(Base):
+    """Master list of terms & conditions snippets for quotations."""
+
+    __tablename__ = "quotation_term_templates"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    client_config: Mapped[str] = mapped_column(String(100), nullable=False, default="parth_valves", index=True)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class QuotationProductHistory(Base):
+    """Searchable snapshot of quoted product pricing per quote line."""
+
+    __tablename__ = "quotation_product_history"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    quotation_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("quotations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    enquiry_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("enquiries.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    client_config: Mapped[str] = mapped_column(String(100), nullable=False, default="parth_valves", index=True)
+
+    quote_number: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    quoted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow, index=True)
+    client_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    client_company: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    line_index: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    unit_price: Mapped[float] = mapped_column(Float, nullable=False)
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    line_total: Mapped[float] = mapped_column(Float, nullable=False)
+    currency: Mapped[str] = mapped_column(String(10), nullable=False, default="INR")
+
+    category: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    catalog_table: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    catalog_row_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
+
+    variant_type: Mapped[str | None] = mapped_column(Text, nullable=True)
+    construction: Mapped[str | None] = mapped_column(Text, nullable=True)
+    valve_size: Mapped[str | None] = mapped_column(Text, nullable=True)
+    end_connection: Mapped[str | None] = mapped_column(Text, nullable=True)
+    pressure: Mapped[str | None] = mapped_column(Text, nullable=True)
+    body: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ball_disc: Mapped[str | None] = mapped_column(Text, nullable=True)
+    stem: Mapped[str | None] = mapped_column(Text, nullable=True)
+    seat: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+
+
+class UserTier(str, enum.Enum):
+    SUPERADMIN = "superadmin"
+    ADMIN = "admin"
+    INDIAMART = "indiamart"
+    MEMBER = "member"
 
 
 class User(Base):
     __tablename__ = "users"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
-    name: Mapped[str] = mapped_column(String(255), nullable=False)
-    role: Mapped[str] = mapped_column(String(50), nullable=False, default="marketing")
+    email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
+    full_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
+    tier: Mapped[str] = mapped_column(String(50), nullable=False, default=UserTier.MEMBER.value)
+    job_title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    phone: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    monthly_booking_target: Mapped[float] = mapped_column(Float, nullable=False, default=1_000_000.0)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_first_login: Mapped[bool] = mapped_column(Boolean, default=True)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_login_ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+    reset_token: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    reset_token_expires: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    permissions: Mapped[list["UserPermission"]] = relationship(
+        "UserPermission",
+        primaryjoin="User.id == UserPermission.user_id",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+
+
+class UserPermission(Base):
+    """One row per permission string granted to a user."""
+
+    __tablename__ = "user_permissions"
+    __table_args__ = (UniqueConstraint("user_id", "permission", name="uq_user_permission"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    permission: Mapped[str] = mapped_column(String(100), nullable=False)
+
+    granted_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    granted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    user: Mapped["User"] = relationship(
+        "User",
+        back_populates="permissions",
+        foreign_keys=[user_id],
+    )
+
+
+class RefreshToken(Base):
+    __tablename__ = "refresh_tokens"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    token_hash: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    device_info: Mapped[str | None] = mapped_column(String(512), nullable=True)
 
 
 class EmailSyncState(Base):
@@ -104,11 +420,79 @@ class EmailSyncState(Base):
     baseline_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class Mailbox(Base):
+    """IMAP mailbox credentials (superadmin-managed)."""
+
+    __tablename__ = "mailboxes"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    display_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    email_address: Mapped[str] = mapped_column(String(255), nullable=False, unique=True, index=True)
+    imap_host: Mapped[str] = mapped_column(String(255), nullable=False, default="imap.gmail.com")
+    imap_port: Mapped[int] = mapped_column(Integer, nullable=False, default=993)
+    imap_folder: Mapped[str] = mapped_column(String(255), nullable=False, default="INBOX")
+    unread_only: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    credential_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    sync_state: Mapped["MailboxSyncState | None"] = relationship(
+        "MailboxSyncState",
+        back_populates="mailbox",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
+
+
+class MailboxSyncState(Base):
+    """Per-mailbox IMAP sync baseline (replaces singleton semantics for multi-mailbox)."""
+
+    __tablename__ = "mailbox_sync_state"
+
+    mailbox_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("mailboxes.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    baseline_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    mailbox: Mapped["Mailbox"] = relationship("Mailbox", back_populates="sync_state")
+
+
+class UserMailboxAccess(Base):
+    """Which mailboxes a user may view / process / trigger sync for."""
+
+    __tablename__ = "user_mailbox_access"
+    __table_args__ = (UniqueConstraint("user_id", "mailbox_id", name="uq_user_mailbox_access"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    mailbox_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("mailboxes.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    can_view: Mapped[bool] = mapped_column(Boolean, default=True)
+    can_process: Mapped[bool] = mapped_column(Boolean, default=True)
+    can_trigger_sync: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class ProcessedEmail(Base):
     __tablename__ = "processed_emails"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    message_id: Mapped[str] = mapped_column(String, unique=True, nullable=False, index=True)
+    mailbox_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("mailboxes.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    message_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
     sender_email: Mapped[str] = mapped_column(String, nullable=False)
     sender_name: Mapped[str | None] = mapped_column(String, nullable=True)
     subject: Mapped[str | None] = mapped_column(String, nullable=True)
@@ -136,33 +520,299 @@ class AuditLog(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
 
-class ClientRecord(Base):
-    __tablename__ = "client_records"
+class Supplier(Base):
+    """Vendor that supplies catalog products at negotiated list prices + discounts."""
+
+    __tablename__ = "suppliers"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    client_id: Mapped[str] = mapped_column(String(100), nullable=False, default="parth_valves", index=True)
 
-    # Core identity
-    company_name: Mapped[str] = mapped_column(String, nullable=False)
-    contact_name: Mapped[str | None] = mapped_column(String, nullable=True)
-    email: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
-    phone: Mapped[str | None] = mapped_column(String, nullable=True)
-    city: Mapped[str | None] = mapped_column(String, nullable=True)
-    country: Mapped[str] = mapped_column(String, default="India")
-
-    # ERP integration fields
-    # TODO: Populate from ERP when integration is ready
-    erp_code: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
-    is_erp_synced: Mapped[bool] = mapped_column(Boolean, default=False)
-
-    # Source of this record
-    source: Mapped[str] = mapped_column(String, default="email_parsed")
-
-    enquiry_count: Mapped[int] = mapped_column(Integer, default=1)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    primary_category_key: Mapped[str] = mapped_column(String(100), nullable=False, default="all", index=True)
+    contact_person: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    address: Mapped[str | None] = mapped_column(Text, nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-        onupdate=func.now(),
+    # Legacy: discount moved to supplier-category pricing. Kept for back-compat migrations.
+    default_discount_pct: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_preferred: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+
+    prices: Mapped[list["SupplierProductPrice"]] = relationship(
+        "SupplierProductPrice",
+        back_populates="supplier",
+        cascade="all, delete-orphan",
     )
+    category_pricing: Mapped[list["SupplierCategoryPricing"]] = relationship(
+        "SupplierCategoryPricing",
+        back_populates="supplier",
+        cascade="all, delete-orphan",
+    )
+    catalog_categories: Mapped[list["SupplierCatalogCategory"]] = relationship(
+        "SupplierCatalogCategory",
+        back_populates="supplier",
+        cascade="all, delete-orphan",
+    )
+
+
+class SupplierCatalogCategory(Base):
+    """Catalog sheets (masters ``catalog_table`` keys) a supplier is associated with."""
+
+    __tablename__ = "supplier_catalog_categories"
+    __table_args__ = (
+        UniqueConstraint("supplier_id", "category_key", name="uq_supplier_catalog_category"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    supplier_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("suppliers.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    category_key: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+
+    supplier: Mapped["Supplier"] = relationship("Supplier", back_populates="catalog_categories")
+
+
+class SupplierProductPrice(Base):
+    """List price from a supplier for one catalog row (polymorphic by catalog_table + catalog_row_id)."""
+
+    __tablename__ = "supplier_product_prices"
+    __table_args__ = (
+        UniqueConstraint("supplier_id", "catalog_table", "catalog_row_id", name="uq_supplier_product"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    supplier_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("suppliers.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    catalog_table: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    catalog_row_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+
+    list_price_inr: Mapped[float] = mapped_column(Float, nullable=False)
+    discount_pct_override: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    supplier: Mapped["Supplier"] = relationship("Supplier", back_populates="prices")
+
+    @property
+    def effective_discount_pct(self) -> float:
+        """Discount Parth gets from supplier for this line (override or supplier default)."""
+        if self.discount_pct_override is not None:
+            return float(self.discount_pct_override)
+        if self.supplier is not None:
+            return float(self.supplier.default_discount_pct)
+        return 0.0
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+
+
+class SupplierCategoryPricing(Base):
+    """Supplier-specific pricing variables, scoped per category (default = 'all')."""
+
+    __tablename__ = "supplier_category_pricing"
+    __table_args__ = (
+        UniqueConstraint("supplier_id", "category_key", name="uq_supplier_category_pricing"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    supplier_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("suppliers.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    category_key: Mapped[str] = mapped_column(String(100), nullable=False, default="all", index=True)
+
+    # The 3 variables: margin, supplier discount, customer discount.
+    margin_multiplier: Mapped[float | None] = mapped_column(Float, nullable=True)
+    supplier_discount_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    customer_discount_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+
+    supplier: Mapped["Supplier"] = relationship("Supplier", back_populates="category_pricing")
+
+
+class MasterSheetDefaultSupplier(Base):
+    """Default supplier for a masters catalog sheet (table + optional nav leaf)."""
+
+    __tablename__ = "master_sheet_default_suppliers"
+    __table_args__ = (
+        UniqueConstraint(
+            "client_id",
+            "catalog_table",
+            "nav_slug",
+            name="uq_master_sheet_default_supplier",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    client_id: Mapped[str] = mapped_column(String(100), nullable=False, default="parth_valves", index=True)
+    catalog_table: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    nav_slug: Mapped[str] = mapped_column(String(120), nullable=False, default="", index=True)
+    supplier_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("suppliers.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+
+    supplier: Mapped["Supplier"] = relationship("Supplier")
+
+
+class ClientPricingConfig(Base):
+    """Per-tenant (string client_id) margin + default customer discount + default supplier."""
+
+    __tablename__ = "client_pricing_configs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    client_id: Mapped[str] = mapped_column(String(100), nullable=False, unique=True, index=True)
+
+    margin_multiplier: Mapped[float] = mapped_column(Float, nullable=False, default=1.4)
+    default_customer_discount_pct: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+
+    default_supplier_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("suppliers.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+
+    default_supplier: Mapped["Supplier | None"] = relationship("Supplier")
+
+
+class PurchaseOrder(Base):
+    """Customer purchase order — optionally linked to a quotation."""
+
+    __tablename__ = "purchase_orders"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    po_number: Mapped[str] = mapped_column(String(50), unique=True, nullable=False, index=True)
+    so_number: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
+    so_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+
+    quotation_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("quotations.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    quote_number: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
+
+    client_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    client_company: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    client_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    client_phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    client_employee_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("client_employees.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    line_items: Mapped[list] = mapped_column(JSON, nullable=False)
+    subtotal: Mapped[float] = mapped_column(Float, nullable=False)
+    gst_rate: Mapped[float] = mapped_column(Float, nullable=False, default=18.0)
+    gst_amount: Mapped[float] = mapped_column(Float, nullable=False)
+    pf_rate: Mapped[float] = mapped_column(Float, nullable=False, default=3.0)
+    pf_amount: Mapped[float] = mapped_column(Float, nullable=False)
+    freight_note: Mapped[str] = mapped_column(String(255), nullable=False, default="Extra at actual")
+    freight_amount: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    freight_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
+    total_amount: Mapped[float] = mapped_column(Float, nullable=False)
+
+    primary_category: Mapped[str] = mapped_column(String(100), nullable=False, default="Others", index=True)
+    item_desc_short: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+
+    financial_config: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    pdf_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    quotation: Mapped["Quotation | None"] = relationship("Quotation", foreign_keys=[quotation_id])
+    client_employee: Mapped["ClientEmployee | None"] = relationship("ClientEmployee")
+
+    created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    created_by_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_by_user: Mapped["User | None"] = relationship("User", foreign_keys=[created_by_user_id])
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+
+
+class IndiaMartSyncState(Base):
+    """Singleton row tracking the last successful IndiaMart delta sync."""
+
+    __tablename__ = "indiamart_sync_state"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    last_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_sync_status: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    last_sync_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class IndiaMartQuery(Base):
+    """Lead/query pulled from IndiaMart CRM API (deduped by ``unique_query_id``)."""
+
+    __tablename__ = "indiamart_queries"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    unique_query_id: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    query_type: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    query_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    sender_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    sender_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    sender_mobile: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    sender_company: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    sender_city: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    sender_state: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    sender_address: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sender_country_iso: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    query_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    query_product_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    raw_payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+    enquiry_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("enquiries.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    picked_up_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    picked_up_by_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    picked_up_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    enquiry_number: Mapped[str | None] = mapped_column(String(20), nullable=True, index=True)
+    is_archived: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false"), index=True
+    )
+
+    enquiry: Mapped["Enquiry | None"] = relationship("Enquiry", foreign_keys=[enquiry_id])
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)

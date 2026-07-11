@@ -5,11 +5,25 @@
   "gst_number": "27AASFP6216F2ZY",
   "phone": "+91 7722076899",
   "email": "marketing@parthvalve.com",
+  "sales_email": "sales@parthvalve.com",
+  "prepared_by": "Sales Team",
+  "quotation_form_footer_ref": "PVH/MKT/04 Rev.No:02 Date:07/04/2025",
   "website": "www.parthvalve.com",
   "currency": "INR",
   "default_gst_rate": 18.0,
   "default_pf_rate": 3.0,
   "quote_validity_days": 15,
-  "product_categories": ["butterfly_valve", "hose", "fitting"],
-  "active_category_for_demo": "butterfly_valve"
+  "payment_terms": "50% advance along with PO; balance 50% against proforma invoice before dispatch.",
+  "delivery_period": "Within 5–6 working weeks from receipt of PO, advance payment and GAD approval.",
+  "bank_details": {
+    "account_name": "Parth Valves and Hoses LLP",
+    "bank": "IDFC First Bank",
+    "account_no": "10059117858",
+    "ifsc": "IDFB0041355",
+    "branch": "Aundh Branch",
+    "account_type": "OD Account",
+    "swift": "IDFBINBBMUM"
+  },
+  "product_categories": [],
+  "active_category_for_demo": ""
 }

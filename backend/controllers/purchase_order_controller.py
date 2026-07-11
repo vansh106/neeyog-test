@@ -1,0 +1,405 @@
+"""HTTP handlers for purchase orders."""
+
+import uuid
+from datetime import date
+
+from fastapi import HTTPException
+from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from core.auth_middleware import CurrentUser
+from core.exceptions import ProductNotFoundError
+from db.models import PurchaseOrder
+from services import purchase_order_service, quotation_service
+from services.quotation_description_sanitize import supplier_names_for_client
+
+
+def _po_api_dict(po: PurchaseOrder) -> dict:
+    po_type = "quoted" if po.quotation_id else "non_quoted"
+    return {
+        "po_id": str(po.id),
+        "po_number": po.po_number,
+        "so_number": po.so_number,
+        "so_date": po.so_date.isoformat() if po.so_date else None,
+        "quotation_id": str(po.quotation_id) if po.quotation_id else None,
+        "quote_number": po.quote_number,
+        "po_type": po_type,
+        "client_name": po.client_name,
+        "client_company": po.client_company,
+        "client_email": po.client_email,
+        "client_phone": po.client_phone,
+        "client_employee_id": str(po.client_employee_id) if po.client_employee_id else None,
+        "line_items": po.line_items if isinstance(po.line_items, list) else [],
+        "subtotal": po.subtotal,
+        "gst_rate": po.gst_rate,
+        "gst_amount": po.gst_amount,
+        "pf_rate": po.pf_rate,
+        "pf_amount": po.pf_amount,
+        "freight_note": po.freight_note,
+        "freight_amount": po.freight_amount,
+        "freight_rate": float(po.freight_rate) if po.freight_rate is not None else None,
+        "total_amount": po.total_amount,
+        "primary_category": po.primary_category,
+        "item_desc_short": po.item_desc_short,
+        "financial_config": po.financial_config if isinstance(po.financial_config, dict) else None,
+        "pdf_path": po.pdf_path,
+        "notes": po.notes,
+        "created_at": po.created_at.isoformat() if po.created_at else None,
+        "created_by_name": (po.created_by_name or "").strip() or None,
+        "created_by_email": (
+            str(po.created_by_user.email).strip()
+            if getattr(po, "created_by_user", None) is not None and getattr(po.created_by_user, "email", None)
+            else None
+        ),
+    }
+
+
+def _po_quotation_line_indices(po: PurchaseOrder) -> list[int]:
+    indices: list[int] = []
+    for pl in po.line_items if isinstance(po.line_items, list) else []:
+        if not isinstance(pl, dict):
+            continue
+        raw = pl.get("quotation_line_index", pl.get("quotationLineIndex"))
+        if raw is None:
+            continue
+        try:
+            indices.append(int(raw))
+        except (TypeError, ValueError):
+            continue
+    return sorted(set(indices))
+
+
+def _lines_for_po_listing_category(po: PurchaseOrder) -> list[dict]:
+    """Category labels for quoted POs come from the linked quotation lines (same as quotation list)."""
+    quotation = getattr(po, "quotation", None)
+    q_lines = (
+        quotation.line_items
+        if quotation is not None and isinstance(quotation.line_items, list)
+        else []
+    )
+    if q_lines:
+        indices = _po_quotation_line_indices(po)
+        if indices:
+            subset = [
+                dict(q_lines[i])
+                for i in indices
+                if 0 <= i < len(q_lines) and isinstance(q_lines[i], dict)
+            ]
+            if subset:
+                return subset
+        return [dict(li) for li in q_lines if isinstance(li, dict)]
+
+    return [dict(li) for li in (po.line_items if isinstance(po.line_items, list) else []) if isinstance(li, dict)]
+
+
+def _listing_fields_for_po(po: PurchaseOrder, *, supplier_names: list[str] | None = None) -> dict:
+    from masters.listing_category import listing_fields_from_lines
+
+    lines = _lines_for_po_listing_category(po)
+    primary = quotation_service._primary_category_from_lines(lines) or po.primary_category or "Others"
+    return listing_fields_from_lines(lines, primary_fallback=primary)
+
+
+def _is_admin_scope(user: CurrentUser) -> bool:
+    return user.tier in ("admin", "superadmin")
+
+
+def _ensure_po_access(po: PurchaseOrder, user: CurrentUser) -> None:
+    if _is_admin_scope(user):
+        return
+    if po.created_by_user_id is None or str(po.created_by_user_id) != str(user.id):
+        raise HTTPException(status_code=404, detail="Purchase order not found")
+
+
+def _po_export_lines(po: PurchaseOrder, supplier_names: list[str] | None = None) -> list[dict]:
+    lines = po.line_items if isinstance(po.line_items, list) else []
+    if not lines:
+        return [
+            {
+                "description": (po.item_desc_short or "—").strip(),
+                "quantity": 1,
+                "unit_price": float(po.subtotal or 0),
+                "line_total": float(po.subtotal or 0),
+            }
+        ]
+    desc_lines = quotation_service.item_desc_lines_from_lines(lines, supplier_names)
+    out: list[dict] = []
+    for idx, li in enumerate(lines):
+        if not isinstance(li, dict):
+            continue
+        qty = int(li.get("quantity") or 1)
+        unit_price = round(float(li.get("unit_price") or 0), 2)
+        line_total = li.get("line_total")
+        if line_total is None:
+            line_total = li.get("total")
+        if line_total is None:
+            line_total = round(qty * unit_price, 2)
+        else:
+            line_total = round(float(line_total), 2)
+        desc = ""
+        if idx < len(desc_lines):
+            desc = str(desc_lines[idx].get("full") or desc_lines[idx].get("short") or "").strip()
+        if not desc:
+            desc = str(li.get("description") or po.item_desc_short or "Item").strip()
+        out.append(
+            {
+                "description": desc,
+                "quantity": max(1, qty),
+                "unit_price": unit_price,
+                "line_total": line_total,
+            }
+        )
+    return out or [
+        {
+            "description": (po.item_desc_short or "—").strip(),
+            "quantity": 1,
+            "unit_price": float(po.subtotal or 0),
+            "line_total": float(po.subtotal or 0),
+        }
+    ]
+
+
+class PurchaseOrderExportLine(BaseModel):
+    description: str
+    quantity: int = 1
+    unit_price: float = 0.0
+    line_total: float = 0.0
+
+
+class PurchaseOrderListItem(BaseModel):
+    po_id: str
+    po_number: str
+    created_at: str
+    client_name: str
+    client_company: str | None = None
+    po_type: str
+    quote_number: str | None = None
+    quotation_id: str | None = None
+    primary_category: str
+    category_label: str | None = None
+    sub_category: str | None = None
+    category_lines: list[dict[str, str | None]] = Field(default_factory=list)
+    item_desc_short: str
+    subtotal: float
+    total_amount: float
+    so_number: str | None = None
+    so_date: str | None = None
+    created_by_name: str | None = None
+    export_lines: list[PurchaseOrderExportLine] = Field(default_factory=list)
+
+
+class PurchaseOrderSelectedLine(BaseModel):
+    line_index: int = Field(..., ge=0)
+    quantity: int = Field(..., ge=1)
+    unit_price: float = Field(..., ge=0)
+    quoted_unit_price: float | None = None
+    customer_discount_pct: float | None = Field(None, alias="customerDiscountPct")
+
+    model_config = {"populate_by_name": True}
+
+
+class PurchaseOrderCreateBody(BaseModel):
+    quotation_id: str | None = Field(None, alias="quotationId")
+    selected_lines: list[PurchaseOrderSelectedLine] | None = Field(None, alias="selectedLines")
+    manual_line_items: list | None = Field(None, alias="manualLineItems")
+    client_name: str | None = Field(None, alias="clientName")
+    client_company: str | None = Field(None, alias="clientCompany")
+    client_email: str | None = Field(None, alias="clientEmail")
+    client_phone: str | None = Field(None, alias="clientPhone")
+    client_employee_id: str | None = Field(None, alias="clientEmployeeId")
+    so_number: str | None = Field(None, alias="soNumber")
+    so_date: date | None = Field(None, alias="soDate")
+    notes: str | None = None
+    freight_note: str | None = Field(None, alias="freightNote")
+    pf_applicable: bool = Field(True, alias="pfApplicable")
+    pf_mode: str = Field("percent", alias="pfMode")
+    pf_draft: str = Field("3", alias="pfDraft")
+    freight_applicable: bool = Field(True, alias="freightApplicable")
+    freight_mode: str = Field("percent", alias="freightMode")
+    freight_draft: str = Field("", alias="freightDraft")
+    cgst_applicable: bool = Field(True, alias="cgstApplicable")
+    cgst_mode: str = Field("percent", alias="cgstMode")
+    cgst_draft: str = Field("9", alias="cgstDraft")
+    sgst_applicable: bool = Field(True, alias="sgstApplicable")
+    sgst_mode: str = Field("percent", alias="sgstMode")
+    sgst_draft: str = Field("9", alias="sgstDraft")
+    igst_applicable: bool = Field(False, alias="igstApplicable")
+    igst_mode: str = Field("percent", alias="igstMode")
+    igst_draft: str = Field("18", alias="igstDraft")
+
+    model_config = {"populate_by_name": True}
+
+
+class PurchaseOrderUpdateBody(BaseModel):
+    selected_lines: list[PurchaseOrderSelectedLine] | None = Field(None, alias="selectedLines")
+    manual_line_items: list | None = Field(None, alias="manualLineItems")
+    client_name: str | None = Field(None, alias="clientName")
+    client_company: str | None = Field(None, alias="clientCompany")
+    client_email: str | None = Field(None, alias="clientEmail")
+    client_phone: str | None = Field(None, alias="clientPhone")
+    client_employee_id: str | None = Field(None, alias="clientEmployeeId")
+    so_number: str | None = Field(None, alias="soNumber")
+    so_date: date | None = Field(None, alias="soDate")
+    notes: str | None = None
+    freight_note: str | None = Field(None, alias="freightNote")
+    pf_applicable: bool | None = Field(None, alias="pfApplicable")
+    pf_mode: str | None = Field(None, alias="pfMode")
+    pf_draft: str | None = Field(None, alias="pfDraft")
+    freight_applicable: bool | None = Field(None, alias="freightApplicable")
+    freight_mode: str | None = Field(None, alias="freightMode")
+    freight_draft: str | None = Field(None, alias="freightDraft")
+    cgst_applicable: bool | None = Field(None, alias="cgstApplicable")
+    cgst_mode: str | None = Field(None, alias="cgstMode")
+    cgst_draft: str | None = Field(None, alias="cgstDraft")
+    sgst_applicable: bool | None = Field(None, alias="sgstApplicable")
+    sgst_mode: str | None = Field(None, alias="sgstMode")
+    sgst_draft: str | None = Field(None, alias="sgstDraft")
+    igst_applicable: bool | None = Field(None, alias="igstApplicable")
+    igst_mode: str | None = Field(None, alias="igstMode")
+    igst_draft: str | None = Field(None, alias="igstDraft")
+
+    model_config = {"populate_by_name": True}
+
+
+async def handle_list_purchase_orders(
+    db: AsyncSession,
+    user: CurrentUser,
+    *,
+    limit: int = 200,
+    offset: int = 0,
+    search: str | None = None,
+    client_name: str | None = None,
+    date_from: date | None = None,
+    date_to: date | None = None,
+    po_type: str | None = None,
+) -> list[dict]:
+    scope_user_id = None if _is_admin_scope(user) else uuid.UUID(str(user.id))
+    rows = await purchase_order_service.list_purchase_orders(
+        db,
+        limit=limit,
+        offset=offset,
+        search=search,
+        client_name=client_name,
+        date_from=date_from,
+        date_to=date_to,
+        po_type=po_type,
+        created_by_user_id=scope_user_id,
+    )
+    supplier_names = await supplier_names_for_client(db)
+    out: list[dict] = []
+    for po in rows:
+        listing = _listing_fields_for_po(po, supplier_names=supplier_names)
+        out.append(
+        {
+            "po_id": str(po.id),
+            "po_number": po.po_number,
+            "created_at": po.created_at.isoformat() if po.created_at else "",
+            "client_name": po.client_name,
+            "client_company": po.client_company,
+            "po_type": "quoted" if po.quotation_id else "non_quoted",
+            "quote_number": po.quote_number,
+            "quotation_id": str(po.quotation_id) if po.quotation_id else None,
+            "primary_category": po.primary_category,
+            "category_label": listing["category_label"],
+            "sub_category": listing["sub_category"],
+            "category_lines": listing.get("category_lines") or [],
+            "item_desc_short": po.item_desc_short,
+            "subtotal": float(po.subtotal or 0),
+            "total_amount": po.total_amount,
+            "so_number": po.so_number,
+            "so_date": po.so_date.isoformat() if po.so_date else None,
+            "created_by_name": po.created_by_name,
+            "export_lines": _po_export_lines(po, supplier_names),
+        }
+        )
+    return out
+
+
+async def handle_get_purchase_order(db: AsyncSession, po_id: str, user: CurrentUser) -> dict:
+    try:
+        po = await purchase_order_service.get_purchase_order(db, po_id)
+        _ensure_po_access(po, user)
+    except ProductNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return _po_api_dict(po)
+
+
+async def handle_create_purchase_order(
+    body: PurchaseOrderCreateBody,
+    db: AsyncSession,
+    user: CurrentUser,
+) -> dict:
+    payload = body.model_dump()
+    payload["financial"] = {
+        "pf_applicable": body.pf_applicable,
+        "pf_mode": body.pf_mode,
+        "pf_draft": body.pf_draft,
+        "freight_applicable": body.freight_applicable,
+        "freight_mode": body.freight_mode,
+        "freight_draft": body.freight_draft,
+        "cgst_applicable": body.cgst_applicable,
+        "cgst_mode": body.cgst_mode,
+        "cgst_draft": body.cgst_draft,
+        "sgst_applicable": body.sgst_applicable,
+        "sgst_mode": body.sgst_mode,
+        "sgst_draft": body.sgst_draft,
+        "igst_applicable": body.igst_applicable,
+        "igst_mode": body.igst_mode,
+        "igst_draft": body.igst_draft,
+    }
+    try:
+        if body.quotation_id and not _is_admin_scope(user):
+            q = await quotation_service.get_quotation(str(body.quotation_id), db)
+            if q.created_by_user_id is None or str(q.created_by_user_id) != str(user.id):
+                raise HTTPException(status_code=404, detail="Quotation not found")
+        po = await purchase_order_service.create_purchase_order(
+            db,
+            payload,
+            user_id=uuid.UUID(user.id),
+            user_name=user.full_name or user.email,
+            user_email=user.email,
+        )
+    except ProductNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _po_api_dict(po)
+
+
+async def handle_update_purchase_order(
+    po_id: str,
+    body: PurchaseOrderUpdateBody,
+    db: AsyncSession,
+    user: CurrentUser,
+) -> dict:
+    current = await purchase_order_service.get_purchase_order(db, po_id)
+    _ensure_po_access(current, user)
+    payload = body.model_dump(exclude_unset=True)
+    try:
+        po = await purchase_order_service.update_purchase_order(
+            db,
+            po_id,
+            payload,
+            user_email=user.email,
+            user_name=user.full_name or user.email,
+        )
+    except ProductNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _po_api_dict(po)
+
+
+async def handle_delete_purchase_order(db: AsyncSession, po_id: str, user: CurrentUser) -> dict:
+    try:
+        current = await purchase_order_service.get_purchase_order(db, po_id)
+        _ensure_po_access(current, user)
+        deleted_id = await purchase_order_service.delete_purchase_order(
+            db,
+            po_id,
+            user_email=user.email,
+            user_name=user.full_name or user.email,
+        )
+    except ProductNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"po_id": deleted_id, "deleted": True}

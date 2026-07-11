@@ -15,7 +15,7 @@ const FLOW_COLORS: Record<(typeof FLOW_ORDER)[number], string> = {
 
 const FLOW_LABELS: Record<(typeof FLOW_ORDER)[number], string> = {
   complete: 'Complete',
-  incomplete: 'Incomplete',
+  incomplete: 'Not Quoted',
   ambiguous: 'Ambiguous',
   not_found: 'Not found',
 }

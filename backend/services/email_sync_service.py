@@ -1,4 +1,4 @@
-"""Gmail IMAP polling — qualifies enquiry emails and runs the agent pipeline."""
+"""Gmail IMAP polling — qualifies quotation-style enquiry mail and optionally runs the agent pipeline."""
 
 from __future__ import annotations
 
@@ -19,26 +19,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import get_settings
 from core.database import async_session_factory
-from db.models import EmailSyncState, ProcessedEmail
+from db.models import ProcessedEmail
+from services.email_inbox_filters import is_quotation_work_related
 from services.enquiry_service import create_enquiry, process_enquiry
+from services.mailbox_crypto import decrypt_secret
+from services.mailbox_service import get_mailbox, get_or_create_sync_state, list_mailboxes_public
 
 logger = logging.getLogger(__name__)
-settings = get_settings()
 
 
 class EmailSyncService:
-    """Polls Gmail via IMAP and triggers the agent pipeline for qualifying enquiry emails."""
+    """Polls Gmail via IMAP per configured mailbox."""
 
-    def __init__(self) -> None:
-        self.host = settings.email_imap_host
-        self.port = settings.email_imap_port
-        self.email = settings.email_address
-        self.password = settings.email_app_password
-        self.keywords = settings.enquiry_keywords_list
-
-    def _connect(self) -> imaplib.IMAP4_SSL:
-        mail = imaplib.IMAP4_SSL(self.host, self.port)
-        mail.login(self.email, self.password)
+    def _connect_ssl(self, host: str, port: int, email: str, password: str) -> imaplib.IMAP4_SSL:
+        mail = imaplib.IMAP4_SSL(host, port)
+        mail.login(email, password)
         return mail
 
     def _decode_header(self, value: str) -> str:
@@ -105,6 +100,7 @@ class EmailSyncService:
 
     def _is_enquiry_email(
         self,
+        account_email: str,
         subject: str,
         body: str,
         sender_email: str,
@@ -112,7 +108,7 @@ class EmailSyncService:
         if not sender_email or "@" not in sender_email:
             return False, "auto_sender"
 
-        own_domain = self.email.split("@")[-1]
+        own_domain = account_email.split("@")[-1]
         sender_lower = (sender_email or "").lower()
 
         # Allow forwarded RFQs sent from our own mailbox/domain by extracting the original external sender.
@@ -137,11 +133,8 @@ class EmailSyncService:
             if "indiamart" not in sender_lower:
                 return False, "auto_sender"
 
-        combined = (subject + " " + body).lower()
-        matched_keywords = [kw for kw in self.keywords if kw in combined]
-
-        if not matched_keywords:
-            return False, "no_keywords"
+        if not is_quotation_work_related(subject, body, sender_email):
+            return False, "not_work_related"
 
         return True, ""
 
@@ -173,22 +166,19 @@ class EmailSyncService:
             return m.group(1).strip()
         return None
 
-    async def _get_or_create_sync_state(self, db: AsyncSession) -> EmailSyncState:
-        result = await db.execute(select(EmailSyncState).where(EmailSyncState.id == 1))
-        row = result.scalar_one_or_none()
-        if row is None:
-            row = EmailSyncState(id=1, baseline_at=None)
-            db.add(row)
-            await db.flush()
-        return row
-
-    async def _is_already_processed(self, message_id: str, db: AsyncSession) -> bool:
-        result = await db.execute(select(ProcessedEmail).where(ProcessedEmail.message_id == message_id))
+    async def _is_already_processed(self, message_id: str, mailbox_id: uuid.UUID, db: AsyncSession) -> bool:
+        result = await db.execute(
+            select(ProcessedEmail).where(
+                ProcessedEmail.message_id == message_id,
+                ProcessedEmail.mailbox_id == mailbox_id,
+            )
+        )
         return result.scalar_one_or_none() is not None
 
     async def _record_processed(
         self,
         *,
+        mailbox_id: uuid.UUID,
         message_id: str,
         sender_email: str,
         sender_name: str | None,
@@ -198,14 +188,16 @@ class EmailSyncService:
         enquiry_id: uuid.UUID | None = None,
         filter_reason: str | None = None,
     ) -> None:
+        settings = get_settings()
         record = ProcessedEmail(
+            mailbox_id=mailbox_id,
             message_id=message_id,
             sender_email=sender_email,
             sender_name=sender_name,
             subject=subject,
             received_at=received_at,
             enquiry_id=enquiry_id,
-            was_processed=enquiry_id is not None,
+            was_processed=bool(enquiry_id) and settings.email_sync_auto_process,
             filter_reason=filter_reason,
         )
         db.add(record)
@@ -240,78 +232,18 @@ class EmailSyncService:
             logger.exception("Failed to parse message %s", msg_id_bytes)
             return None
 
-    async def _establish_baseline(
-        self, mail: imaplib.IMAP4_SSL, summary: dict
-    ) -> None:
-        """First activation: skip all current UNSEEN without parsing; mark read; set baseline."""
-        search_criteria = "UNSEEN" if settings.email_filter_unread_only else "ALL"
-        _, message_ids = mail.search(None, search_criteria)
-        id_list = message_ids[0].split()
-        skipped = 0
-
-        for msg_id_bytes in id_list:
-            async with async_session_factory() as db:
-                try:
-                    _, msg_data = mail.fetch(msg_id_bytes, "(RFC822)")
-                    if not msg_data or not msg_data[0] or len(msg_data[0]) < 2:
-                        continue
-                    raw_email = msg_data[0][1]
-                    parsed = self._parse_fetched_message(msg_id_bytes, raw_email)
-                    if not parsed:
-                        continue
-
-                    if await self._is_already_processed(parsed["message_id"], db):
-                        try:
-                            mail.store(msg_id_bytes, "+FLAGS", "\\Seen")
-                        except Exception:
-                            logger.debug("Could not mark seen for %s", msg_id_bytes, exc_info=True)
-                        continue
-
-                    await self._record_processed(
-                        message_id=parsed["message_id"],
-                        sender_email=parsed["sender_email_addr"] or "",
-                        sender_name=parsed["sender_name"],
-                        subject=parsed["subject"],
-                        received_at=parsed["received_at"],
-                        filter_reason="before_baseline",
-                        db=db,
-                    )
-                    try:
-                        mail.store(msg_id_bytes, "+FLAGS", "\\Seen")
-                    except Exception:
-                        logger.warning("Could not mark seen after before_baseline %s", msg_id_bytes)
-                    skipped += 1
-                except IntegrityError:
-                    await db.rollback()
-                    try:
-                        mail.store(msg_id_bytes, "+FLAGS", "\\Seen")
-                    except Exception:
-                        pass
-                except Exception as e:
-                    await db.rollback()
-                    logger.error("Baseline skip failed for %s: %s", msg_id_bytes, e, exc_info=True)
-
-        async with async_session_factory() as db:
-            st = await self._get_or_create_sync_state(db)
-            st.baseline_at = datetime.now(timezone.utc)
-            await db.commit()
-
-        summary["emails_checked"] = len(id_list)
-        summary["filtered_out"] += skipped
-        summary["baseline_established"] = True
-        summary["details"].append(
-            f"Sync baseline established — skipped {skipped} older unread message(s) without parsing."
-        )
-        logger.info("Email sync baseline established (%s backlog messages skipped)", skipped)
-
     async def _process_single_unseen(
         self,
         mail: imaplib.IMAP4_SSL,
         msg_id_bytes: bytes,
         baseline_at: datetime,
         summary: dict,
+        *,
+        mailbox_id: uuid.UUID,
+        account_email: str,
     ) -> None:
         """One IMAP message = one fresh DB session so failures never poison the next message."""
+        settings = get_settings()
         async with async_session_factory() as db:
             try:
                 _, msg_data = mail.fetch(msg_id_bytes, "(RFC822)")
@@ -330,7 +262,7 @@ class EmailSyncService:
                 body = parsed["body"]
                 received_at = parsed["received_at"]
 
-                if await self._is_already_processed(message_id, db):
+                if await self._is_already_processed(message_id, mailbox_id, db):
                     logger.debug("Already processed: %s", message_id)
                     try:
                         mail.store(msg_id_bytes, "+FLAGS", "\\Seen")
@@ -338,9 +270,8 @@ class EmailSyncService:
                         pass
                     return
 
-                # If this is a forwarded thread from our own mailbox, use the original external sender in the saved raw email.
                 effective_sender_email = sender_email_addr
-                if sender_email_addr and sender_email_addr.lower().endswith(f"@{self.email.split('@')[-1]}"):
+                if sender_email_addr and sender_email_addr.lower().endswith(f"@{account_email.split('@')[-1]}"):
                     fwd_sender = self._extract_forwarded_sender_email(subject, body)
                     if fwd_sender:
                         effective_sender_email = fwd_sender
@@ -348,6 +279,7 @@ class EmailSyncService:
                 if received_at < baseline_at:
                     logger.info("Skipping message before baseline: %s", subject)
                     await self._record_processed(
+                        mailbox_id=mailbox_id,
                         message_id=message_id,
                         sender_email=sender_email_addr or "",
                         sender_name=sender_name,
@@ -363,11 +295,12 @@ class EmailSyncService:
                     summary["filtered_out"] += 1
                     return
 
-                is_enquiry, reason = self._is_enquiry_email(subject, body, sender_email_addr)
+                is_enquiry, reason = self._is_enquiry_email(account_email, subject, body, sender_email_addr)
 
                 if not is_enquiry:
                     logger.info("Filtered out: %s — reason: %s", subject, reason)
                     await self._record_processed(
+                        mailbox_id=mailbox_id,
                         message_id=message_id,
                         sender_email=sender_email_addr or "",
                         sender_name=sender_name,
@@ -391,9 +324,9 @@ class EmailSyncService:
                     email_text=email_text,
                     input_type="email_sync",
                     db=db,
+                    mailbox_id=mailbox_id,
                 )
 
-                # Broadcast to all connected frontends (Emails tab).
                 try:
                     from services.global_event_bus import broadcast_new_email
 
@@ -404,11 +337,15 @@ class EmailSyncService:
                         subject=subject or "",
                         raw_email=email_text,
                         input_type="email_sync",
+                        mailbox_id=str(mailbox_id),
+                        mailbox_label=account_email,
+                        enquiry_number=(enquiry.enquiry_number or "").strip() or None,
                     )
                 except Exception:
                     pass
 
                 await self._record_processed(
+                    mailbox_id=mailbox_id,
                     message_id=message_id,
                     sender_email=sender_email_addr or "",
                     sender_name=sender_name,
@@ -423,16 +360,16 @@ class EmailSyncService:
                 except Exception:
                     logger.warning("Could not mark seen for enquiry email %s", msg_id_bytes)
 
-                # Trigger processing (stub for now)
-                asyncio.create_task(
-                    process_enquiry(
-                        enquiry_id=str(enquiry.id),
-                        raw_input=email_text,
-                        input_type="email_sync",
-                        db=db,
-                        emitter=None
+                if settings.email_sync_auto_process:
+                    asyncio.create_task(
+                        process_enquiry(
+                            enquiry_id=str(enquiry.id),
+                            raw_input=email_text,
+                            input_type="email_sync",
+                            db=db,
+                            emitter=None,
+                        )
                     )
-                )
 
                 summary["enquiries_created"] += 1
                 summary["details"].append(f"Created enquiry for: {sender_name} — {subject}")
@@ -446,8 +383,9 @@ class EmailSyncService:
                 summary["errors"] += 1
                 logger.error("Error processing email %s: %s", msg_id_bytes, e, exc_info=True)
 
-    async def sync_once(self) -> dict:
+    async def sync_mailbox(self, mailbox_id: uuid.UUID) -> dict:
         summary: dict = {
+            "mailbox_id": str(mailbox_id),
             "emails_checked": 0,
             "enquiries_created": 0,
             "filtered_out": 0,
@@ -455,31 +393,44 @@ class EmailSyncService:
             "details": [],
             "baseline_established": False,
         }
-
+        settings = get_settings()
         if not settings.email_sync_enabled:
             logger.info("Email sync disabled — skipping")
             return summary
 
-        if not self.email or not self.password:
-            logger.warning("EMAIL_ADDRESS or EMAIL_APP_PASSWORD not configured — skipping sync")
-            return summary
+        async with async_session_factory() as db:
+            mb = await get_mailbox(db, mailbox_id)
+            if not mb or not mb.is_active:
+                logger.warning("Mailbox %s missing or inactive — skipping", mailbox_id)
+                return summary
+            if not mb.credential_encrypted:
+                logger.warning("Mailbox %s has no credentials — skipping", mailbox_id)
+                return summary
+            try:
+                password = decrypt_secret(mb.credential_encrypted)
+            except Exception as e:
+                logger.error("Cannot decrypt mailbox credentials %s: %s", mailbox_id, e)
+                summary["errors"] += 1
+                return summary
 
         mail: imaplib.IMAP4_SSL | None = None
         try:
-            logger.info("Email sync starting for %s", self.email)
-            mail = self._connect()
-            mail.select(settings.email_sync_label)
+            logger.info("Email sync starting for mailbox %s (%s)", mailbox_id, mb.email_address)
+            mail = self._connect_ssl(mb.imap_host, mb.imap_port, mb.email_address, password)
+            mail.select(mb.imap_folder)
 
             async with async_session_factory() as db:
-                st = await self._get_or_create_sync_state(db)
+                st = await get_or_create_sync_state(db, mailbox_id)
+                if st.baseline_at is None:
+                    st.baseline_at = datetime.now(timezone.utc)
+                    summary["baseline_established"] = True
+                    summary["details"].append(
+                        "Baseline set to now for this mailbox — older unread mail skipped until reset."
+                    )
                 baseline_at = st.baseline_at
                 await db.commit()
 
-            if baseline_at is None:
-                await self._establish_baseline(mail, summary)
-                return summary
-
-            search_criteria = "UNSEEN" if settings.email_filter_unread_only else "ALL"
+            search_criteria = "UNSEEN" if mb.unread_only else "ALL"
             _, message_ids = mail.search(None, search_criteria)
             id_list = message_ids[0].split()
 
@@ -487,7 +438,14 @@ class EmailSyncService:
             summary["emails_checked"] = len(id_list)
 
             for msg_id_bytes in id_list:
-                await self._process_single_unseen(mail, msg_id_bytes, baseline_at, summary)
+                await self._process_single_unseen(
+                    mail,
+                    msg_id_bytes,
+                    baseline_at,
+                    summary,
+                    mailbox_id=mailbox_id,
+                    account_email=mb.email_address,
+                )
 
         except imaplib.IMAP4.error as e:
             logger.error("IMAP connection error: %s", e)
@@ -505,12 +463,53 @@ class EmailSyncService:
                     pass
 
         logger.info(
-            "Sync complete: %s created, %s filtered, %s errors",
+            "Sync complete [%s]: %s created, %s filtered, %s errors",
+            mailbox_id,
             summary["enquiries_created"],
             summary["filtered_out"],
             summary["errors"],
         )
         return summary
+
+    async def sync_all_mailboxes(self) -> dict:
+        """Sync every active mailbox with stored credentials (scheduler entry point)."""
+        settings = get_settings()
+        merged: dict[str, Any] = {
+            "mailboxes": [],
+            "emails_checked": 0,
+            "enquiries_created": 0,
+            "filtered_out": 0,
+            "errors": 0,
+            "details": [],
+        }
+        if not settings.email_sync_enabled:
+            return merged
+
+        async with async_session_factory() as db:
+            boxes = await list_mailboxes_public(db, include_inactive=False)
+
+        if not boxes:
+            logger.info("No mailboxes configured — skipping IMAP sync")
+            return merged
+
+        for mb in boxes:
+            if not mb.credential_encrypted:
+                continue
+            s = await self.sync_mailbox(mb.id)
+            merged["mailboxes"].append(s)
+            merged["emails_checked"] += int(s.get("emails_checked") or 0)
+            merged["enquiries_created"] += int(s.get("enquiries_created") or 0)
+            merged["filtered_out"] += int(s.get("filtered_out") or 0)
+            merged["errors"] += int(s.get("errors") or 0)
+            merged["details"].extend(s.get("details") or [])
+
+        return merged
+
+    async def sync_once(self, mailbox_id: uuid.UUID | None = None) -> dict:
+        """Manual trigger: one mailbox or all."""
+        if mailbox_id is not None:
+            return await self.sync_mailbox(mailbox_id)
+        return await self.sync_all_mailboxes()
 
 
 email_sync_service = EmailSyncService()

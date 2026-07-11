@@ -29,40 +29,17 @@ class _CatalogBase(Base):
 
 
 class CatalogButterflyValveRow(_CatalogBase):
-    __tablename__ = "catalog_butterfly_valve"
+    __tablename__ = "catalog_fp_butterfly_all_products"
 
     sr_no: Mapped[float | None] = mapped_column(Float, nullable=True)
     variant_type: Mapped[str | None] = mapped_column(Text, nullable=True)
     construction: Mapped[str | None] = mapped_column(Text, nullable=True)
     valve_size: Mapped[str | None] = mapped_column(Text, nullable=True)
-    bore_type: Mapped[str | None] = mapped_column(Text, nullable=True)
     end_connection: Mapped[str | None] = mapped_column(Text, nullable=True)
     pressure: Mapped[str | None] = mapped_column(Text, nullable=True)
     body: Mapped[str | None] = mapped_column(Text, nullable=True)
     ball_disc: Mapped[str | None] = mapped_column(Text, nullable=True)
-    stem: Mapped[str | None] = mapped_column(Text, nullable=True)
     seat: Mapped[str | None] = mapped_column(Text, nullable=True)
-    fasteners: Mapped[str | None] = mapped_column(Text, nullable=True)
-    price_inr: Mapped[float | None] = mapped_column(Float, nullable=True)
-    source_file: Mapped[str | None] = mapped_column(Text, nullable=True)
-
-
-class CatalogBallValveRow(_CatalogBase):
-    __tablename__ = "catalog_ball_valve"
-
-    sr_no: Mapped[float | None] = mapped_column(Float, nullable=True)
-    variant_type: Mapped[str | None] = mapped_column(Text, nullable=True)
-    construction: Mapped[str | None] = mapped_column(Text, nullable=True)
-    valve_size: Mapped[str | None] = mapped_column(Text, nullable=True)
-    bore_type: Mapped[str | None] = mapped_column(Text, nullable=True)
-    end_connection: Mapped[str | None] = mapped_column(Text, nullable=True)
-    pressure: Mapped[str | None] = mapped_column(Text, nullable=True)
-    body: Mapped[str | None] = mapped_column(Text, nullable=True)
-    ball: Mapped[str | None] = mapped_column(Text, nullable=True)
-    stem: Mapped[str | None] = mapped_column(Text, nullable=True)
-    seat: Mapped[str | None] = mapped_column(Text, nullable=True)
-    fasteners: Mapped[str | None] = mapped_column(Text, nullable=True)
-    price_inr: Mapped[float | None] = mapped_column(Float, nullable=True)
     source_file: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
@@ -73,7 +50,6 @@ class CatalogOperatorRow(_CatalogBase):
     construct: Mapped[str | None] = mapped_column(Text, nullable=True)
     size_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     model_name: Mapped[str | None] = mapped_column(Text, nullable=True)
-    price_inr: Mapped[float | None] = mapped_column(Float, nullable=True)
 
 
 class CatalogBracketsCouplerRow(_CatalogBase):
@@ -82,7 +58,6 @@ class CatalogBracketsCouplerRow(_CatalogBase):
     bracket_operator: Mapped[str | None] = mapped_column(Text, nullable=True)
     construct: Mapped[str | None] = mapped_column(Text, nullable=True)
     size_text: Mapped[str | None] = mapped_column(Text, nullable=True)
-    price_inr: Mapped[float | None] = mapped_column(Float, nullable=True)
 
 
 class CatalogSovRow(_CatalogBase):
@@ -90,7 +65,6 @@ class CatalogSovRow(_CatalogBase):
 
     sr_no: Mapped[float | None] = mapped_column(Float, nullable=True)
     variant_type: Mapped[str | None] = mapped_column(Text, nullable=True)
-    price_inr: Mapped[float | None] = mapped_column(Float, nullable=True)
 
 
 class CatalogLimitSwitchRow(_CatalogBase):
@@ -98,7 +72,6 @@ class CatalogLimitSwitchRow(_CatalogBase):
 
     sr_no: Mapped[float | None] = mapped_column(Float, nullable=True)
     variant_type: Mapped[str | None] = mapped_column(Text, nullable=True)
-    price_inr: Mapped[float | None] = mapped_column(Float, nullable=True)
 
 
 class CatalogPositionerRow(_CatalogBase):
@@ -106,16 +79,17 @@ class CatalogPositionerRow(_CatalogBase):
 
     sr_no: Mapped[float | None] = mapped_column(Float, nullable=True)
     variant_type: Mapped[str | None] = mapped_column(Text, nullable=True)
-    price_inr: Mapped[float | None] = mapped_column(Float, nullable=True)
 
 
 # Exact Excel worksheet name -> (stable API key, ORM model)
 EXCEL_SHEET_TO_MODEL: dict[str, tuple[str, type]] = {
     "Butterfly Valve": ("butterfly_valve", CatalogButterflyValveRow),
-    "Ball valve": ("ball_valve", CatalogBallValveRow),
     "Operator": ("operator", CatalogOperatorRow),
     "Brackets and couplers": ("brackets_coupler", CatalogBracketsCouplerRow),
     "SOV": ("sov", CatalogSovRow),
     "Limit switch Box": ("limit_switch_box", CatalogLimitSwitchRow),
     "Positioner": ("positioner", CatalogPositionerRow),
 }
+
+# Register Final_Products ORM tables on the same metadata (``init_db`` / Alembic).
+import db.final_product_models  # noqa: E402, F401

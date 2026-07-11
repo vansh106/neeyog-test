@@ -6,8 +6,9 @@ import { cn } from '@/lib/utils'
 import type { AgentEvent } from '@/types'
 
 const AGENT_LABELS: Record<string, string> = {
-  parser: 'Email Parser',
-  matcher: 'Product Matcher',
+  parser: 'Demand Parser',
+  matcher: 'Catalog Matcher',
+  extractor: 'Context Loader',
   quote_builder: 'Quotation Builder',
   system: 'System',
 }
@@ -22,6 +23,11 @@ const AGENT_COLORS: Record<string, { dot: string; chip: string; border: string }
     dot: 'bg-brand-gold-400',
     chip: 'bg-brand-gold-50 text-brand-gold-700 border-brand-gold-200',
     border: 'border-brand-gold-400',
+  },
+  extractor: {
+    dot: 'bg-violet-500',
+    chip: 'bg-violet-50 text-violet-700 border-violet-200',
+    border: 'border-violet-500',
   },
   quote_builder: {
     dot: 'bg-brand-green-500',

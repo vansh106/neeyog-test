@@ -1,8 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 
+import { bearerHeaders } from '@/lib/bearer'
+import { refreshAccessToken } from '@/lib/api'
+import { useAuthStore } from '@/stores/authStore'
+
 export interface GlobalEvent {
   type: string
   enquiry_id?: string
+  enquiry_number?: string
   sender_name?: string
   sender_email?: string
   subject?: string
@@ -32,6 +37,7 @@ function streamUrl(): string {
 }
 
 export function useGlobalEvents(options: UseGlobalEventsOptions = {}) {
+  const accessToken = useAuthStore((s) => s.access_token)
   const [isConnected, setIsConnected] = useState(false)
   const [lastEvent, setLastEvent] = useState<GlobalEvent | null>(null)
   const abortRef = useRef<AbortController | null>(null)
@@ -45,10 +51,17 @@ export function useGlobalEvents(options: UseGlobalEventsOptions = {}) {
       abortRef.current = new AbortController()
 
       try {
-        const res = await fetch(streamUrl(), {
+        let res = await fetch(streamUrl(), {
           signal: abortRef.current.signal,
-          headers: { Accept: 'text/event-stream' },
+          headers: { Accept: 'text/event-stream', ...bearerHeaders(false) },
         })
+        if (res.status === 401) {
+          await refreshAccessToken()
+          res = await fetch(streamUrl(), {
+            signal: abortRef.current.signal,
+            headers: { Accept: 'text/event-stream', ...bearerHeaders(false) },
+          })
+        }
         if (!res.ok || !res.body) throw new Error(`Stream failed (${res.status})`)
 
         if (!mounted) return
@@ -115,7 +128,7 @@ export function useGlobalEvents(options: UseGlobalEventsOptions = {}) {
       abortRef.current?.abort()
       if (reconnectRef.current) window.clearTimeout(reconnectRef.current)
     }
-  }, [])
+  }, [accessToken])
 
   return { isConnected, lastEvent }
 }

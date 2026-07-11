@@ -1,21 +1,28 @@
 from logging.config import fileConfig
 
 from alembic import context
-from sqlalchemy import engine_from_config, pool
+from sqlalchemy import engine_from_config, pool, text
 
 from core.config import get_settings
 from core.database import Base
 from db.models import (  # noqa: F401
     AuditLog,
-    ClientRecord,
+    ClientBranch,
+    ClientCompany,
+    ClientEmployee,
+    ClientPricingConfig,
     EmailSyncState,
     Enquiry,
     ProcessedEmail,
+    PurchaseOrder,
     Quotation,
+    RefreshToken,
+    Supplier,
+    SupplierProductPrice,
     User,
+    UserPermission,
 )
 from db.sheet_models import (  # noqa: F401
-    CatalogBallValveRow,
     CatalogBracketsCouplerRow,
     CatalogButterflyValveRow,
     CatalogLimitSwitchRow,
@@ -23,6 +30,7 @@ from db.sheet_models import (  # noqa: F401
     CatalogPositionerRow,
     CatalogSovRow,
 )
+import db.final_product_models  # noqa: F401
 
 config = context.config
 
@@ -30,9 +38,24 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 settings = get_settings()
-config.set_main_option("sqlalchemy.url", settings.DATABASE_URL_SYNC)
+
+# Session pooler (5432) supports DDL; transaction pooler (6543) does not.
+config.set_main_option("sqlalchemy.url", settings.migration_url.replace("%", "%%"))
 
 target_metadata = Base.metadata
+schema = (settings.DB_SCHEMA or "public").strip()
+use_schema = schema if schema and schema != "public" else None
+
+
+def _configure_context(connection) -> None:
+    if use_schema:
+        connection.execute(text(f'SET search_path TO "{use_schema}", public'))
+    context.configure(
+        connection=connection,
+        target_metadata=target_metadata,
+        include_schemas=bool(use_schema),
+        version_table_schema=use_schema,
+    )
 
 
 def run_migrations_offline() -> None:
@@ -54,7 +77,7 @@ def run_migrations_online() -> None:
         poolclass=pool.NullPool,
     )
     with connectable.connect() as connection:
-        context.configure(connection=connection, target_metadata=target_metadata)
+        _configure_context(connection)
         with context.begin_transaction():
             context.run_migrations()
 
