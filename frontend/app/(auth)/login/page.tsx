@@ -41,7 +41,7 @@ export default function LoginPage() {
             <div className="w-16 h-16 rounded-xl bg-brand-green-500 flex items-center justify-center text-white text-xl font-semibold tracking-tight">
               PV
             </div>
-            <h1 className="text-[28px] font-semibold text-brand-green-300 tracking-[-0.5px]">Parth CPQ</h1>
+            <h1 className="text-[28px] font-semibold text-brand-green-300 tracking-[-0.5px]">Neeyog CPQ</h1>
             <div className="w-full max-w-[200px] h-px bg-white/15" />
             <p className="text-[13px] text-[#5a7a5e] leading-snug">AI-Powered Quotation System</p>
           </div>
@@ -71,7 +71,7 @@ export default function LoginPage() {
                 id="login-email"
                 type="email"
                 autoComplete="email"
-                placeholder="your@parthvalve.com"
+                placeholder="your@neeyog.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 className="h-10 bg-white border-[#E2E6DC]"

@@ -338,7 +338,7 @@ export async function downloadPoImportTemplate(othersTree: OthersCategory[] = []
   const subCategories = getAllMasterNotesSubCategories(othersTree)
 
   const wb = new ExcelJS.Workbook()
-  wb.creator = 'Parth Valves CPQ'
+  wb.creator = 'Neeyog Packaging CPQ'
   wb.created = new Date()
 
   const instructions = wb.addWorksheet('Instructions')

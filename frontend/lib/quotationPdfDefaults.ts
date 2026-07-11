@@ -167,7 +167,7 @@ export function formatQuotationFreight(quotation: Quotation): string {
 export function buildDefaultTerms(quotation: Quotation, companyName?: string): string[] {
   const gstRate = quotation.gst_rate
   const pfRate = quotation.pf_rate
-  const company = (companyName || 'Parth Valves and Hoses LLP').trim()
+  const company = (companyName || 'Neeyog Packaging').trim()
   const freightAmt = Number(quotation.freight_amount ?? 0)
   const freightTerm =
     freightAmt > 0 && quotation.freight_rate != null

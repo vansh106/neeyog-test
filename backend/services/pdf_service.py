@@ -366,7 +366,7 @@ async def generate_quotation_pdf(
 
         footer_ref = str(
             client_config.get("quotation_form_footer_ref")
-            or "PVH/MKT/04 Rev.No:02 Date:07/04/2025"
+            or "NP/MKT/01 Rev.No:01 Date:11/07/2026"
         )
         doc = SimpleDocTemplate(
             str(filepath),
@@ -454,7 +454,7 @@ async def generate_quotation_pdf(
         s_terms = ParagraphStyle("Terms", parent=s_normal, fontSize=7.3, leading=10, textColor=_MUTED_TEXT)
         s_thanks = ParagraphStyle("Thanks", parent=s_normal, fontSize=9, alignment=1, textColor=_PRIMARY, fontName="Helvetica-Bold")
 
-        company = client_config.get("company_name", "PARTH VALVES AND HOSES LLP")
+        company = client_config.get("company_name", "Neeyog Packaging")
         address = client_config.get("address", "")
         phone = client_config.get("phone", "")
         email = client_config.get("email", "")

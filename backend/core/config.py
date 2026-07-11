@@ -45,7 +45,7 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 60
     refresh_token_expire_days: int = 30
-    superadmin_email: str = "admin@parthvalve.com"
+    superadmin_email: str = "neeyog@gmail.com"
     superadmin_password: str = "ChangeMe@123"
     superadmin_name: str = "Super Admin"
     superadmin_phone: str = "9823012345"
@@ -59,7 +59,7 @@ class Settings(BaseSettings):
     ENQUIRY_FLOW_TIMEOUT_SECONDS: float = 900.0
 
     # Gmail IMAP sync (env: EMAIL_SYNC_ENABLED, EMAIL_IMAP_HOST, …)
-    email_sync_enabled: bool = True
+    email_sync_enabled: bool = False
     email_imap_host: str = "imap.gmail.com"
     email_imap_port: int = 993
     email_address: str = ""
@@ -79,6 +79,8 @@ class Settings(BaseSettings):
     )
     #: Product / technical context (paired with commerce terms for non-portal mail).
     email_quotation_product_terms: str = (
+        "foil,aluminium,aluminum,container,lid,paper,cup,cups,kraft,plate,plates,"
+        "bowl,wrap,packaging,biodegradable,ripple,dolphin,clarro,tnpl,pet lid,salad,"
         "valve,butterfly,ball,gate,globe,needle,check,nrv,disc,flange,actuator,"
         "bfv,bv,wcb,cf8,ss304,dn,pn,class"
     )

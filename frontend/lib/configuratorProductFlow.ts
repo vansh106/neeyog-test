@@ -217,7 +217,7 @@ export function fittingCategoryLabel(catalogCategory: string | null | undefined)
   )
 }
 
-/** Parth hose inch → hose fitting size (mm). Used when hose ``size_id_mm`` is in inches. */
+/** Hose inch → hose fitting size (mm). Used when hose ``size_id_mm`` is in inches. */
 export const HOSE_INCH_TO_FITTING_MM: Readonly<Record<number, number>> = {
   0.5: 13,
   0.625: 16, // 5/8"

@@ -607,7 +607,7 @@ class SupplierProductPrice(Base):
 
     @property
     def effective_discount_pct(self) -> float:
-        """Discount Parth gets from supplier for this line (override or supplier default)."""
+        """Discount Neeyog gets from supplier for this line (override or supplier default)."""
         if self.discount_pct_override is not None:
             return float(self.discount_pct_override)
         if self.supplier is not None:

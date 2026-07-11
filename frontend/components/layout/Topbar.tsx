@@ -55,7 +55,7 @@ export default function Topbar() {
 
   const title =
     Object.entries(PAGE_TITLES).find(([path]) => pathname === path || pathname.startsWith(path + '/'))?.[1] ||
-    'Parth CPQ'
+    'Neeyog CPQ'
 
   const syncOn =
     !!syncStatus?.sync_enabled &&

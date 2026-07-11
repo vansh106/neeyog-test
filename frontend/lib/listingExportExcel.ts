@@ -17,7 +17,7 @@ export async function downloadListingExcelWorkbook(args: {
   groupIndexForRow: (rowIndex: number) => number
 }): Promise<void> {
   const wb = new ExcelJS.Workbook()
-  wb.creator = 'Parth Valves CPQ'
+  wb.creator = 'Neeyog Packaging CPQ'
   wb.created = new Date()
 
   const ws = wb.addWorksheet(args.sheetName)

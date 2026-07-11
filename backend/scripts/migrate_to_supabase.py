@@ -161,7 +161,7 @@ def step5_print_summary() -> None:
 
 
 async def main() -> None:
-    print("Parth CPQ — Supabase Migration")
+    print("Neeyog CPQ — Supabase Migration")
     print("=" * 50)
 
     await step1_verify_connection()

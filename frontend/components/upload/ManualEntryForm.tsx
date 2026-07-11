@@ -2421,7 +2421,7 @@ export default function ManualEntryForm({
                       <tr className="bg-[#F4F5F0] text-[11px] font-medium uppercase tracking-wide text-[#8A9488]">
                         <th className="px-3 py-2">Product</th>
                         <th className="px-3 py-2">Supplier price</th>
-                        <th className="px-3 py-2">Cost to Parth</th>
+                        <th className="px-3 py-2">Cost to Neeyog</th>
                         <th className="px-3 py-2">Selling (unit)</th>
                         <th className="px-3 py-2">Quote unit (temp)</th>
                         <th className="px-3 py-2">Customer discount (%)</th>
